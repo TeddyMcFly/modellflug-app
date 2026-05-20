@@ -1,3 +1,4 @@
+import 'package:flutter/widgets.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../features/batteries/batteries_page.dart';
@@ -14,16 +15,25 @@ final appRouter = GoRouter(
   routes: [
     GoRoute(
       path: '/',
-      builder: (context, state) => const LandingPage(),
+      pageBuilder: (context, state) => _noTransitionPage(
+        state: state,
+        child: const LandingPage(),
+      ),
     ),
     GoRoute(
       path: '/dashboard',
-      builder: (context, state) => const DashboardPage(),
+      pageBuilder: (context, state) => _noTransitionPage(
+        state: state,
+        child: const DashboardPage(),
+      ),
     ),
     GoRoute(
       path: '/models',
-      builder: (context, state) => ModelsPage(
-        initialSelectedAircraftId: state.uri.queryParameters['model'],
+      pageBuilder: (context, state) => _noTransitionPage(
+        state: state,
+        child: ModelsPage(
+          initialSelectedAircraftId: state.uri.queryParameters['model'],
+        ),
       ),
     ),
     GoRoute(
@@ -32,27 +42,55 @@ final appRouter = GoRouter(
     ),
     GoRoute(
       path: '/flightbook',
-      builder: (context, state) => const FlightbookPage(),
+      pageBuilder: (context, state) => _noTransitionPage(
+        state: state,
+        child: const FlightbookPage(),
+      ),
     ),
     GoRoute(
       path: '/friends',
-      builder: (context, state) => const FriendsPage(),
+      pageBuilder: (context, state) => _noTransitionPage(
+        state: state,
+        child: const FriendsPage(),
+      ),
     ),
     GoRoute(
       path: '/batteries',
-      builder: (context, state) => const BatteriesPage(),
+      pageBuilder: (context, state) => _noTransitionPage(
+        state: state,
+        child: const BatteriesPage(),
+      ),
     ),
     GoRoute(
       path: '/statistics',
-      builder: (context, state) => const StatisticsPage(),
+      pageBuilder: (context, state) => _noTransitionPage(
+        state: state,
+        child: const StatisticsPage(),
+      ),
     ),
     GoRoute(
       path: '/webcam',
-      builder: (context, state) => const WebcamPage(),
+      pageBuilder: (context, state) => _noTransitionPage(
+        state: state,
+        child: const WebcamPage(),
+      ),
     ),
     GoRoute(
       path: '/settings',
-      builder: (context, state) => const SettingsPage(),
+      pageBuilder: (context, state) => _noTransitionPage(
+        state: state,
+        child: const SettingsPage(),
+      ),
     ),
   ],
 );
+
+NoTransitionPage<void> _noTransitionPage({
+  required GoRouterState state,
+  required Widget child,
+}) {
+  return NoTransitionPage<void>(
+    key: state.pageKey,
+    child: child,
+  );
+}

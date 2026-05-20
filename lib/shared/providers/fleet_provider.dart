@@ -38,6 +38,17 @@ class FleetState {
   double get totalHours =>
       flights.fold(0, (sum, item) => sum + item.durationMinutes / 60);
 
+  int get nextBatteryInventoryNumber {
+    if (batteries.isEmpty) {
+      return 1;
+    }
+    return batteries
+            .map((item) => item.inventoryNumber)
+            .where((number) => number > 0)
+            .fold<int>(0, (max, number) => number > max ? number : max) +
+        1;
+  }
+
   FleetState copyWith({
     List<AircraftModel>? aircraft,
     List<FlightLogEntry>? flights,
@@ -64,10 +75,10 @@ class FleetState {
         for (final item in json['flights'] as List<dynamic>)
           FlightLogEntry.fromJson(item as Map<String, dynamic>),
       ],
-      batteries: [
+      batteries: _normalizeBatteryInventoryNumbers([
         for (final item in json['batteries'] as List<dynamic>? ?? [])
           BatteryPack.fromJson(item as Map<String, dynamic>),
-      ],
+      ]),
       pilotProfile: PilotProfile.fromJson(
         json['pilotProfile'] as Map<String, dynamic>? ?? const {},
       ),
@@ -148,7 +159,14 @@ class FleetNotifier extends StateNotifier<FleetState> {
   }
 
   void addBattery(BatteryPack battery) {
-    state = state.copyWith(batteries: [battery, ...state.batteries]);
+    final numberAlreadyExists = state.batteries
+        .any((item) => item.inventoryNumber == battery.inventoryNumber);
+    final numberedBattery = battery.inventoryNumber > 0 && !numberAlreadyExists
+        ? battery
+        : battery.copyWith(
+            inventoryNumber: state.nextBatteryInventoryNumber,
+          );
+    state = state.copyWith(batteries: [numberedBattery, ...state.batteries]);
     _save();
   }
 
@@ -312,6 +330,32 @@ class FleetNotifier extends StateNotifier<FleetState> {
   }
 }
 
+List<BatteryPack> _normalizeBatteryInventoryNumbers(
+  List<BatteryPack> batteries,
+) {
+  final usedNumbers = {
+    for (final battery in batteries)
+      if (battery.inventoryNumber > 0) battery.inventoryNumber,
+  };
+  var nextNumber = 1;
+
+  return [
+    for (final battery in batteries)
+      if (battery.inventoryNumber > 0)
+        battery
+      else
+        battery.copyWith(
+          inventoryNumber: () {
+            while (usedNumbers.contains(nextNumber)) {
+              nextNumber++;
+            }
+            usedNumbers.add(nextNumber);
+            return nextNumber++;
+          }(),
+        ),
+  ];
+}
+
 LocationPresenceStatus _determinePresenceStatus(List<FlightLogEntry> flights) {
   if (flights.isEmpty) {
     return LocationPresenceStatus.atField;
@@ -437,6 +481,7 @@ final _initialState = FleetState(
   batteries: [
     BatteryPack(
       id: 'akku-6s-5000-a',
+      inventoryNumber: 1,
       label: '6S 5000 A',
       chemistry: 'LiPo',
       cells: 6,
@@ -451,6 +496,7 @@ final _initialState = FleetState(
     ),
     BatteryPack(
       id: 'akku-6s-5000-b',
+      inventoryNumber: 2,
       label: '6S 5000 B',
       chemistry: 'LiPo',
       cells: 6,
@@ -465,6 +511,7 @@ final _initialState = FleetState(
     ),
     BatteryPack(
       id: 'akku-4s-2200-q1',
+      inventoryNumber: 3,
       label: '4S 2200 Q1',
       chemistry: 'LiPo',
       cells: 4,
@@ -479,6 +526,7 @@ final _initialState = FleetState(
     ),
     BatteryPack(
       id: 'akku-2s-rx-asw',
+      inventoryNumber: 4,
       label: '2S RX ASW',
       chemistry: 'LiIon',
       cells: 2,

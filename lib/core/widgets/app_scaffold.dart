@@ -60,7 +60,7 @@ class AppScaffold extends ConsumerWidget {
                 final isWide = constraints.maxWidth >= 1020;
                 final content = Expanded(
                   child: _ContentFrame(
-                    child: SingleChildScrollView(
+                    child: _ScrollablePageContent(
                       padding: EdgeInsets.fromLTRB(
                         isWide ? 30 : 16,
                         isWide ? 12 : 10,
@@ -152,6 +152,44 @@ class _ContentFrame extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ColoredBox(color: _pageBackgroundColor, child: child);
+  }
+}
+
+class _ScrollablePageContent extends StatefulWidget {
+  final EdgeInsetsGeometry padding;
+  final Widget child;
+
+  const _ScrollablePageContent({
+    required this.padding,
+    required this.child,
+  });
+
+  @override
+  State<_ScrollablePageContent> createState() => _ScrollablePageContentState();
+}
+
+class _ScrollablePageContentState extends State<_ScrollablePageContent> {
+  final ScrollController _controller = ScrollController();
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scrollbar(
+      controller: _controller,
+      thumbVisibility: true,
+      trackVisibility: true,
+      interactive: true,
+      child: SingleChildScrollView(
+        controller: _controller,
+        padding: widget.padding,
+        child: widget.child,
+      ),
+    );
   }
 }
 
@@ -1470,9 +1508,11 @@ class _NavTile extends StatelessWidget {
         color: Colors.transparent,
         child: InkWell(
           borderRadius: BorderRadius.circular(8),
-          onTap: () => context.go(path),
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 160),
+          splashFactory: NoSplash.splashFactory,
+          highlightColor: Colors.transparent,
+          hoverColor: Colors.white.withValues(alpha: 0.05),
+          onTap: selected ? null : () => context.go(path),
+          child: Container(
             width: double.infinity,
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
             decoration: BoxDecoration(
@@ -1545,7 +1585,8 @@ class _NavChip extends StatelessWidget {
         selectedColor: _activeNavColor,
         backgroundColor: Colors.white.withValues(alpha: 0.08),
         side: BorderSide(color: Colors.white.withValues(alpha: 0.12)),
-        onSelected: (_) => context.go(path),
+        showCheckmark: false,
+        onSelected: selected ? null : (_) => context.go(path),
       ),
     );
   }

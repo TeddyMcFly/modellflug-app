@@ -73,7 +73,7 @@ class _ModelsPageState extends ConsumerState<ModelsPage> {
             final selected = selectedAircraft!;
             if (isWide) {
               return SizedBox(
-                height: 680,
+                height: 980,
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
@@ -93,6 +93,7 @@ class _ModelsPageState extends ConsumerState<ModelsPage> {
                           constraints: const BoxConstraints(maxWidth: 620),
                           child: _AircraftDetails(
                             aircraft: selected,
+                            batteries: fleet.batteries,
                             onEdit: () => _showAircraftDialog(context,
                                 aircraft: selected),
                             onDelete: () => _confirmDelete(context, selected),
@@ -122,9 +123,10 @@ class _ModelsPageState extends ConsumerState<ModelsPage> {
                 ),
                 const SizedBox(height: 18),
                 SizedBox(
-                  height: 820,
+                  height: 1180,
                   child: _AircraftDetails(
                     aircraft: selected,
+                    batteries: fleet.batteries,
                     onEdit: () =>
                         _showAircraftDialog(context, aircraft: selected),
                     onDelete: () => _confirmDelete(context, selected),
@@ -410,6 +412,7 @@ class _AircraftListItem extends StatelessWidget {
 
 class _AircraftDetails extends StatelessWidget {
   final AircraftModel aircraft;
+  final List<BatteryPack> batteries;
   final ValueChanged<AircraftStatus> onStatusChanged;
   final VoidCallback onEdit;
   final VoidCallback onDelete;
@@ -417,6 +420,7 @@ class _AircraftDetails extends StatelessWidget {
 
   const _AircraftDetails({
     required this.aircraft,
+    required this.batteries,
     required this.onStatusChanged,
     required this.onEdit,
     required this.onDelete,
@@ -426,6 +430,10 @@ class _AircraftDetails extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final formatter = DateFormat('dd.MM.yyyy');
+    final assignedBatteries = batteries
+        .where((battery) => battery.aircraftIds.contains(aircraft.id))
+        .toList()
+      ..sort((a, b) => a.label.compareTo(b.label));
 
     return Card(
       clipBehavior: Clip.antiAlias,
@@ -589,6 +597,15 @@ class _AircraftDetails extends StatelessWidget {
                     const SizedBox(height: 22),
                   ],
                   _InfoPanel(
+                    title: 'Fliegt am besten mit...',
+                    icon: Icons.battery_charging_full_rounded,
+                    iconColor: const Color(0xFF16A34A),
+                    children: [
+                      _BestBatteryList(batteries: assignedBatteries),
+                    ],
+                  ),
+                  const SizedBox(height: 22),
+                  _InfoPanel(
                     title: 'Notizen',
                     icon: Icons.notes_rounded,
                     children: [
@@ -622,6 +639,80 @@ String _repairInfo(AircraftModel aircraft) {
     return firstLine.replaceFirst('Reparatur:', '').trim();
   }
   return 'Noch keine Reparaturhinweise hinterlegt.';
+}
+
+class _BestBatteryList extends StatelessWidget {
+  final List<BatteryPack> batteries;
+
+  const _BestBatteryList({required this.batteries});
+
+  @override
+  Widget build(BuildContext context) {
+    if (batteries.isEmpty) {
+      return const Text(
+        'Noch keine Akkus fuer dieses Modell ausgewaehlt.',
+        style: TextStyle(
+          color: Color(0xFF64748B),
+          height: 1.35,
+          fontWeight: FontWeight.w600,
+        ),
+      );
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        for (final battery in batteries)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Container(
+                  width: 8,
+                  height: 8,
+                  margin: const EdgeInsets.only(top: 7, right: 9),
+                  decoration: BoxDecoration(
+                    color: _batteryStatusColor(battery.status),
+                    shape: BoxShape.circle,
+                  ),
+                ),
+                Expanded(
+                  child: Text(
+                    _batteryDescription(battery),
+                    style: const TextStyle(
+                      color: Color(0xFF334155),
+                      height: 1.3,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+      ],
+    );
+  }
+
+  String _batteryDescription(BatteryPack battery) {
+    final manufacturer = battery.manufacturer.trim();
+    final name = [
+      if (manufacturer.isNotEmpty) manufacturer,
+      battery.label,
+    ].join(' ');
+    return '$name - ${battery.chemistry} ${battery.cells}S, '
+        '${battery.capacityMah} mAh, ${battery.cRate}C, '
+        '${battery.status.label}';
+  }
+
+  Color _batteryStatusColor(BatteryStatus status) {
+    return switch (status) {
+      BatteryStatus.charged => const Color(0xFF16A34A),
+      BatteryStatus.storage => const Color(0xFF0A84FF),
+      BatteryStatus.discharged => const Color(0xFFEAB308),
+      BatteryStatus.service => const Color(0xFFEF4444),
+    };
+  }
 }
 
 class _AircraftPhoto extends StatelessWidget {
@@ -797,6 +888,9 @@ class _FlightTimerDialog extends StatefulWidget {
 }
 
 class _FlightTimerDialogState extends State<_FlightTimerDialog> {
+  static const double _panelWidth = 640;
+  static const double _panelHeight = 871;
+
   DateTime? _startedAt;
   DateTime? _lastTickAt;
   Duration _elapsed = Duration.zero;
@@ -854,212 +948,245 @@ class _FlightTimerDialogState extends State<_FlightTimerDialog> {
     final photoDataUri =
         widget.aircraft.photos.isEmpty ? null : widget.aircraft.photos.first;
     final running = _startedAt != null;
-
     return Dialog(
       backgroundColor: Colors.transparent,
       surfaceTintColor: Colors.transparent,
       insetPadding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
-      child: SizedBox(
-        width: 640,
-        height: 871,
-        child: Stack(
-          children: [
-            Positioned.fill(
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(22),
-                child: Image.asset(
-                  'assets/widgets/timer_bg.jpg',
-                  fit: BoxFit.cover,
-                  filterQuality: FilterQuality.high,
-                ),
-              ),
-            ),
-            Positioned(
-              left: 30,
-              top: 123,
-              width: 329,
-              height: 183,
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(10),
-                child: photoDataUri == null
-                    ? Image.asset(
-                        'assets/splash/landing_page.png',
-                        fit: BoxFit.cover,
-                        alignment: _photoAlignment(widget.aircraft),
-                        filterQuality: FilterQuality.high,
-                      )
-                    : Image.memory(
-                        _bytesFromDataUri(photoDataUri),
-                        fit: BoxFit.cover,
-                        filterQuality: FilterQuality.high,
-                        gaplessPlayback: true,
-                      ),
-              ),
-            ),
-            if (!running)
-              Positioned(
-                right: 28,
-                top: 18,
-                child: IconButton(
-                  tooltip: 'Schliessen',
-                  onPressed: () => Navigator.of(context).pop(),
-                  icon: const Icon(Icons.close_rounded),
-                  color: const Color(0xFFF4F1DE),
-                  style: IconButton.styleFrom(
-                    backgroundColor: Colors.black.withValues(alpha: 0.26),
-                  ),
-                ),
-              ),
-            Positioned(
-              left: 55,
-              top: 537,
-              width: 88,
-              height: 88,
-              child: _PanelStatusLight(active: running && !_paused),
-            ),
-            Positioned(
-              left: 187,
-              top: 436,
-              width: 277,
-              height: 277,
-              child: _CockpitTimerGauge(
-                elapsedListenable: _elapsedNotifier,
-                running: running && !_paused,
-                paused: _paused,
-              ),
-            ),
-            Positioned(
-              left: 42,
-              top: 361,
-              width: 102,
-              height: 44,
-              child: _CockpitButton(
-                label: 'Reset',
-                icon: Icons.restart_alt_rounded,
-                onPressed: _resetTimer,
-                accent: const Color(0xFF93C5FD),
-              ),
-            ),
-            Positioned(
-              left: 201,
-              top: 361,
-              width: 102,
-              height: 44,
-              child: _CockpitButton(
-                label: 'Verwerfen',
-                icon: Icons.delete_outline_rounded,
-                onPressed: _discardFlight,
-                accent: const Color(0xFFFCA5A5),
-                compact: true,
-              ),
-            ),
-            Positioned(
-              left: 351,
-              top: 361,
-              width: 102,
-              height: 44,
-              child: _CockpitButton(
-                label: 'Start',
-                icon: Icons.play_arrow_rounded,
-                onPressed: running ? null : _startTimer,
-                accent: const Color(0xFF38BDF8),
-              ),
-            ),
-            Positioned(
-              left: 508,
-              top: 361,
-              width: 102,
-              height: 44,
-              child: _CockpitButton(
-                label: _paused ? 'Weiter' : 'Pause',
-                icon: _paused ? Icons.play_arrow_rounded : Icons.pause_rounded,
-                onPressed: running ? _togglePause : null,
-                accent: const Color(0xFFFACC15),
-              ),
-            ),
-            Positioned(
-              left: 508,
-              top: 461,
-              width: 102,
-              height: 44,
-              child: _CockpitButton(
-                label: 'Beenden',
-                icon: Icons.stop_rounded,
-                onPressed: running ? _finishFlight : null,
-                accent: const Color(0xFF22C55E),
-                compact: true,
-              ),
-            ),
-            Positioned(
-              left: 86,
-              top: 758,
-              width: 470,
-              child: _FlightLocationSelector(
-                homeAirfield: widget.homeAirfield,
-                flightAreas: _availableHomeLocations,
-                selectedHomeLocation:
-                    _selectedHomeLocation ?? _availableHomeLocations.first,
-                customLocation: _customLocation,
-                controller: _customLocationController,
-                onHomeLocationChanged: (location) =>
-                    setState(() => _selectedHomeLocation = location),
-                onModeChanged: (custom) =>
-                    setState(() => _customLocation = custom),
-              ),
-            ),
-            Positioned(
-              left: 376,
-              top: 132,
-              width: 222,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    widget.aircraft.name,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      color: Color(0xFFF4F1DE),
-                      fontSize: 30,
-                      fontWeight: FontWeight.w900,
-                      height: 1.02,
-                      shadows: [
-                        Shadow(
-                          color: Colors.black,
-                          blurRadius: 6,
-                          offset: Offset(0, 2),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final viewport = MediaQuery.sizeOf(context);
+          final constraintWidth = constraints.hasBoundedWidth
+              ? constraints.maxWidth
+              : double.infinity;
+          final constraintHeight = constraints.hasBoundedHeight
+              ? constraints.maxHeight
+              : double.infinity;
+          final availableWidth = math.min(constraintWidth, viewport.width - 36);
+          final availableHeight =
+              math.min(constraintHeight, viewport.height - 24);
+          final scale = math
+              .min(
+                math.min(math.max(280.0, availableWidth), _panelWidth) /
+                    _panelWidth,
+                math.min(math.max(420.0, availableHeight), _panelHeight) /
+                    _panelHeight,
+              )
+              .toDouble();
+
+          return SizedBox(
+            width: _panelWidth * scale,
+            height: _panelHeight * scale,
+            child: FittedBox(
+              fit: BoxFit.fill,
+              child: SizedBox(
+                width: _panelWidth,
+                height: _panelHeight,
+                child: Stack(
+                  children: [
+                    Positioned.fill(
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(22),
+                        child: Image.asset(
+                          'assets/widgets/timer_bg.jpg',
+                          fit: BoxFit.fill,
+                          filterQuality: FilterQuality.high,
                         ),
-                      ],
+                      ),
                     ),
-                  ),
-                  const SizedBox(height: 10),
-                  Text(
-                    widget.aircraft.type,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      color: Color(0xFFD6B98C),
-                      fontSize: 15,
-                      fontWeight: FontWeight.w900,
+                    Positioned(
+                      left: 30,
+                      top: 123,
+                      width: 329,
+                      height: 183,
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(10),
+                        child: photoDataUri == null
+                            ? Image.asset(
+                                'assets/splash/landing_page.png',
+                                fit: BoxFit.cover,
+                                alignment: _photoAlignment(widget.aircraft),
+                                filterQuality: FilterQuality.high,
+                              )
+                            : Image.memory(
+                                _bytesFromDataUri(photoDataUri),
+                                fit: BoxFit.cover,
+                                filterQuality: FilterQuality.high,
+                                gaplessPlayback: true,
+                              ),
+                      ),
                     ),
-                  ),
-                  const SizedBox(height: 7),
-                  Text(
-                    '${widget.aircraft.registration}\n${widget.aircraft.flightHours.toStringAsFixed(1)} h gesamt',
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      color: const Color(0xFFF4F1DE).withValues(alpha: 0.72),
-                      fontSize: 13,
-                      fontWeight: FontWeight.w800,
-                      height: 1.2,
+                    if (!running)
+                      Positioned(
+                        right: 28,
+                        top: 18,
+                        child: IconButton(
+                          tooltip: 'Schliessen',
+                          onPressed: () => Navigator.of(context).pop(),
+                          icon: const Icon(Icons.close_rounded),
+                          color: const Color(0xFFF4F1DE),
+                          style: IconButton.styleFrom(
+                            backgroundColor:
+                                Colors.black.withValues(alpha: 0.26),
+                          ),
+                        ),
+                      ),
+                    Positioned(
+                      left: 55,
+                      top: 537,
+                      width: 88,
+                      height: 88,
+                      child: _PanelStatusLight(active: running && !_paused),
                     ),
-                  ),
-                ],
+                    Positioned(
+                      left: 187,
+                      top: 436,
+                      width: 277,
+                      height: 277,
+                      child: _CockpitTimerGauge(
+                        elapsedListenable: _elapsedNotifier,
+                        running: running && !_paused,
+                        paused: _paused,
+                      ),
+                    ),
+                    Positioned(
+                      left: 42,
+                      top: 361,
+                      width: 102,
+                      height: 44,
+                      child: _CockpitButton(
+                        label: 'Reset',
+                        icon: Icons.restart_alt_rounded,
+                        onPressed: _resetTimer,
+                        accent: const Color(0xFF93C5FD),
+                      ),
+                    ),
+                    Positioned(
+                      left: 201,
+                      top: 361,
+                      width: 102,
+                      height: 44,
+                      child: _CockpitButton(
+                        label: 'Verwerfen',
+                        icon: Icons.delete_outline_rounded,
+                        onPressed: _discardFlight,
+                        accent: const Color(0xFFFCA5A5),
+                        compact: true,
+                      ),
+                    ),
+                    Positioned(
+                      left: 351,
+                      top: 361,
+                      width: 102,
+                      height: 44,
+                      child: _CockpitButton(
+                        label: 'Start',
+                        icon: Icons.play_arrow_rounded,
+                        onPressed: running ? null : _startTimer,
+                        accent: const Color(0xFF38BDF8),
+                      ),
+                    ),
+                    Positioned(
+                      left: 508,
+                      top: 361,
+                      width: 102,
+                      height: 44,
+                      child: _CockpitButton(
+                        label: _paused ? 'Weiter' : 'Pause',
+                        icon: _paused
+                            ? Icons.play_arrow_rounded
+                            : Icons.pause_rounded,
+                        onPressed: running ? _togglePause : null,
+                        accent: const Color(0xFFFACC15),
+                      ),
+                    ),
+                    Positioned(
+                      left: 508,
+                      top: 461,
+                      width: 102,
+                      height: 44,
+                      child: _CockpitButton(
+                        label: 'Beenden',
+                        icon: Icons.stop_rounded,
+                        onPressed: running ? _finishFlight : null,
+                        accent: const Color(0xFF22C55E),
+                        compact: true,
+                      ),
+                    ),
+                    Positioned(
+                      left: 86,
+                      top: 758,
+                      width: 470,
+                      child: _FlightLocationSelector(
+                        homeAirfield: widget.homeAirfield,
+                        flightAreas: _availableHomeLocations,
+                        selectedHomeLocation: _selectedHomeLocation ??
+                            _availableHomeLocations.first,
+                        customLocation: _customLocation,
+                        controller: _customLocationController,
+                        onHomeLocationChanged: (location) =>
+                            setState(() => _selectedHomeLocation = location),
+                        onModeChanged: (custom) =>
+                            setState(() => _customLocation = custom),
+                      ),
+                    ),
+                    Positioned(
+                      left: 376,
+                      top: 132,
+                      width: 222,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            widget.aircraft.name,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              color: Color(0xFFF4F1DE),
+                              fontSize: 30,
+                              fontWeight: FontWeight.w900,
+                              height: 1.02,
+                              shadows: [
+                                Shadow(
+                                  color: Colors.black,
+                                  blurRadius: 6,
+                                  offset: Offset(0, 2),
+                                ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(height: 10),
+                          Text(
+                            widget.aircraft.type,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              color: Color(0xFFD6B98C),
+                              fontSize: 15,
+                              fontWeight: FontWeight.w900,
+                            ),
+                          ),
+                          const SizedBox(height: 7),
+                          Text(
+                            '${widget.aircraft.registration}\n${widget.aircraft.flightHours.toStringAsFixed(1)} h gesamt',
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              color: const Color(0xFFF4F1DE)
+                                  .withValues(alpha: 0.72),
+                              fontSize: 13,
+                              fontWeight: FontWeight.w800,
+                              height: 1.2,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
-          ],
-        ),
+          );
+        },
       ),
     );
   }
@@ -1667,7 +1794,7 @@ class _CockpitTimerGaugePainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    final center = Offset(size.width / 2, size.height / 2);
+    final center = Offset(size.width / 2, size.height / 2 + 7);
     final radius = size.shortestSide / 2;
     final faceRadius = radius * 0.71;
 

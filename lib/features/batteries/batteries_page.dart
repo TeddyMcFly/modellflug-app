@@ -61,6 +61,8 @@ class BatteriesPage extends ConsumerWidget {
       builder: (context) => _BatteryDialog(
         aircraft: aircraft,
         battery: battery,
+        suggestedInventoryNumber:
+            ref.read(fleetProvider).nextBatteryInventoryNumber,
         onSubmit: (nextBattery) {
           final notifier = ref.read(fleetProvider.notifier);
           if (battery == null) {
@@ -857,6 +859,36 @@ class _BatteryCard extends StatelessWidget {
             Row(
               children: [
                 Container(
+                  width: 44,
+                  height: 44,
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    color: color.withValues(alpha: 0.28),
+                    shape: BoxShape.circle,
+                    border: Border.all(
+                      color: color.withValues(alpha: 0.48),
+                      width: 1.2,
+                    ),
+                    boxShadow: [
+                      BoxShadow(
+                        color: color.withValues(alpha: 0.16),
+                        blurRadius: 8,
+                        offset: const Offset(0, 3),
+                      ),
+                    ],
+                  ),
+                  child: Text(
+                    battery.inventoryNumber.toString(),
+                    style: TextStyle(
+                      color: color,
+                      fontSize: 22,
+                      fontWeight: FontWeight.w900,
+                      height: 1,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 9),
+                Container(
                   width: 38,
                   height: 62,
                   padding: const EdgeInsets.all(3),
@@ -1299,11 +1331,13 @@ class _CycleStatusBar extends StatelessWidget {
 class _BatteryDialog extends StatefulWidget {
   final List<AircraftModel> aircraft;
   final BatteryPack? battery;
+  final int suggestedInventoryNumber;
   final ValueChanged<BatteryPack> onSubmit;
 
   const _BatteryDialog({
     required this.aircraft,
     this.battery,
+    required this.suggestedInventoryNumber,
     required this.onSubmit,
   });
 
@@ -1362,6 +1396,9 @@ class _BatteryDialogState extends State<_BatteryDialog> {
 
   @override
   Widget build(BuildContext context) {
+    final inventoryNumber =
+        widget.battery?.inventoryNumber ?? widget.suggestedInventoryNumber;
+
     return AlertDialog(
       alignment: Alignment.topCenter,
       insetPadding: const EdgeInsets.fromLTRB(24, 22, 24, 24),
@@ -1378,6 +1415,26 @@ class _BatteryDialogState extends State<_BatteryDialog> {
                 spacing: 12,
                 runSpacing: 12,
                 children: [
+                  SizedBox(
+                    width: 532,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 10,
+                      ),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF06172E).withValues(alpha: 0.08),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Text(
+                        'Akku-Nr. $inventoryNumber',
+                        style: const TextStyle(
+                          color: Color(0xFF06172E),
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
+                    ),
+                  ),
                   _TextField(controller: _label, label: 'Bezeichnung'),
                   _TextField(controller: _manufacturer, label: 'Hersteller'),
                   _TextField(controller: _chemistry, label: 'Chemie'),
@@ -1446,6 +1503,8 @@ class _BatteryDialogState extends State<_BatteryDialog> {
     widget.onSubmit(
       BatteryPack(
         id: widget.battery?.id ?? const Uuid().v4(),
+        inventoryNumber:
+            widget.battery?.inventoryNumber ?? widget.suggestedInventoryNumber,
         label: _label.text.trim(),
         manufacturer: _manufacturer.text.trim(),
         chemistry: _chemistry.text.trim(),

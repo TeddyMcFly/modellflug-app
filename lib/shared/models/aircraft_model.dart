@@ -534,14 +534,18 @@ class AppSettings {
   }
 
   factory AppSettings.fromJson(Map<String, dynamic> json) {
+    final shareLocationWithFriends =
+        json['shareLocationWithFriends'] as bool? ?? false;
+    final presenceStatus = LocationPresenceStatus.values.firstWhere(
+      (status) => status.name == json['presenceStatus'],
+      orElse: () => LocationPresenceStatus.offline,
+    );
     return AppSettings(
-      shareLocationWithFriends:
-          json['shareLocationWithFriends'] as bool? ?? false,
+      shareLocationWithFriends: shareLocationWithFriends,
       reachableByChat: json['reachableByChat'] as bool? ?? true,
-      presenceStatus: LocationPresenceStatus.values.firstWhere(
-        (status) => status.name == json['presenceStatus'],
-        orElse: () => LocationPresenceStatus.offline,
-      ),
+      presenceStatus: shareLocationWithFriends
+          ? presenceStatus
+          : LocationPresenceStatus.offline,
       timeZone: json['timeZone'] as String? ?? 'Europe/Berlin',
       distanceUnit: json['distanceUnit'] as String? ?? 'km',
       windUnit: json['windUnit'] as String? ?? 'km/h',
@@ -575,10 +579,13 @@ class AppSettings {
   }
 
   Map<String, dynamic> toJson() {
+    final visiblePresenceStatus = shareLocationWithFriends
+        ? presenceStatus
+        : LocationPresenceStatus.offline;
     return {
       'shareLocationWithFriends': shareLocationWithFriends,
       'reachableByChat': reachableByChat,
-      'presenceStatus': presenceStatus.name,
+      'presenceStatus': visiblePresenceStatus.name,
       'timeZone': timeZone,
       'distanceUnit': distanceUnit,
       'windUnit': windUnit,
@@ -660,6 +667,7 @@ extension BatteryStatusText on BatteryStatus {
 
 class BatteryPack {
   final String id;
+  final int inventoryNumber;
   final String label;
   final String manufacturer;
   final String chemistry;
@@ -677,6 +685,7 @@ class BatteryPack {
 
   const BatteryPack({
     required this.id,
+    this.inventoryNumber = 0,
     required this.label,
     this.manufacturer = '',
     required this.chemistry,
@@ -702,6 +711,7 @@ class BatteryPack {
 
   BatteryPack copyWith({
     String? id,
+    int? inventoryNumber,
     String? label,
     String? manufacturer,
     String? chemistry,
@@ -719,6 +729,7 @@ class BatteryPack {
   }) {
     return BatteryPack(
       id: id ?? this.id,
+      inventoryNumber: inventoryNumber ?? this.inventoryNumber,
       label: label ?? this.label,
       manufacturer: manufacturer ?? this.manufacturer,
       chemistry: chemistry ?? this.chemistry,
@@ -739,6 +750,7 @@ class BatteryPack {
   factory BatteryPack.fromJson(Map<String, dynamic> json) {
     return BatteryPack(
       id: json['id'] as String,
+      inventoryNumber: json['inventoryNumber'] as int? ?? 0,
       label: json['label'] as String,
       manufacturer: json['manufacturer'] as String? ?? '',
       chemistry: json['chemistry'] as String,
@@ -764,6 +776,7 @@ class BatteryPack {
   Map<String, dynamic> toJson() {
     return {
       'id': id,
+      'inventoryNumber': inventoryNumber,
       'label': label,
       'manufacturer': manufacturer,
       'chemistry': chemistry,

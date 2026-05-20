@@ -14,6 +14,11 @@ final weeklyWeatherForecastProvider = FutureProvider.family
   return OpenMeteoService.instance.weeklyForecast(query);
 });
 
+final pressureTrendProvider = FutureProvider.family
+    .autoDispose<List<PressureTrendPoint>, WeatherQuery>((ref, query) {
+  return OpenMeteoService.instance.pressureTrend(query);
+});
+
 class WeatherQuery {
   final String location;
   final String timeZone;
@@ -57,6 +62,7 @@ class OpenMeteoWeather {
   final double visibilityKm;
   final int precipitationProbability;
   final int cloudCover;
+  final String sunrise;
   final String sunset;
   final String assessment;
   final Color assessmentColor;
@@ -74,6 +80,7 @@ class OpenMeteoWeather {
     required this.visibilityKm,
     required this.precipitationProbability,
     required this.cloudCover,
+    required this.sunrise,
     required this.sunset,
     required this.assessment,
     required this.assessmentColor,
@@ -114,6 +121,18 @@ class DailyWeatherForecast {
   });
 }
 
+class PressureTrendPoint {
+  final DateTime date;
+  final double pressureHpa;
+  final bool forecast;
+
+  const PressureTrendPoint({
+    required this.date,
+    required this.pressureHpa,
+    required this.forecast,
+  });
+}
+
 class OpenMeteoService {
   OpenMeteoService._();
 
@@ -122,6 +141,7 @@ class OpenMeteoService {
   static const _geocodingBase = 'https://geocoding-api.open-meteo.com';
   final _cache = <WeatherQuery, _WeatherCacheEntry>{};
   final _weeklyCache = <WeatherQuery, _WeeklyWeatherCacheEntry>{};
+  final _pressureCache = <WeatherQuery, _PressureTrendCacheEntry>{};
   final _coordinateCache = <String, AirfieldCoordinates>{};
 
   Future<OpenMeteoWeather> forecast(WeatherQuery query) async {
@@ -140,7 +160,7 @@ class OpenMeteoService {
         'current':
             'temperature_2m,weather_code,wind_speed_10m,wind_direction_10m,wind_gusts_10m,surface_pressure,precipitation,cloud_cover',
         'hourly': 'visibility',
-        'daily': 'sunset,precipitation_probability_max',
+        'daily': 'sunrise,sunset,precipitation_probability_max',
         'timezone': query.timeZone,
         'wind_speed_unit': 'kmh',
       };
@@ -195,6 +215,43 @@ class OpenMeteoService {
     } catch (_) {
       final fallback = fallbackWeeklyForecast();
       _weeklyCache[query] = _WeeklyWeatherCacheEntry(fallback, DateTime.now());
+      return fallback;
+    }
+  }
+
+  Future<List<PressureTrendPoint>> pressureTrend(WeatherQuery query) async {
+    final cached = _pressureCache[query];
+    if (cached != null &&
+        DateTime.now().difference(cached.loadedAt) <
+            const Duration(minutes: 30)) {
+      return cached.trend;
+    }
+
+    try {
+      final coordinates = await _coordinatesForLocation(query.location);
+      final params = {
+        'latitude': coordinates.latitude.toStringAsFixed(5),
+        'longitude': coordinates.longitude.toStringAsFixed(5),
+        'hourly': 'surface_pressure',
+        'past_days': '10',
+        'forecast_days': '4',
+        'timezone': query.timeZone,
+      };
+      final uri = Uri.parse('$_apiBase/v1/forecast').replace(
+        queryParameters: params,
+      );
+      final response = await http.get(uri).timeout(const Duration(seconds: 12));
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        throw StateError('Open-Meteo HTTP ${response.statusCode}');
+      }
+      final json = jsonDecode(response.body) as Map<String, dynamic>;
+      final trend = _pressureTrendFromJson(json);
+      _pressureCache[query] = _PressureTrendCacheEntry(trend, DateTime.now());
+      return trend;
+    } catch (_) {
+      final fallback = fallbackPressureTrend();
+      _pressureCache[query] =
+          _PressureTrendCacheEntry(fallback, DateTime.now());
       return fallback;
     }
   }
@@ -270,6 +327,13 @@ class _WeeklyWeatherCacheEntry {
   const _WeeklyWeatherCacheEntry(this.forecast, this.loadedAt);
 }
 
+class _PressureTrendCacheEntry {
+  final List<PressureTrendPoint> trend;
+  final DateTime loadedAt;
+
+  const _PressureTrendCacheEntry(this.trend, this.loadedAt);
+}
+
 AirfieldCoordinates? _knownCoordinatesForLocation(String location) {
   final normalized = location.toLowerCase();
 
@@ -309,6 +373,7 @@ OpenMeteoWeather _weatherFromJson(String location, Map<String, dynamic> json) {
   final hourly = json['hourly'] as Map<String, dynamic>? ?? const {};
   final daily = json['daily'] as Map<String, dynamic>? ?? const {};
   final visibilityValues = hourly['visibility'] as List<dynamic>? ?? const [];
+  final sunriseValues = daily['sunrise'] as List<dynamic>? ?? const [];
   final sunsetValues = daily['sunset'] as List<dynamic>? ?? const [];
   final rainProbabilityValues =
       daily['precipitation_probability_max'] as List<dynamic>? ?? const [];
@@ -342,7 +407,14 @@ OpenMeteoWeather _weatherFromJson(String location, Map<String, dynamic> json) {
         : (_number(visibilityValues.first) / 1000).clamp(0.0, 99.0),
     precipitationProbability: rainProbability,
     cloudCover: cloudCover,
-    sunset: _formatSunset(sunsetValues.isEmpty ? null : sunsetValues.first),
+    sunrise: _formatClockTime(
+      sunriseValues.isEmpty ? null : sunriseValues.first,
+      fallback: '05:31',
+    ),
+    sunset: _formatClockTime(
+      sunsetValues.isEmpty ? null : sunsetValues.first,
+      fallback: '21:17',
+    ),
     assessment: weather.$1,
     assessmentColor: weather.$2,
     assessmentIcon: weather.$3,
@@ -375,6 +447,41 @@ List<DailyWeatherForecast> _weeklyForecastFromJson(Map<String, dynamic> json) {
         gustValues: gustValues,
         sunsetValues: sunsetValues,
         index: index,
+      ),
+  ];
+}
+
+List<PressureTrendPoint> _pressureTrendFromJson(Map<String, dynamic> json) {
+  final hourly = json['hourly'] as Map<String, dynamic>? ?? const {};
+  final times = hourly['time'] as List<dynamic>? ?? const [];
+  final pressureValues =
+      hourly['surface_pressure'] as List<dynamic>? ?? const [];
+  final today = _dateOnly(DateTime.now());
+  final buckets = <DateTime, List<double>>{};
+
+  for (var index = 0;
+      index < times.length && index < pressureValues.length;
+      index++) {
+    final dateTime = DateTime.tryParse(times[index].toString());
+    if (dateTime == null) {
+      continue;
+    }
+    final pressure = _number(pressureValues[index], fallback: double.nan);
+    if (pressure.isNaN) {
+      continue;
+    }
+    buckets.putIfAbsent(_dateOnly(dateTime), () => <double>[]).add(pressure);
+  }
+
+  final dates = buckets.keys.toList()..sort();
+  return [
+    for (final date in dates)
+      PressureTrendPoint(
+        date: date,
+        pressureHpa:
+            buckets[date]!.reduce((value, element) => value + element) /
+                buckets[date]!.length,
+        forecast: date.isAfter(today),
       ),
   ];
 }
@@ -413,8 +520,8 @@ DailyWeatherForecast _dailyForecastAt({
     precipitationProbability: rain,
     windSpeedKmh: wind,
     gustsKmh: gusts,
-    sunset:
-        _formatSunset(index < sunsetValues.length ? sunsetValues[index] : null),
+    sunset: _formatClockTime(
+        index < sunsetValues.length ? sunsetValues[index] : null),
     assessment: weather.$1,
     assessmentColor: weather.$2,
     assessmentIcon: weather.$3,
@@ -434,6 +541,7 @@ OpenMeteoWeather fallbackWeather(String location) {
     visibilityKm: 12,
     precipitationProbability: 10,
     cloudCover: 35,
+    sunrise: '05:31',
     sunset: '21:17',
     assessment:
         'Sehr gute Bedingungen. Wenig Wind, trocken und hell genug fuer einen Flugplatzbesuch.',
@@ -441,6 +549,34 @@ OpenMeteoWeather fallbackWeather(String location) {
     assessmentIcon: Icons.thumb_up_alt_rounded,
     isLive: false,
   );
+}
+
+List<PressureTrendPoint> fallbackPressureTrend() {
+  final today = _dateOnly(DateTime.now());
+  const values = [
+    1017.0,
+    1016.0,
+    1018.0,
+    1019.0,
+    1016.5,
+    1014.0,
+    1012.0,
+    1013.5,
+    1015.0,
+    1016.0,
+    1015.5,
+    1014.5,
+    1013.0,
+    1012.5,
+  ];
+  return [
+    for (var index = 0; index < values.length; index++)
+      PressureTrendPoint(
+        date: today.add(Duration(days: index - 10)),
+        pressureHpa: values[index],
+        forecast: index > 10,
+      ),
+  ];
 }
 
 List<DailyWeatherForecast> fallbackWeeklyForecast() {
@@ -498,12 +634,15 @@ String _dayLabel(DateTime date, int index) {
   return '${weekdays[date.weekday - 1]} ${date.day.toString().padLeft(2, '0')}.${date.month.toString().padLeft(2, '0')}.';
 }
 
-String _formatSunset(Object? value) {
+DateTime _dateOnly(DateTime value) =>
+    DateTime(value.year, value.month, value.day);
+
+String _formatClockTime(Object? value, {String fallback = '21:17'}) {
   final raw = value?.toString() ?? '';
   if (raw.length >= 16) {
     return raw.substring(11, 16);
   }
-  return '21:17';
+  return fallback;
 }
 
 String _conditionForCode(int code, int cloudCover) {

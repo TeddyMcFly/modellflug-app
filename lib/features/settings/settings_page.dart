@@ -32,7 +32,7 @@ class SettingsPage extends ConsumerWidget {
             children: [
               const _SettingsTabs(),
               Container(
-                height: 650,
+                height: 1320,
                 decoration: const BoxDecoration(
                   borderRadius: BorderRadius.only(
                     bottomLeft: Radius.circular(8),
@@ -43,39 +43,35 @@ class SettingsPage extends ConsumerWidget {
                   children: [
                     Padding(
                       padding: const EdgeInsets.all(2),
-                      child: SingleChildScrollView(
-                        child: _PilotProfileCard(
-                          profile: fleet.pilotProfile,
-                          onSave: (profile) => ref
-                              .read(fleetProvider.notifier)
-                              .updatePilotProfile(profile),
-                        ),
+                      child: _PilotProfileCard(
+                        profile: fleet.pilotProfile,
+                        onSave: (profile) => ref
+                            .read(fleetProvider.notifier)
+                            .updatePilotProfile(profile),
                       ),
                     ),
                     Padding(
                       padding: const EdgeInsets.all(2),
-                      child: SingleChildScrollView(
-                        child: _AppSettingsCard(
-                          settings: fleet.appSettings,
-                          onCreateBackup: () => _showBackupDialog(
-                            context,
-                            ref,
-                          ),
-                          onRestoreBackup: () => _importData(
-                            context,
-                            ref,
-                            restore: true,
-                          ),
-                          onLocationSharingChanged: (value) => ref
-                              .read(fleetProvider.notifier)
-                              .updateLocationSharing(value),
-                          onChatReachabilityChanged: (value) => ref
-                              .read(fleetProvider.notifier)
-                              .updateChatReachability(value),
-                          onSettingsChanged: (settings) => ref
-                              .read(fleetProvider.notifier)
-                              .updateAppSettings(settings),
+                      child: _AppSettingsCard(
+                        settings: fleet.appSettings,
+                        onCreateBackup: () => _showBackupDialog(
+                          context,
+                          ref,
                         ),
+                        onRestoreBackup: () => _importData(
+                          context,
+                          ref,
+                          restore: true,
+                        ),
+                        onLocationSharingChanged: (value) => ref
+                            .read(fleetProvider.notifier)
+                            .updateLocationSharing(value),
+                        onChatReachabilityChanged: (value) => ref
+                            .read(fleetProvider.notifier)
+                            .updateChatReachability(value),
+                        onSettingsChanged: (settings) => ref
+                            .read(fleetProvider.notifier)
+                            .updateAppSettings(settings),
                       ),
                     ),
                   ],
@@ -1066,7 +1062,7 @@ class _InsuranceDocumentBox extends StatelessWidget {
               const SizedBox(height: 12),
               Center(
                 child: ConstrainedBox(
-                  constraints: const BoxConstraints(maxHeight: 260),
+                  constraints: const BoxConstraints(maxHeight: 460),
                   child: DecoratedBox(
                     decoration: BoxDecoration(
                       borderRadius: BorderRadius.circular(8),
