@@ -33,6 +33,14 @@ class AppTheme {
     inputDecorationTheme: InputDecorationTheme(
       filled: true,
       fillColor: Colors.white.withValues(alpha: 0.92),
+      labelStyle: const TextStyle(
+        fontSize: 13,
+        fontWeight: FontWeight.w600,
+      ),
+      floatingLabelStyle: const TextStyle(
+        fontSize: 14,
+        fontWeight: FontWeight.w700,
+      ),
       border: OutlineInputBorder(
         borderRadius: BorderRadius.circular(8),
         borderSide: const BorderSide(color: Color(0xFFCBD5E1)),

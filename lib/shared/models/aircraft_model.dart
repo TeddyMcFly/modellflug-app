@@ -10,7 +10,7 @@ extension AircraftStatusText on AircraftStatus {
       case AircraftStatus.ready:
         return 'Flugbereit';
       case AircraftStatus.maintenance:
-        return 'Wartung';
+        return 'Reparatur';
       case AircraftStatus.destroyed:
         return 'Zerstört';
     }
@@ -26,17 +26,25 @@ class AircraftModel {
   final double wingspanMeters;
   final double lengthMeters;
   final double weightKg;
+  final String transmitter;
+  final String transmitterMemorySlot;
   final String receiver;
   final String propeller;
+  final String materialFuselageWing;
+  final String wingLoading;
+  final String recommendedDriveBattery;
+  final String servos;
   final DateTime purchaseDate;
   final String drive;
   final int batteryCount;
+  final List<int> batteryCellOptions;
   final int totalFlights;
   final double flightHours;
   final AircraftStatus status;
   final DateTime lastService;
   final DateTime nextService;
   final String notes;
+  final String repairNotes;
   final String? photoDataUri;
   final List<String> photoDataUris;
 
@@ -49,17 +57,25 @@ class AircraftModel {
     required this.wingspanMeters,
     required this.lengthMeters,
     required this.weightKg,
+    required this.transmitter,
+    required this.transmitterMemorySlot,
     required this.receiver,
     required this.propeller,
+    this.materialFuselageWing = '',
+    this.wingLoading = '',
+    this.recommendedDriveBattery = '',
+    this.servos = '',
     required this.purchaseDate,
     required this.drive,
     required this.batteryCount,
+    this.batteryCellOptions = const [],
     required this.totalFlights,
     required this.flightHours,
     required this.status,
     required this.lastService,
     required this.nextService,
     required this.notes,
+    this.repairNotes = '',
     this.photoDataUri,
     this.photoDataUris = const [],
   });
@@ -74,6 +90,13 @@ class AircraftModel {
     return const [];
   }
 
+  List<int> get batteryCells {
+    if (batteryCellOptions.isNotEmpty) {
+      return batteryCellOptions;
+    }
+    return [batteryCount];
+  }
+
   AircraftModel copyWith({
     String? id,
     String? name,
@@ -83,17 +106,25 @@ class AircraftModel {
     double? wingspanMeters,
     double? lengthMeters,
     double? weightKg,
+    String? transmitter,
+    String? transmitterMemorySlot,
     String? receiver,
     String? propeller,
+    String? materialFuselageWing,
+    String? wingLoading,
+    String? recommendedDriveBattery,
+    String? servos,
     DateTime? purchaseDate,
     String? drive,
     int? batteryCount,
+    List<int>? batteryCellOptions,
     int? totalFlights,
     double? flightHours,
     AircraftStatus? status,
     DateTime? lastService,
     DateTime? nextService,
     String? notes,
+    String? repairNotes,
     String? photoDataUri,
     List<String>? photoDataUris,
   }) {
@@ -106,17 +137,27 @@ class AircraftModel {
       wingspanMeters: wingspanMeters ?? this.wingspanMeters,
       lengthMeters: lengthMeters ?? this.lengthMeters,
       weightKg: weightKg ?? this.weightKg,
+      transmitter: transmitter ?? this.transmitter,
+      transmitterMemorySlot:
+          transmitterMemorySlot ?? this.transmitterMemorySlot,
       receiver: receiver ?? this.receiver,
       propeller: propeller ?? this.propeller,
+      materialFuselageWing: materialFuselageWing ?? this.materialFuselageWing,
+      wingLoading: wingLoading ?? this.wingLoading,
+      recommendedDriveBattery:
+          recommendedDriveBattery ?? this.recommendedDriveBattery,
+      servos: servos ?? this.servos,
       purchaseDate: purchaseDate ?? this.purchaseDate,
       drive: drive ?? this.drive,
       batteryCount: batteryCount ?? this.batteryCount,
+      batteryCellOptions: batteryCellOptions ?? this.batteryCellOptions,
       totalFlights: totalFlights ?? this.totalFlights,
       flightHours: flightHours ?? this.flightHours,
       status: status ?? this.status,
       lastService: lastService ?? this.lastService,
       nextService: nextService ?? this.nextService,
       notes: notes ?? this.notes,
+      repairNotes: repairNotes ?? this.repairNotes,
       photoDataUri: photoDataUri ?? this.photoDataUri,
       photoDataUris: photoDataUris ?? this.photoDataUris,
     );
@@ -132,18 +173,29 @@ class AircraftModel {
       wingspanMeters: (json['wingspanMeters'] as num).toDouble(),
       lengthMeters: (json['lengthMeters'] as num?)?.toDouble() ?? 0,
       weightKg: (json['weightKg'] as num).toDouble(),
+      transmitter: json['transmitter'] as String? ?? '',
+      transmitterMemorySlot: json['transmitterMemorySlot'] as String? ?? '',
       receiver: json['receiver'] as String? ?? '',
       propeller: json['propeller'] as String? ?? '',
+      materialFuselageWing: json['materialFuselageWing'] as String? ?? '',
+      wingLoading: json['wingLoading'] as String? ?? '',
+      recommendedDriveBattery: json['recommendedDriveBattery'] as String? ?? '',
+      servos: json['servos'] as String? ?? '',
       purchaseDate: DateTime.tryParse(json['purchaseDate'] as String? ?? '') ??
           DateTime(2026),
       drive: json['drive'] as String? ?? '',
       batteryCount: json['batteryCount'] as int,
+      batteryCellOptions: [
+        for (final item in json['batteryCellOptions'] as List<dynamic>? ?? [])
+          (item as num).toInt(),
+      ],
       totalFlights: json['totalFlights'] as int,
       flightHours: (json['flightHours'] as num).toDouble(),
       status: _aircraftStatusFromJson(json['status'] as String?),
       lastService: DateTime.parse(json['lastService'] as String),
       nextService: DateTime.parse(json['nextService'] as String),
       notes: json['notes'] as String,
+      repairNotes: json['repairNotes'] as String? ?? '',
       photoDataUri: json['photoDataUri'] as String?,
       photoDataUris: [
         for (final item in json['photoDataUris'] as List<dynamic>? ?? [])
@@ -162,17 +214,25 @@ class AircraftModel {
       'wingspanMeters': wingspanMeters,
       'lengthMeters': lengthMeters,
       'weightKg': weightKg,
+      'transmitter': transmitter,
+      'transmitterMemorySlot': transmitterMemorySlot,
       'receiver': receiver,
       'propeller': propeller,
+      'materialFuselageWing': materialFuselageWing,
+      'wingLoading': wingLoading,
+      'recommendedDriveBattery': recommendedDriveBattery,
+      'servos': servos,
       'purchaseDate': purchaseDate.toIso8601String(),
       'drive': drive,
       'batteryCount': batteryCount,
+      'batteryCellOptions': batteryCellOptions,
       'totalFlights': totalFlights,
       'flightHours': flightHours,
       'status': status.name,
       'lastService': lastService.toIso8601String(),
       'nextService': nextService.toIso8601String(),
       'notes': notes,
+      'repairNotes': repairNotes,
       'photoDataUri': photoDataUri,
       'photoDataUris': photoDataUris,
     };
@@ -263,43 +323,61 @@ class FlightLogEntry {
 class PilotProfile {
   final String name;
   final String homeAirfield;
+  final List<String> flightAreas;
   final String club;
   final String licenseNumber;
   final String phone;
   final String email;
+  final List<String> transmitters;
   final String notes;
   final String? photoDataUri;
+  final String? insuranceDocumentName;
+  final String? insuranceDocumentDataUri;
 
   const PilotProfile({
     required this.name,
     required this.homeAirfield,
+    this.flightAreas = const [],
     required this.club,
     required this.licenseNumber,
     required this.phone,
     required this.email,
+    this.transmitters = const [],
     required this.notes,
     this.photoDataUri,
+    this.insuranceDocumentName,
+    this.insuranceDocumentDataUri,
   });
 
   PilotProfile copyWith({
     String? name,
     String? homeAirfield,
+    List<String>? flightAreas,
     String? club,
     String? licenseNumber,
     String? phone,
     String? email,
+    List<String>? transmitters,
     String? notes,
     String? photoDataUri,
+    String? insuranceDocumentName,
+    String? insuranceDocumentDataUri,
   }) {
     return PilotProfile(
       name: name ?? this.name,
       homeAirfield: homeAirfield ?? this.homeAirfield,
+      flightAreas: flightAreas ?? this.flightAreas,
       club: club ?? this.club,
       licenseNumber: licenseNumber ?? this.licenseNumber,
       phone: phone ?? this.phone,
       email: email ?? this.email,
+      transmitters: transmitters ?? this.transmitters,
       notes: notes ?? this.notes,
       photoDataUri: photoDataUri ?? this.photoDataUri,
+      insuranceDocumentName:
+          insuranceDocumentName ?? this.insuranceDocumentName,
+      insuranceDocumentDataUri:
+          insuranceDocumentDataUri ?? this.insuranceDocumentDataUri,
     );
   }
 
@@ -307,13 +385,23 @@ class PilotProfile {
     return PilotProfile(
       name: json['name'] as String? ?? 'Teddy',
       homeAirfield: json['homeAirfield'] as String? ?? 'MFC Suedhang',
+      flightAreas: [
+        for (final item in json['flightAreas'] as List<dynamic>? ?? [])
+          item as String,
+      ],
       club: json['club'] as String? ?? 'MFC Adler',
       licenseNumber: json['licenseNumber'] as String? ?? '',
       phone: json['phone'] as String? ?? '',
       email: json['email'] as String? ?? '',
+      transmitters: [
+        for (final item in json['transmitters'] as List<dynamic>? ?? [])
+          item as String,
+      ],
       notes: json['notes'] as String? ??
           'Modellpilot mit Fokus auf Segler und Kunstflug.',
       photoDataUri: json['photoDataUri'] as String?,
+      insuranceDocumentName: json['insuranceDocumentName'] as String?,
+      insuranceDocumentDataUri: json['insuranceDocumentDataUri'] as String?,
     );
   }
 
@@ -321,12 +409,16 @@ class PilotProfile {
     return {
       'name': name,
       'homeAirfield': homeAirfield,
+      'flightAreas': flightAreas,
       'club': club,
       'licenseNumber': licenseNumber,
       'phone': phone,
       'email': email,
+      'transmitters': transmitters,
       'notes': notes,
       'photoDataUri': photoDataUri,
+      'insuranceDocumentName': insuranceDocumentName,
+      'insuranceDocumentDataUri': insuranceDocumentDataUri,
     };
   }
 }
@@ -354,23 +446,90 @@ class AppSettings {
   final bool shareLocationWithFriends;
   final bool reachableByChat;
   final LocationPresenceStatus presenceStatus;
+  final String timeZone;
+  final String distanceUnit;
+  final String windUnit;
+  final String temperatureUnit;
+  final String language;
+  final bool wifiOnlySync;
+  final int batteryProblemCycleThreshold;
+  final int fullBatteryStorageReminderDays;
+  final int batteryAgeWarningYears;
+  final List<String> batteryTypes;
+  final List<String> webcams;
+  final List<String> webcamUrls;
+  final bool notifyFriendsAtField;
+  final bool notifyBatteryLimits;
+  final bool notifyRepairs;
+  final bool notifyGoodWeather;
 
   const AppSettings({
     required this.shareLocationWithFriends,
     required this.reachableByChat,
     required this.presenceStatus,
+    this.timeZone = 'Europe/Berlin',
+    this.distanceUnit = 'km',
+    this.windUnit = 'km/h',
+    this.temperatureUnit = 'Celsius',
+    this.language = 'Deutsch',
+    this.wifiOnlySync = true,
+    this.batteryProblemCycleThreshold = 300,
+    this.fullBatteryStorageReminderDays = 3,
+    this.batteryAgeWarningYears = 5,
+    this.batteryTypes = defaultSelectedBatteryTypes,
+    this.webcams = defaultWebcams,
+    this.webcamUrls = defaultWebcamUrls,
+    this.notifyFriendsAtField = true,
+    this.notifyBatteryLimits = true,
+    this.notifyRepairs = true,
+    this.notifyGoodWeather = true,
   });
 
   AppSettings copyWith({
     bool? shareLocationWithFriends,
     bool? reachableByChat,
     LocationPresenceStatus? presenceStatus,
+    String? timeZone,
+    String? distanceUnit,
+    String? windUnit,
+    String? temperatureUnit,
+    String? language,
+    bool? wifiOnlySync,
+    int? batteryProblemCycleThreshold,
+    int? fullBatteryStorageReminderDays,
+    int? batteryAgeWarningYears,
+    List<String>? batteryTypes,
+    List<String>? webcams,
+    List<String>? webcamUrls,
+    bool? notifyFriendsAtField,
+    bool? notifyBatteryLimits,
+    bool? notifyRepairs,
+    bool? notifyGoodWeather,
   }) {
     return AppSettings(
       shareLocationWithFriends:
           shareLocationWithFriends ?? this.shareLocationWithFriends,
       reachableByChat: reachableByChat ?? this.reachableByChat,
       presenceStatus: presenceStatus ?? this.presenceStatus,
+      timeZone: timeZone ?? this.timeZone,
+      distanceUnit: distanceUnit ?? this.distanceUnit,
+      windUnit: windUnit ?? this.windUnit,
+      temperatureUnit: temperatureUnit ?? this.temperatureUnit,
+      language: language ?? this.language,
+      wifiOnlySync: wifiOnlySync ?? this.wifiOnlySync,
+      batteryProblemCycleThreshold:
+          batteryProblemCycleThreshold ?? this.batteryProblemCycleThreshold,
+      fullBatteryStorageReminderDays:
+          fullBatteryStorageReminderDays ?? this.fullBatteryStorageReminderDays,
+      batteryAgeWarningYears:
+          batteryAgeWarningYears ?? this.batteryAgeWarningYears,
+      batteryTypes: batteryTypes ?? this.batteryTypes,
+      webcams: webcams ?? this.webcams,
+      webcamUrls: webcamUrls ?? this.webcamUrls,
+      notifyFriendsAtField: notifyFriendsAtField ?? this.notifyFriendsAtField,
+      notifyBatteryLimits: notifyBatteryLimits ?? this.notifyBatteryLimits,
+      notifyRepairs: notifyRepairs ?? this.notifyRepairs,
+      notifyGoodWeather: notifyGoodWeather ?? this.notifyGoodWeather,
     );
   }
 
@@ -383,6 +542,35 @@ class AppSettings {
         (status) => status.name == json['presenceStatus'],
         orElse: () => LocationPresenceStatus.offline,
       ),
+      timeZone: json['timeZone'] as String? ?? 'Europe/Berlin',
+      distanceUnit: json['distanceUnit'] as String? ?? 'km',
+      windUnit: json['windUnit'] as String? ?? 'km/h',
+      temperatureUnit: json['temperatureUnit'] as String? ?? 'Celsius',
+      language: json['language'] as String? ?? 'Deutsch',
+      wifiOnlySync: json['wifiOnlySync'] as bool? ?? true,
+      batteryProblemCycleThreshold:
+          json['batteryProblemCycleThreshold'] as int? ?? 300,
+      fullBatteryStorageReminderDays:
+          json['fullBatteryStorageReminderDays'] as int? ?? 3,
+      batteryAgeWarningYears: json['batteryAgeWarningYears'] as int? ?? 5,
+      batteryTypes: [
+        for (final item in json['batteryTypes'] as List<dynamic>? ??
+            defaultSelectedBatteryTypes)
+          if (item is String && item.trim().isNotEmpty) item.trim(),
+      ],
+      webcams: [
+        for (final item in json['webcams'] as List<dynamic>? ?? defaultWebcams)
+          if (item is String && item.trim().isNotEmpty) item.trim(),
+      ],
+      webcamUrls: [
+        for (final item
+            in json['webcamUrls'] as List<dynamic>? ?? defaultWebcamUrls)
+          if (item is String) item.trim(),
+      ],
+      notifyFriendsAtField: json['notifyFriendsAtField'] as bool? ?? true,
+      notifyBatteryLimits: json['notifyBatteryLimits'] as bool? ?? true,
+      notifyRepairs: json['notifyRepairs'] as bool? ?? true,
+      notifyGoodWeather: json['notifyGoodWeather'] as bool? ?? true,
     );
   }
 
@@ -391,14 +579,67 @@ class AppSettings {
       'shareLocationWithFriends': shareLocationWithFriends,
       'reachableByChat': reachableByChat,
       'presenceStatus': presenceStatus.name,
+      'timeZone': timeZone,
+      'distanceUnit': distanceUnit,
+      'windUnit': windUnit,
+      'temperatureUnit': temperatureUnit,
+      'language': language,
+      'wifiOnlySync': wifiOnlySync,
+      'batteryProblemCycleThreshold': batteryProblemCycleThreshold,
+      'fullBatteryStorageReminderDays': fullBatteryStorageReminderDays,
+      'batteryAgeWarningYears': batteryAgeWarningYears,
+      'batteryTypes': batteryTypes,
+      'webcams': webcams,
+      'webcamUrls': webcamUrls,
+      'notifyFriendsAtField': notifyFriendsAtField,
+      'notifyBatteryLimits': notifyBatteryLimits,
+      'notifyRepairs': notifyRepairs,
+      'notifyGoodWeather': notifyGoodWeather,
     };
   }
 }
 
+const defaultSelectedBatteryTypes = [
+  'LiPo 1S',
+  'LiPo 2S',
+  'LiPo 3S',
+  'LiPo 4S',
+];
+
+const defaultBatteryTypes = [
+  'LiPo 1S',
+  'LiPo 2S',
+  'LiPo 3S',
+  'LiPo 4S',
+  'LiPo 5S',
+  'LiPo 6S',
+  'LiPo 7S',
+  'LiPo 8S',
+  'LiPo 9S',
+  'LiPo 10S',
+  'LiPo 11S',
+  'LiPo 12S',
+  'LiFePo4 / LiFe',
+  'LiIon',
+  'NiMH',
+];
+
+const defaultWebcams = [
+  'LMFC-Fluggelaende',
+  'Startbahn Nord',
+  'Vereinsheim',
+];
+
+const defaultWebcamUrls = [
+  '',
+  '',
+  '',
+];
+
 enum BatteryStatus {
   charged,
   storage,
-  charging,
+  discharged,
   service,
 }
 
@@ -406,11 +647,11 @@ extension BatteryStatusText on BatteryStatus {
   String get label {
     switch (this) {
       case BatteryStatus.charged:
-        return 'Voll';
+        return 'Flug-ready';
       case BatteryStatus.storage:
         return 'Lagerspannung';
-      case BatteryStatus.charging:
-        return 'Laedt';
+      case BatteryStatus.discharged:
+        return 'Leer geflogen';
       case BatteryStatus.service:
         return 'Pruefen';
     }
@@ -420,54 +661,77 @@ extension BatteryStatusText on BatteryStatus {
 class BatteryPack {
   final String id;
   final String label;
+  final String manufacturer;
   final String chemistry;
   final int cells;
   final int capacityMah;
+  final int cRate;
   final int chargePercent;
   final int cycles;
   final BatteryStatus status;
+  final DateTime purchaseDate;
   final DateTime lastUsed;
   final String assignedAircraftId;
+  final List<String> assignedAircraftIds;
   final String notes;
 
   const BatteryPack({
     required this.id,
     required this.label,
+    this.manufacturer = '',
     required this.chemistry,
     required this.cells,
     required this.capacityMah,
+    this.cRate = 30,
     required this.chargePercent,
     required this.cycles,
     required this.status,
+    required this.purchaseDate,
     required this.lastUsed,
     required this.assignedAircraftId,
+    this.assignedAircraftIds = const [],
     required this.notes,
   });
+
+  List<String> get aircraftIds {
+    if (assignedAircraftIds.isNotEmpty) {
+      return assignedAircraftIds;
+    }
+    return assignedAircraftId.isEmpty ? const [] : [assignedAircraftId];
+  }
 
   BatteryPack copyWith({
     String? id,
     String? label,
+    String? manufacturer,
     String? chemistry,
     int? cells,
     int? capacityMah,
+    int? cRate,
     int? chargePercent,
     int? cycles,
     BatteryStatus? status,
+    DateTime? purchaseDate,
     DateTime? lastUsed,
     String? assignedAircraftId,
+    List<String>? assignedAircraftIds,
     String? notes,
   }) {
     return BatteryPack(
       id: id ?? this.id,
       label: label ?? this.label,
+      manufacturer: manufacturer ?? this.manufacturer,
       chemistry: chemistry ?? this.chemistry,
       cells: cells ?? this.cells,
       capacityMah: capacityMah ?? this.capacityMah,
+      cRate: cRate ?? this.cRate,
       chargePercent: chargePercent ?? this.chargePercent,
       cycles: cycles ?? this.cycles,
       status: status ?? this.status,
+      purchaseDate: purchaseDate ?? this.purchaseDate,
       lastUsed: lastUsed ?? this.lastUsed,
       assignedAircraftId: assignedAircraftId ?? this.assignedAircraftId,
+      assignedAircraftIds: assignedAircraftIds ?? this.assignedAircraftIds,
       notes: notes ?? this.notes,
     );
   }
@@ -476,17 +740,23 @@ class BatteryPack {
     return BatteryPack(
       id: json['id'] as String,
       label: json['label'] as String,
+      manufacturer: json['manufacturer'] as String? ?? '',
       chemistry: json['chemistry'] as String,
       cells: json['cells'] as int,
       capacityMah: json['capacityMah'] as int,
+      cRate: json['cRate'] as int? ?? 30,
       chargePercent: json['chargePercent'] as int,
       cycles: json['cycles'] as int,
-      status: BatteryStatus.values.firstWhere(
-        (status) => status.name == json['status'],
-        orElse: () => BatteryStatus.storage,
-      ),
+      status: _batteryStatusFromJson(json['status'] as String?),
+      purchaseDate: DateTime.tryParse(json['purchaseDate'] as String? ?? '') ??
+          DateTime(2026),
       lastUsed: DateTime.parse(json['lastUsed'] as String),
-      assignedAircraftId: json['assignedAircraftId'] as String,
+      assignedAircraftId: json['assignedAircraftId'] as String? ?? '',
+      assignedAircraftIds: [
+        for (final item
+            in json['assignedAircraftIds'] as List<dynamic>? ?? const [])
+          item as String,
+      ],
       notes: json['notes'] as String,
     );
   }
@@ -495,15 +765,30 @@ class BatteryPack {
     return {
       'id': id,
       'label': label,
+      'manufacturer': manufacturer,
       'chemistry': chemistry,
       'cells': cells,
       'capacityMah': capacityMah,
+      'cRate': cRate,
       'chargePercent': chargePercent,
       'cycles': cycles,
       'status': status.name,
+      'purchaseDate': purchaseDate.toIso8601String(),
       'lastUsed': lastUsed.toIso8601String(),
       'assignedAircraftId': assignedAircraftId,
+      'assignedAircraftIds': aircraftIds,
       'notes': notes,
     };
   }
+}
+
+BatteryStatus _batteryStatusFromJson(String? value) {
+  if (value == 'charging') {
+    return BatteryStatus.discharged;
+  }
+
+  return BatteryStatus.values.firstWhere(
+    (status) => status.name == value,
+    orElse: () => BatteryStatus.storage,
+  );
 }

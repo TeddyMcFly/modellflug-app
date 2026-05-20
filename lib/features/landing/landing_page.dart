@@ -154,84 +154,74 @@ class _LoadingPanel extends StatelessWidget {
   Widget build(BuildContext context) {
     return SizedBox(
       width: 300,
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          AnimatedOpacity(
-            duration: const Duration(milliseconds: 240),
-            opacity: isReady ? 0.94 : 0.82,
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(
-                  isReady
-                      ? Icons.check_circle_rounded
-                      : Icons.flight_takeoff_rounded,
-                  color: isReady
-                      ? const Color(0xFF4ADE80)
-                      : const Color(0xFF0A84FF),
-                  size: 14,
-                ),
-                const SizedBox(width: 6),
-                Text(
-                  status.toUpperCase(),
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 11,
+      child: AnimatedSwitcher(
+        duration: const Duration(milliseconds: 260),
+        child: isReady
+            ? FilledButton.icon(
+                key: const ValueKey('ready-button'),
+                onPressed: onOpenDashboard,
+                icon: const Icon(Icons.flight_takeoff_rounded),
+                label: const Text('Dashboard oeffnen'),
+                style: FilledButton.styleFrom(
+                  backgroundColor:
+                      const Color(0xFF0A84FF).withValues(alpha: 0.92),
+                  minimumSize: const Size(190, 40),
+                  textStyle: const TextStyle(
+                    fontSize: 13,
                     fontWeight: FontWeight.w900,
-                    letterSpacing: 0.6,
                   ),
                 ),
-                const SizedBox(width: 8),
-                Text(
-                  '${(progress * 100).round()}%',
-                  style: const TextStyle(
-                    color: Color(0xFFBFDBFE),
-                    fontSize: 11,
-                    fontWeight: FontWeight.w800,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 6),
-          ClipRRect(
-            borderRadius: BorderRadius.circular(8),
-            child: LinearProgressIndicator(
-              minHeight: 4,
-              value: progress,
-              color: const Color(0xFF0A84FF),
-              backgroundColor: Colors.white.withValues(alpha: 0.24),
-            ),
-          ),
-          AnimatedSwitcher(
-            duration: const Duration(milliseconds: 260),
-            child: isReady
-                ? Padding(
-                    key: const ValueKey('ready-button'),
-                    padding: const EdgeInsets.only(top: 14),
-                    child: FilledButton.icon(
-                      onPressed: onOpenDashboard,
-                      icon: const Icon(Icons.flight_takeoff_rounded),
-                      label: const Text('Dashboard oeffnen'),
-                      style: FilledButton.styleFrom(
-                        backgroundColor:
-                            const Color(0xFF0A84FF).withValues(alpha: 0.92),
-                        minimumSize: const Size(190, 40),
-                        textStyle: const TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w900,
+              )
+            : Column(
+                key: const ValueKey('loading-panel'),
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  AnimatedOpacity(
+                    duration: const Duration(milliseconds: 240),
+                    opacity: 0.82,
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        const Icon(
+                          Icons.flight_takeoff_rounded,
+                          color: Color(0xFF0A84FF),
+                          size: 14,
                         ),
-                      ),
+                        const SizedBox(width: 6),
+                        Text(
+                          status.toUpperCase(),
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w900,
+                            letterSpacing: 0.6,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          '${(progress * 100).round()}%',
+                          style: const TextStyle(
+                            color: Color(0xFFBFDBFE),
+                            fontSize: 11,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                      ],
                     ),
-                  )
-                : const SizedBox(
-                    key: ValueKey('loading-space'),
-                    height: 10,
                   ),
-          ),
-        ],
+                  const SizedBox(height: 6),
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(8),
+                    child: LinearProgressIndicator(
+                      minHeight: 4,
+                      value: progress,
+                      color: const Color(0xFF0A84FF),
+                      backgroundColor: Colors.white.withValues(alpha: 0.24),
+                    ),
+                  ),
+                ],
+              ),
       ),
     );
   }

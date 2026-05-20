@@ -1,16 +1,62 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/widgets/app_scaffold.dart';
+import '../../shared/models/aircraft_model.dart';
+import '../../shared/providers/fleet_provider.dart';
+import '../../shared/services/open_meteo_service.dart';
 
-class WebcamPage extends StatelessWidget {
+class WebcamPage extends ConsumerStatefulWidget {
   const WebcamPage({super.key});
 
-  static const livePlaceholderAsset = 'assets/webcam/home_airfield.jpg';
+  static const livePlaceholderAsset = 'assets/webcam/lmfc_flugplatz_1.jpg';
+
+  @override
+  ConsumerState<WebcamPage> createState() => _WebcamPageState();
+}
+
+class _WebcamPageState extends ConsumerState<WebcamPage> {
+  late String _selectedWebcam = defaultWebcams.first;
+  late String _selectedForecastLocation = 'Flugplatz';
+
+  List<String> _forecastLocations(FleetState fleet) {
+    final locations = <String>[
+      if (fleet.pilotProfile.homeAirfield.trim().isNotEmpty)
+        fleet.pilotProfile.homeAirfield.trim(),
+      ...fleet.pilotProfile.flightAreas.where((area) => area.trim().isNotEmpty),
+    ];
+    final unique = locations.toSet().toList();
+    return unique.isEmpty ? ['Flugplatz'] : unique;
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final webcams = ref.read(fleetProvider).appSettings.webcams;
+    final forecastLocations = _forecastLocations(ref.read(fleetProvider));
+    if (webcams.isNotEmpty && !webcams.contains(_selectedWebcam)) {
+      _selectedWebcam = webcams.first;
+    }
+    if (!forecastLocations.contains(_selectedForecastLocation)) {
+      _selectedForecastLocation = forecastLocations.first;
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
+    final fleet = ref.watch(fleetProvider);
+    final webcams = fleet.appSettings.webcams;
+    final availableWebcams = webcams.isEmpty ? defaultWebcams : webcams;
+    final forecastLocations = _forecastLocations(fleet);
+    if (!availableWebcams.contains(_selectedWebcam)) {
+      _selectedWebcam = availableWebcams.first;
+    }
+    if (!forecastLocations.contains(_selectedForecastLocation)) {
+      _selectedForecastLocation = forecastLocations.first;
+    }
+
     return AppScaffold(
-      title: 'Webcam',
+      title: 'Webcams',
       subtitle:
           'Platzkameras, Wetterhinweise und Sichtbedingungen fuer den Flugtag.',
       action: FilledButton.icon(
@@ -18,15 +64,33 @@ class WebcamPage extends StatelessWidget {
         icon: const Icon(Icons.refresh_rounded),
         label: const Text('Aktualisieren'),
       ),
-      children: const [
+      children: [
         Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            _CameraPreview(),
-            SizedBox(height: 12),
-            _AirfieldWeatherCard(),
-            SizedBox(height: 12),
-            _WeeklyWebcamShots(),
+            _WebcamChooser(
+              webcams: availableWebcams,
+              selectedWebcam: _selectedWebcam,
+              onChanged: (value) {
+                if (value != null) {
+                  setState(() => _selectedWebcam = value);
+                }
+              },
+            ),
+            const SizedBox(height: 12),
+            _CameraPreview(title: _selectedWebcam),
+            const SizedBox(height: 12),
+            _AirfieldWeatherCard(webcam: _selectedWebcam),
+            const SizedBox(height: 12),
+            _WeeklyWeatherCard(
+              locations: forecastLocations,
+              selectedLocation: _selectedForecastLocation,
+              onChanged: (value) {
+                if (value != null) {
+                  setState(() => _selectedForecastLocation = value);
+                }
+              },
+            ),
           ],
         ),
       ],
@@ -34,8 +98,65 @@ class WebcamPage extends StatelessWidget {
   }
 }
 
+class _WebcamChooser extends StatelessWidget {
+  final List<String> webcams;
+  final String selectedWebcam;
+  final ValueChanged<String?> onChanged;
+
+  const _WebcamChooser({
+    required this.webcams,
+    required this.selectedWebcam,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 300),
+        child: DropdownButtonFormField<String>(
+          initialValue:
+              webcams.contains(selectedWebcam) ? selectedWebcam : webcams.first,
+          isExpanded: true,
+          style: const TextStyle(
+            color: Color(0xFF334155),
+            fontSize: 12,
+            fontWeight: FontWeight.w600,
+          ),
+          decoration: const InputDecoration(
+            labelText: 'Webcam',
+            labelStyle: TextStyle(fontSize: 11, fontWeight: FontWeight.w600),
+            isDense: true,
+            contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+            prefixIcon: Icon(Icons.videocam_rounded, size: 18),
+            prefixIconConstraints: BoxConstraints(minWidth: 34),
+          ),
+          items: [
+            for (final webcam in webcams)
+              DropdownMenuItem(
+                value: webcam,
+                child: Text(
+                  webcam,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+          ],
+          onChanged: onChanged,
+        ),
+      ),
+    );
+  }
+}
+
 class _CameraPreview extends StatelessWidget {
-  const _CameraPreview();
+  final String title;
+
+  const _CameraPreview({required this.title});
 
   @override
   Widget build(BuildContext context) {
@@ -64,7 +185,7 @@ class _CameraPreview extends StatelessWidget {
               top: 18,
               child: _LiveBadge(),
             ),
-            const Positioned(
+            Positioned(
               left: 22,
               bottom: 22,
               right: 22,
@@ -72,15 +193,15 @@ class _CameraPreview extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    'LMFC-Fluggelaende',
-                    style: TextStyle(
+                    title,
+                    style: const TextStyle(
                       color: Colors.white,
                       fontSize: 24,
                       fontWeight: FontWeight.w900,
                     ),
                   ),
-                  SizedBox(height: 4),
-                  Text(
+                  const SizedBox(height: 4),
+                  const Text(
                     'Letztes Bild vor 18 Sekunden',
                     style: TextStyle(
                       color: Color(0xFFE2E8F0),
@@ -123,60 +244,80 @@ class _LiveBadge extends StatelessWidget {
   }
 }
 
-class _AirfieldWeatherCard extends StatelessWidget {
-  const _AirfieldWeatherCard();
+class _AirfieldWeatherCard extends ConsumerWidget {
+  final String webcam;
+
+  const _AirfieldWeatherCard({required this.webcam});
 
   @override
-  Widget build(BuildContext context) {
-    return const Card(
+  Widget build(BuildContext context, WidgetRef ref) {
+    final settings = ref.watch(fleetProvider).appSettings;
+    final weatherAsync = ref.watch(
+      weatherForecastProvider(
+        WeatherQuery(location: webcam, timeZone: settings.timeZone),
+      ),
+    );
+    final weather = weatherAsync.maybeWhen(
+      data: (weather) => weather,
+      orElse: () => fallbackWeather(webcam),
+    );
+
+    return Card(
       child: Padding(
-        padding: EdgeInsets.all(16),
+        padding: const EdgeInsets.all(16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              'Wetter am Platz',
-              style: TextStyle(fontSize: 22, fontWeight: FontWeight.w900),
+              'Wetter am Platz - ${weather.location}${weather.isLive ? '' : ' (Fallback)'}',
+              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w900),
             ),
-            SizedBox(height: 16),
+            const SizedBox(height: 12),
             Wrap(
-              spacing: 24,
-              runSpacing: 16,
+              spacing: 38,
+              runSpacing: 18,
               children: [
                 _WeatherValue(
                   icon: Icons.cloud_rounded,
                   label: 'Bewoelkung',
-                  value: 'leicht bewoelkt',
+                  value: '${weather.condition}, ${weather.cloudCover} %',
                 ),
                 _WeatherValue(
                   icon: Icons.thermostat_rounded,
                   label: 'Temperatur',
-                  value: '22 C',
+                  value: formatTemperature(
+                    weather.temperatureC,
+                    settings.temperatureUnit,
+                  ),
                 ),
                 _WeatherValue(
                   icon: Icons.air_rounded,
                   label: 'Wind',
-                  value: '8 km/h NW',
+                  value:
+                      '${windDirectionLabel(weather.windDirection)} ${formatWindSpeed(weather.windSpeedKmh, settings.windUnit)}',
                 ),
                 _WeatherValue(
                   icon: Icons.speed_rounded,
                   label: 'Boeen',
-                  value: '18 km/h',
+                  value: formatWindSpeed(weather.gustsKmh, settings.windUnit),
                 ),
                 _WeatherValue(
                   icon: Icons.compress_rounded,
                   label: 'Luftdruck',
-                  value: '1016 hPa',
+                  value: '${weather.pressureHpa.round()} hPa',
                 ),
                 _WeatherValue(
                   icon: Icons.visibility_rounded,
                   label: 'Sichtweite',
-                  value: '12 km',
+                  value: formatDistance(
+                    weather.visibilityKm,
+                    settings.distanceUnit,
+                  ),
                 ),
                 _WeatherValue(
                   icon: Icons.wb_twilight_rounded,
                   label: 'Sonnenuntergang',
-                  value: '21:17',
+                  value: weather.sunset,
                 ),
               ],
             ),
@@ -205,7 +346,7 @@ class _WeatherValue extends StatelessWidget {
       child: Row(
         children: [
           Icon(icon, color: const Color(0xFF0A84FF), size: 34),
-          const SizedBox(width: 12),
+          const SizedBox(width: 14),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -215,16 +356,16 @@ class _WeatherValue extends StatelessWidget {
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
                     color: Color(0xFF64748B),
-                    fontSize: 13,
-                    fontWeight: FontWeight.w800,
+                    fontSize: 10,
+                    fontWeight: FontWeight.w700,
                   ),
                 ),
                 Text(
                   value,
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.w900,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w800,
                   ),
                 ),
               ],
@@ -236,20 +377,29 @@ class _WeatherValue extends StatelessWidget {
   }
 }
 
-class _WeeklyWebcamShots extends StatelessWidget {
-  const _WeeklyWebcamShots();
+class _WeeklyWeatherCard extends ConsumerWidget {
+  final List<String> locations;
+  final String selectedLocation;
+  final ValueChanged<String?> onChanged;
+
+  const _WeeklyWeatherCard({
+    required this.locations,
+    required this.selectedLocation,
+    required this.onChanged,
+  });
 
   @override
-  Widget build(BuildContext context) {
-    const days = [
-      'Heute',
-      'Gestern',
-      '14.05.',
-      '13.05.',
-      '12.05.',
-      '11.05.',
-      '10.05.',
-    ];
+  Widget build(BuildContext context, WidgetRef ref) {
+    final settings = ref.watch(fleetProvider).appSettings;
+    final forecastAsync = ref.watch(
+      weeklyWeatherForecastProvider(
+        WeatherQuery(location: selectedLocation, timeZone: settings.timeZone),
+      ),
+    );
+    final forecast = forecastAsync.maybeWhen(
+      data: (forecast) => forecast,
+      orElse: fallbackWeeklyForecast,
+    );
 
     return Card(
       child: Padding(
@@ -257,44 +407,141 @@ class _WeeklyWebcamShots extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text(
-              'Webcam-Aufnahmen der letzten Tage',
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.w900),
-            ),
-            const SizedBox(height: 12),
-            SizedBox(
-              height: 126,
-              child: ListView.separated(
-                scrollDirection: Axis.horizontal,
-                itemCount: days.length,
-                separatorBuilder: (context, index) => const SizedBox(width: 10),
-                itemBuilder: (context, index) {
-                  return SizedBox(
-                    width: 150,
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        ClipRRect(
-                          borderRadius: BorderRadius.circular(8),
-                          child: AspectRatio(
-                            aspectRatio: 8 / 5,
-                            child: Image.asset(
-                              WebcamPage.livePlaceholderAsset,
-                              fit: BoxFit.cover,
-                            ),
+            Row(
+              children: [
+                const Expanded(
+                  child: Text(
+                    'Wettervorhersage fuer die naechste Woche',
+                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.w900),
+                  ),
+                ),
+                const SizedBox(width: 14),
+                ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 260),
+                  child: DropdownButtonFormField<String>(
+                    initialValue: locations.contains(selectedLocation)
+                        ? selectedLocation
+                        : locations.first,
+                    isExpanded: true,
+                    style: const TextStyle(
+                      color: Color(0xFF334155),
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                    ),
+                    decoration: const InputDecoration(
+                      labelText: 'Fluggebiet',
+                      isDense: true,
+                      contentPadding:
+                          EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+                      prefixIcon: Icon(Icons.place_rounded, size: 18),
+                      prefixIconConstraints: BoxConstraints(minWidth: 34),
+                    ),
+                    items: [
+                      for (final location in locations)
+                        DropdownMenuItem(
+                          value: location,
+                          child: Text(
+                            location,
+                            overflow: TextOverflow.ellipsis,
                           ),
                         ),
-                        const SizedBox(height: 6),
-                        Text(
-                          days[index],
-                          style: const TextStyle(fontWeight: FontWeight.w900),
+                    ],
+                    onChanged: onChanged,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: DataTable(
+                headingRowHeight: 38,
+                dataRowMinHeight: 42,
+                dataRowMaxHeight: 48,
+                horizontalMargin: 12,
+                columnSpacing: 22,
+                headingTextStyle: const TextStyle(
+                  color: Color(0xFF0F172A),
+                  fontSize: 12,
+                  fontWeight: FontWeight.w900,
+                ),
+                dataTextStyle: const TextStyle(
+                  color: Color(0xFF334155),
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                ),
+                columns: const [
+                  DataColumn(label: Text('Tag')),
+                  DataColumn(label: Text('Wetter')),
+                  DataColumn(label: Text('Temp.')),
+                  DataColumn(label: Text('Regen')),
+                  DataColumn(label: Text('Wind')),
+                  DataColumn(label: Text('Boeen')),
+                  DataColumn(label: Text('Sonnenuntergang')),
+                  DataColumn(label: Text('Einschaetzung')),
+                ],
+                rows: [
+                  for (final day in forecast)
+                    DataRow(
+                      cells: [
+                        DataCell(Text(day.label)),
+                        DataCell(Text(day.condition)),
+                        DataCell(
+                          Text(
+                            '${formatTemperature(day.minTemperatureC, settings.temperatureUnit)} - ${formatTemperature(day.maxTemperatureC, settings.temperatureUnit)}',
+                          ),
+                        ),
+                        DataCell(Text('${day.precipitationProbability} %')),
+                        DataCell(
+                          Text(formatWindSpeed(
+                              day.windSpeedKmh, settings.windUnit)),
+                        ),
+                        DataCell(
+                          Text(
+                              formatWindSpeed(day.gustsKmh, settings.windUnit)),
+                        ),
+                        DataCell(Text('${day.sunset} Uhr')),
+                        DataCell(
+                          Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                day.assessmentIcon,
+                                color: day.assessmentColor,
+                                size: 18,
+                              ),
+                              const SizedBox(width: 6),
+                              SizedBox(
+                                width: 240,
+                                child: Text(
+                                  day.assessment,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                    color: day.assessmentColor,
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w800,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
                         ),
                       ],
                     ),
-                  );
-                },
+                ],
               ),
             ),
+            if (forecast.isNotEmpty && !forecast.first.isLive) ...[
+              const SizedBox(height: 10),
+              const Text(
+                'Fallback-Daten, wenn Open-Meteo fuer dieses Fluggebiet nicht erreichbar ist.',
+                style: TextStyle(
+                  color: Color(0xFF64748B),
+                  fontSize: 11,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ],
           ],
         ),
       ),

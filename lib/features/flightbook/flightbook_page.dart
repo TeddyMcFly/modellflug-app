@@ -1,3 +1,6 @@
+import 'dart:convert';
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
@@ -138,7 +141,7 @@ class _FlightbookMetricCard extends StatelessWidget {
   }
 }
 
-class _FlightbookTable extends StatelessWidget {
+class _FlightbookTable extends StatefulWidget {
   final List<FlightLogEntry> flights;
   final Map<String, AircraftModel> aircraftById;
   final ValueChanged<FlightLogEntry> onEdit;
@@ -150,102 +153,316 @@ class _FlightbookTable extends StatelessWidget {
   });
 
   @override
+  State<_FlightbookTable> createState() => _FlightbookTableState();
+}
+
+class _FlightbookTableState extends State<_FlightbookTable> {
+  final ScrollController _horizontalController = ScrollController();
+
+  @override
+  void dispose() {
+    _horizontalController.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     final formatter = DateFormat('dd.MM.yyyy HH:mm');
-    final sortedFlights = [...flights]
+    final sortedFlights = [...widget.flights]
       ..sort((a, b) => b.date.compareTo(a.date));
 
-    return Card(
-      clipBehavior: Clip.antiAlias,
-      child: sortedFlights.isEmpty
-          ? const Padding(
-              padding: EdgeInsets.all(18),
-              child: Text(
-                'Noch keine Fluege eingetragen.',
-                style: TextStyle(
-                  color: Color(0xFF64748B),
-                  fontWeight: FontWeight.w800,
-                ),
-              ),
-            )
-          : Scrollbar(
-              thumbVisibility: true,
-              child: SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                child: DataTable(
-                  headingRowColor: WidgetStateProperty.all(
-                    const Color(0xFF0A84FF),
-                  ),
-                  headingTextStyle: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 12,
-                    fontWeight: FontWeight.w900,
-                  ),
-                  headingRowHeight: 40,
-                  dataTextStyle: const TextStyle(
-                    color: Color(0xFF334155),
-                    fontSize: 12,
-                    height: 1.1,
-                    fontWeight: FontWeight.w700,
-                  ),
-                  columnSpacing: 22,
-                  horizontalMargin: 16,
-                  dataRowMinHeight: 36,
-                  dataRowMaxHeight: 46,
-                  columns: const [
-                    DataColumn(label: _TableHeader('Datum')),
-                    DataColumn(label: _TableHeader('Modell')),
-                    DataColumn(label: _TableHeader('Kategorie')),
-                    DataColumn(label: _TableHeader('Dauer')),
-                    DataColumn(label: _TableHeader('Fluggebiet')),
-                    DataColumn(label: _TableHeader('Pilot')),
-                    DataColumn(label: _TableHeader('Notizen')),
-                    DataColumn(label: _TableHeader('')),
-                  ],
-                  rows: [
-                    for (final flight in sortedFlights)
-                      DataRow(
-                        cells: [
-                          DataCell(Text(formatter.format(flight.date))),
-                          DataCell(
-                            Text(
-                              aircraftById[flight.aircraftId]?.name ??
-                                  'Unbekanntes Modell',
-                            ),
-                          ),
-                          DataCell(
-                            _CategoryCell(
-                              category:
-                                  aircraftById[flight.aircraftId]?.type ?? '-',
-                            ),
-                          ),
-                          DataCell(Text('${flight.durationMinutes} min')),
-                          DataCell(Text(flight.location)),
-                          DataCell(Text(flight.pilot)),
-                          DataCell(
-                            SizedBox(
-                              width: 320,
-                              child: Text(
-                                flight.notes,
-                                maxLines: 2,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ),
-                          ),
-                          DataCell(
-                            IconButton(
-                              tooltip: 'Eintrag bearbeiten',
-                              icon: const Icon(Icons.edit_rounded),
-                              color: const Color(0xFF0A84FF),
-                              onPressed: () => onEdit(flight),
-                            ),
-                          ),
-                        ],
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final tableWidth =
+            constraints.maxWidth < 1160 ? 1160.0 : constraints.maxWidth;
+
+        return SizedBox(
+          width: constraints.maxWidth,
+          child: Card(
+            clipBehavior: Clip.antiAlias,
+            child: sortedFlights.isEmpty
+                ? const Padding(
+                    padding: EdgeInsets.all(18),
+                    child: Text(
+                      'Noch keine Fluege eingetragen.',
+                      style: TextStyle(
+                        color: Color(0xFF64748B),
+                        fontWeight: FontWeight.w800,
                       ),
+                    ),
+                  )
+                : Stack(
+                    children: [
+                      SingleChildScrollView(
+                        controller: _horizontalController,
+                        scrollDirection: Axis.horizontal,
+                        child: Padding(
+                          padding: const EdgeInsets.only(top: 30, bottom: 10),
+                          child: ConstrainedBox(
+                            constraints: BoxConstraints(minWidth: tableWidth),
+                            child: DataTable(
+                              headingRowColor: WidgetStateProperty.all(
+                                const Color(0xFF0A84FF),
+                              ),
+                              headingTextStyle: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 12,
+                                fontWeight: FontWeight.w900,
+                              ),
+                              headingRowHeight: 40,
+                              dataTextStyle: const TextStyle(
+                                color: Color(0xFF334155),
+                                fontSize: 12,
+                                height: 1.1,
+                                fontWeight: FontWeight.w700,
+                              ),
+                              columnSpacing: 22,
+                              horizontalMargin: 16,
+                              dataRowMinHeight: 36,
+                              dataRowMaxHeight: 52,
+                              columns: const [
+                                DataColumn(label: _TableHeader('Nr.')),
+                                DataColumn(label: _TableHeader('Datum')),
+                                DataColumn(label: _TableHeader('Modell')),
+                                DataColumn(label: _TableHeader('Kategorie')),
+                                DataColumn(label: _TableHeader('Dauer')),
+                                DataColumn(label: _TableHeader('Fluggebiet')),
+                                DataColumn(label: _TableHeader('Pilot')),
+                                DataColumn(label: _TableHeader('Notizen')),
+                                DataColumn(label: _TableHeader('')),
+                              ],
+                              rows:
+                                  List.generate(sortedFlights.length, (index) {
+                                final flight = sortedFlights[index];
+                                final flightNumber =
+                                    sortedFlights.length - index;
+
+                                return DataRow(
+                                  cells: [
+                                    DataCell(Text('$flightNumber')),
+                                    DataCell(
+                                        Text(formatter.format(flight.date))),
+                                    DataCell(
+                                      _AircraftModelCell(
+                                        aircraft: widget
+                                            .aircraftById[flight.aircraftId],
+                                      ),
+                                    ),
+                                    DataCell(
+                                      _CategoryCell(
+                                        category: widget
+                                                .aircraftById[flight.aircraftId]
+                                                ?.type ??
+                                            '-',
+                                      ),
+                                    ),
+                                    DataCell(
+                                        Text('${flight.durationMinutes} min')),
+                                    DataCell(Text(flight.location)),
+                                    DataCell(Text(flight.pilot)),
+                                    DataCell(
+                                      SizedBox(
+                                        width: 320,
+                                        child: Text(
+                                          flight.notes,
+                                          maxLines: 2,
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
+                                      ),
+                                    ),
+                                    DataCell(
+                                      IconButton(
+                                        tooltip: 'Eintrag bearbeiten',
+                                        icon: const Icon(Icons.edit_rounded),
+                                        color: const Color(0xFF0A84FF),
+                                        onPressed: () => widget.onEdit(flight),
+                                      ),
+                                    ),
+                                  ],
+                                );
+                              }),
+                            ),
+                          ),
+                        ),
+                      ),
+                      Positioned(
+                        left: 34,
+                        right: 34,
+                        top: 8,
+                        child: _FloatingTableScrollbar(
+                          controller: _horizontalController,
+                        ),
+                      ),
+                    ],
+                  ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _AircraftModelCell extends StatelessWidget {
+  final AircraftModel? aircraft;
+
+  const _AircraftModelCell({required this.aircraft});
+
+  @override
+  Widget build(BuildContext context) {
+    final photo =
+        aircraft?.photos.isEmpty ?? true ? null : aircraft!.photos.first;
+
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        ClipRRect(
+          borderRadius: BorderRadius.circular(7),
+          child: SizedBox.square(
+            dimension: 34,
+            child: photo == null
+                ? Container(
+                    color: const Color(0xFFE2E8F0),
+                    child: const Icon(
+                      Icons.flight_rounded,
+                      color: Color(0xFF0A84FF),
+                      size: 18,
+                    ),
+                  )
+                : Image.memory(
+                    _bytesFromDataUri(photo),
+                    fit: BoxFit.cover,
+                    errorBuilder: (context, error, stackTrace) => Container(
+                      color: const Color(0xFFE2E8F0),
+                      child: const Icon(
+                        Icons.flight_rounded,
+                        color: Color(0xFF0A84FF),
+                        size: 18,
+                      ),
+                    ),
+                  ),
+          ),
+        ),
+        const SizedBox(width: 9),
+        ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 115),
+          child: Text(
+            aircraft?.name ?? 'Unbekanntes Modell',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _FloatingTableScrollbar extends StatefulWidget {
+  final ScrollController controller;
+
+  const _FloatingTableScrollbar({required this.controller});
+
+  @override
+  State<_FloatingTableScrollbar> createState() =>
+      _FloatingTableScrollbarState();
+}
+
+class _FloatingTableScrollbarState extends State<_FloatingTableScrollbar> {
+  @override
+  void initState() {
+    super.initState();
+    widget.controller.addListener(_handleScroll);
+  }
+
+  @override
+  void didUpdateWidget(covariant _FloatingTableScrollbar oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.controller != widget.controller) {
+      oldWidget.controller.removeListener(_handleScroll);
+      widget.controller.addListener(_handleScroll);
+    }
+  }
+
+  @override
+  void dispose() {
+    widget.controller.removeListener(_handleScroll);
+    super.dispose();
+  }
+
+  void _handleScroll() => setState(() {});
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final hasClients = widget.controller.hasClients;
+        final maxExtent =
+            hasClients ? widget.controller.position.maxScrollExtent : 0.0;
+        final current = hasClients
+            ? widget.controller.position.pixels.clamp(0.0, maxExtent)
+            : 0.0;
+        final ratio = maxExtent <= 0 ? 0.0 : current / maxExtent;
+        final thumbWidth = (constraints.maxWidth * 0.36).clamp(92.0, 190.0);
+        final travel =
+            (constraints.maxWidth - thumbWidth).clamp(0.0, double.infinity);
+        final left = travel * ratio;
+
+        void jumpFromLocalDx(double dx) {
+          if (!hasClients ||
+              maxExtent <= 0 ||
+              constraints.maxWidth <= thumbWidth) {
+            return;
+          }
+          final nextRatio = ((dx - thumbWidth / 2) / travel).clamp(0.0, 1.0);
+          widget.controller.jumpTo(maxExtent * nextRatio);
+        }
+
+        return Opacity(
+          opacity: 0.55,
+          child: Container(
+            height: 16,
+            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 5),
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: 0.22),
+              borderRadius: BorderRadius.circular(999),
+              border: Border.all(
+                color: const Color(0xFFCBD5E1).withValues(alpha: 0.55),
+              ),
+            ),
+            child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTapDown: (details) => jumpFromLocalDx(details.localPosition.dx),
+              onHorizontalDragUpdate: (details) =>
+                  jumpFromLocalDx(details.localPosition.dx),
+              child: SizedBox(
+                height: 18,
+                child: Stack(
+                  alignment: Alignment.centerLeft,
+                  children: [
+                    Container(
+                      height: 3,
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFCBD5E1),
+                        borderRadius: BorderRadius.circular(999),
+                      ),
+                    ),
+                    Positioned(
+                      left: left,
+                      child: Container(
+                        width: thumbWidth,
+                        height: 6,
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF64748B),
+                          borderRadius: BorderRadius.circular(999),
+                        ),
+                      ),
+                    ),
                   ],
                 ),
               ),
             ),
+          ),
+        );
+      },
     );
   }
 }
@@ -267,6 +484,11 @@ class _TableHeader extends StatelessWidget {
 }
 
 class _CategoryCell extends StatelessWidget {
+  static const _kunstflugIconAsset = 'assets/icons/kunstflug_icon.png';
+  static const _motorflugIconAsset = 'assets/icons/motorflugz_icon.png';
+  static const _scaleIconAsset = 'assets/icons/scale_icon.png';
+  static const _seglerIconAsset = 'assets/icons/segler_icon.png';
+
   final String category;
 
   const _CategoryCell({required this.category});
@@ -276,16 +498,69 @@ class _CategoryCell extends StatelessWidget {
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Icon(
-          _categoryIcon(category),
-          color: const Color(0xFF0A84FF),
-          size: 18,
-        ),
+        _categoryImageAsset(category) != null
+            ? ClipRRect(
+                borderRadius: BorderRadius.circular(4),
+                child: Image.asset(
+                  _categoryImageAsset(category)!,
+                  width: _categoryImageWidth(category),
+                  height: 22,
+                  fit: BoxFit.contain,
+                ),
+              )
+            : Icon(
+                _categoryIcon(category),
+                color: const Color(0xFF0A84FF),
+                size: 18,
+              ),
         const SizedBox(width: 7),
         Text(category),
       ],
     );
   }
+}
+
+String? _categoryImageAsset(String category) {
+  if (_isKunstflugCategory(category)) {
+    return _CategoryCell._kunstflugIconAsset;
+  }
+  if (_isElektroCategory(category)) {
+    return _CategoryCell._motorflugIconAsset;
+  }
+  if (_isSeglerCategory(category)) {
+    return _CategoryCell._seglerIconAsset;
+  }
+  if (_isScaleCategory(category)) {
+    return _CategoryCell._scaleIconAsset;
+  }
+  return null;
+}
+
+double _categoryImageWidth(String category) {
+  if (_isSeglerCategory(category)) {
+    return 26;
+  }
+  if (_isScaleCategory(category)) {
+    return 25;
+  }
+  return 30;
+}
+
+bool _isKunstflugCategory(String category) {
+  return category.toLowerCase().contains('kunst');
+}
+
+bool _isElektroCategory(String category) {
+  final value = category.toLowerCase();
+  return value.contains('elektro') || value.contains('motor');
+}
+
+bool _isSeglerCategory(String category) {
+  return category.toLowerCase().contains('segler');
+}
+
+bool _isScaleCategory(String category) {
+  return category.toLowerCase().contains('scale');
 }
 
 IconData _categoryIcon(String category) {
@@ -331,6 +606,13 @@ IconData _categoryIcon(String category) {
     return Icons.paragliding_rounded;
   }
   return Icons.airplanemode_active_rounded;
+}
+
+Uint8List _bytesFromDataUri(String dataUri) {
+  final commaIndex = dataUri.indexOf(',');
+  final encoded =
+      commaIndex == -1 ? dataUri : dataUri.substring(commaIndex + 1);
+  return base64Decode(encoded);
 }
 
 double _totalFlightHours(List<FlightLogEntry> flights) {

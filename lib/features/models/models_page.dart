@@ -1,6 +1,9 @@
+import 'dart:async';
 import 'dart:convert';
+import 'dart:math' as math;
 import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart' show ValueListenable, ValueNotifier;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:image_picker/image_picker.dart';
@@ -12,7 +15,12 @@ import '../../shared/models/aircraft_model.dart';
 import '../../shared/providers/fleet_provider.dart';
 
 class ModelsPage extends ConsumerStatefulWidget {
-  const ModelsPage({super.key});
+  final String? initialSelectedAircraftId;
+
+  const ModelsPage({
+    super.key,
+    this.initialSelectedAircraftId,
+  });
 
   @override
   ConsumerState<ModelsPage> createState() => _ModelsPageState();
@@ -20,6 +28,21 @@ class ModelsPage extends ConsumerStatefulWidget {
 
 class _ModelsPageState extends ConsumerState<ModelsPage> {
   String? _selectedAircraftId;
+
+  @override
+  void initState() {
+    super.initState();
+    _selectedAircraftId = widget.initialSelectedAircraftId;
+  }
+
+  @override
+  void didUpdateWidget(covariant ModelsPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.initialSelectedAircraftId !=
+        widget.initialSelectedAircraftId) {
+      _selectedAircraftId = widget.initialSelectedAircraftId;
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -48,9 +71,6 @@ class _ModelsPageState extends ConsumerState<ModelsPage> {
             }
 
             final selected = selectedAircraft!;
-            final assignedBatteries = fleet.batteries
-                .where((battery) => battery.assignedAircraftId == selected.id)
-                .toList();
             if (isWide) {
               return SizedBox(
                 height: 680,
@@ -73,10 +93,11 @@ class _ModelsPageState extends ConsumerState<ModelsPage> {
                           constraints: const BoxConstraints(maxWidth: 620),
                           child: _AircraftDetails(
                             aircraft: selected,
-                            assignedBatteries: assignedBatteries,
                             onEdit: () => _showAircraftDialog(context,
                                 aircraft: selected),
                             onDelete: () => _confirmDelete(context, selected),
+                            onStartFlight: () =>
+                                _showFlightTimer(context, selected),
                             onStatusChanged: (status) => ref
                                 .read(fleetProvider.notifier)
                                 .updateStatus(selected.id, status),
@@ -104,10 +125,10 @@ class _ModelsPageState extends ConsumerState<ModelsPage> {
                   height: 820,
                   child: _AircraftDetails(
                     aircraft: selected,
-                    assignedBatteries: assignedBatteries,
                     onEdit: () =>
                         _showAircraftDialog(context, aircraft: selected),
                     onDelete: () => _confirmDelete(context, selected),
+                    onStartFlight: () => _showFlightTimer(context, selected),
                     onStatusChanged: (status) => ref
                         .read(fleetProvider.notifier)
                         .updateStatus(selected.id, status),
@@ -142,6 +163,7 @@ class _ModelsPageState extends ConsumerState<ModelsPage> {
       context: context,
       builder: (context) => _AircraftDialog(
         aircraft: editingAircraft,
+        transmitterOptions: ref.read(fleetProvider).pilotProfile.transmitters,
         onSubmit: (aircraft) {
           final notifier = ref.read(fleetProvider.notifier);
           if (editingAircraft == null) {
@@ -184,6 +206,53 @@ class _ModelsPageState extends ConsumerState<ModelsPage> {
 
     ref.read(fleetProvider.notifier).deleteAircraft(aircraft.id);
     setState(() => _selectedAircraftId = null);
+  }
+
+  Future<void> _showFlightTimer(
+    BuildContext context,
+    AircraftModel aircraft,
+  ) async {
+    final pilotProfile = ref.read(fleetProvider).pilotProfile;
+    final result = await showDialog<_FlightTimerResult>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => _FlightTimerDialog(
+        aircraft: aircraft,
+        homeAirfield: pilotProfile.homeAirfield,
+        flightAreas: pilotProfile.flightAreas,
+      ),
+    );
+
+    if (result == null || result.elapsed.inSeconds <= 0) {
+      return;
+    }
+
+    final durationMinutes =
+        (result.elapsed.inSeconds / 60).ceil().clamp(1, 999).toInt();
+    ref.read(fleetProvider.notifier).addFlight(
+          FlightLogEntry(
+            id: const Uuid().v4(),
+            aircraftId: aircraft.id,
+            date: result.startedAt,
+            location: result.location,
+            durationMinutes: durationMinutes,
+            batteryPacks: 1,
+            pilot: pilotProfile.name,
+            notes: 'Automatisch per Flugtimer gespeichert.',
+          ),
+        );
+
+    if (!context.mounted) {
+      return;
+    }
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          'Flug mit ${aircraft.name} gespeichert: $durationMinutes min.',
+        ),
+      ),
+    );
   }
 }
 
@@ -341,23 +410,22 @@ class _AircraftListItem extends StatelessWidget {
 
 class _AircraftDetails extends StatelessWidget {
   final AircraftModel aircraft;
-  final List<BatteryPack> assignedBatteries;
   final ValueChanged<AircraftStatus> onStatusChanged;
   final VoidCallback onEdit;
   final VoidCallback onDelete;
+  final VoidCallback onStartFlight;
 
   const _AircraftDetails({
     required this.aircraft,
-    required this.assignedBatteries,
     required this.onStatusChanged,
     required this.onEdit,
     required this.onDelete,
+    required this.onStartFlight,
   });
 
   @override
   Widget build(BuildContext context) {
     final formatter = DateFormat('dd.MM.yyyy');
-    final statusColor = _statusColor(aircraft.status);
 
     return Card(
       clipBehavior: Clip.antiAlias,
@@ -373,93 +441,44 @@ class _AircraftDetails extends StatelessWidget {
                 child: Stack(
                   fit: StackFit.expand,
                   children: [
-                    _AircraftPhoto(
-                      aircraft: aircraft,
-                      fit: BoxFit.cover,
-                    ),
+                    _AircraftPhotoCarousel(aircraft: aircraft),
                     Positioned(
                       left: 22,
                       right: 22,
                       bottom: 20,
-                      child: Row(
-                        crossAxisAlignment: CrossAxisAlignment.end,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  aircraft.name.toUpperCase(),
-                                  style: const TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 30,
-                                    fontWeight: FontWeight.w900,
-                                    fontStyle: FontStyle.italic,
-                                    shadows: [
-                                      Shadow(
-                                        color: Color(0x99000000),
-                                        blurRadius: 8,
-                                        offset: Offset(0, 2),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                                const SizedBox(height: 5),
-                                Text(
-                                  '${aircraft.manufacturer} - ${aircraft.registration}',
-                                  style: const TextStyle(
-                                    color: Color(0xFFE0F2FE),
-                                    fontSize: 15,
-                                    fontWeight: FontWeight.w800,
-                                    shadows: [
-                                      Shadow(
-                                        color: Color(0x99000000),
-                                        blurRadius: 6,
-                                        offset: Offset(0, 2),
-                                      ),
-                                    ],
-                                  ),
+                          Text(
+                            aircraft.name.toUpperCase(),
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 30,
+                              fontWeight: FontWeight.w900,
+                              fontStyle: FontStyle.italic,
+                              shadows: [
+                                Shadow(
+                                  color: Color(0x99000000),
+                                  blurRadius: 8,
+                                  offset: Offset(0, 2),
                                 ),
                               ],
                             ),
                           ),
-                          PopupMenuButton<AircraftStatus>(
-                            tooltip: 'Status aendern',
-                            onSelected: onStatusChanged,
-                            itemBuilder: (context) => [
-                              for (final status in AircraftStatus.values)
-                                PopupMenuItem(
-                                  value: status,
-                                  child: Text(status.label),
+                          const SizedBox(height: 5),
+                          Text(
+                            '${aircraft.manufacturer} - ${aircraft.registration}',
+                            style: const TextStyle(
+                              color: Color(0xFFE0F2FE),
+                              fontSize: 15,
+                              fontWeight: FontWeight.w800,
+                              shadows: [
+                                Shadow(
+                                  color: Color(0x99000000),
+                                  blurRadius: 6,
+                                  offset: Offset(0, 2),
                                 ),
-                            ],
-                            child: Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 12,
-                                vertical: 9,
-                              ),
-                              decoration: BoxDecoration(
-                                color: statusColor,
-                                borderRadius: BorderRadius.circular(8),
-                              ),
-                              child: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Text(
-                                    aircraft.status.label,
-                                    style: const TextStyle(
-                                      color: Colors.white,
-                                      fontWeight: FontWeight.w900,
-                                    ),
-                                  ),
-                                  const SizedBox(width: 6),
-                                  const Icon(
-                                    Icons.expand_more_rounded,
-                                    color: Colors.white,
-                                    size: 18,
-                                  ),
-                                ],
-                              ),
+                              ],
                             ),
                           ),
                         ],
@@ -519,6 +538,27 @@ class _AircraftDetails extends StatelessWidget {
               ),
             ),
           ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 10, 12, 0),
+            child: Align(
+              alignment: Alignment.center,
+              child: SizedBox(
+                height: 36,
+                child: FilledButton.icon(
+                  onPressed: onStartFlight,
+                  style: FilledButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(horizontal: 14),
+                    textStyle: const TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                  icon: const Icon(Icons.flight_takeoff_rounded, size: 18),
+                  label: const Text('Flug starten'),
+                ),
+              ),
+            ),
+          ),
           Expanded(
             child: SingleChildScrollView(
               padding: const EdgeInsets.all(22),
@@ -530,65 +570,37 @@ class _AircraftDetails extends StatelessWidget {
                     formatter: formatter,
                   ),
                   const SizedBox(height: 22),
-                  _FlightTimeGraphic(aircraft: aircraft),
-                  const SizedBox(height: 22),
-                  _AssignedBatteriesPanel(batteries: assignedBatteries),
-                  if (aircraft.photos.length > 1) ...[
+                  if (aircraft.status == AircraftStatus.maintenance) ...[
+                    _InfoPanel(
+                      title: 'Reparatur',
+                      icon: Icons.build_circle_rounded,
+                      iconColor: const Color(0xFFEA580C),
+                      children: [
+                        Text(
+                          _repairInfo(aircraft),
+                          style: const TextStyle(
+                            color: Color(0xFF334155),
+                            height: 1.45,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
+                    ),
                     const SizedBox(height: 22),
-                    _PhotoGallery(photos: aircraft.photos),
                   ],
-                  const SizedBox(height: 22),
-                  LayoutBuilder(
-                    builder: (context, constraints) {
-                      final twoColumns = constraints.maxWidth >= 650;
-                      final maintenance = _InfoPanel(
-                        title: 'Wartung',
-                        icon: Icons.build_circle_rounded,
-                        children: [
-                          _InfoLine(
-                            label: 'Letzte Wartung',
-                            value: formatter.format(aircraft.lastService),
-                          ),
-                          _InfoLine(
-                            label: 'Naechste Wartung',
-                            value: formatter.format(aircraft.nextService),
-                          ),
-                        ],
-                      );
-                      final notes = _InfoPanel(
-                        title: 'Notizen',
-                        icon: Icons.notes_rounded,
-                        children: [
-                          Text(
-                            aircraft.notes,
-                            style: const TextStyle(
-                              color: Color(0xFF334155),
-                              height: 1.45,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                        ],
-                      );
-
-                      if (twoColumns) {
-                        return Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Expanded(child: maintenance),
-                            const SizedBox(width: 14),
-                            Expanded(child: notes),
-                          ],
-                        );
-                      }
-
-                      return Column(
-                        children: [
-                          maintenance,
-                          const SizedBox(height: 14),
-                          notes,
-                        ],
-                      );
-                    },
+                  _InfoPanel(
+                    title: 'Notizen',
+                    icon: Icons.notes_rounded,
+                    children: [
+                      Text(
+                        aircraft.notes,
+                        style: const TextStyle(
+                          color: Color(0xFF334155),
+                          height: 1.45,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
                   ),
                 ],
               ),
@@ -600,17 +612,27 @@ class _AircraftDetails extends StatelessWidget {
   }
 }
 
+String _repairInfo(AircraftModel aircraft) {
+  if (aircraft.repairNotes.trim().isNotEmpty) {
+    return aircraft.repairNotes.trim();
+  }
+  final trimmed = aircraft.notes.trim();
+  if (trimmed.startsWith('Reparatur:')) {
+    final firstLine = trimmed.split('\n').first;
+    return firstLine.replaceFirst('Reparatur:', '').trim();
+  }
+  return 'Noch keine Reparaturhinweise hinterlegt.';
+}
+
 class _AircraftPhoto extends StatelessWidget {
   final AircraftModel aircraft;
   final double? width;
   final double? height;
-  final BoxFit fit;
 
   const _AircraftPhoto({
     required this.aircraft,
     this.width,
     this.height,
-    this.fit = BoxFit.cover,
   });
 
   @override
@@ -626,18 +648,18 @@ class _AircraftPhoto extends StatelessWidget {
         child: photoDataUri == null
             ? Image.asset(
                 'assets/splash/landing_page.png',
-                fit: fit,
+                fit: BoxFit.cover,
                 alignment: _photoAlignment(aircraft),
                 filterQuality: FilterQuality.high,
               )
             : Image.memory(
                 _bytesFromDataUri(photoDataUri),
-                fit: fit,
+                fit: BoxFit.cover,
                 filterQuality: FilterQuality.high,
                 gaplessPlayback: true,
                 errorBuilder: (context, error, stackTrace) => Image.asset(
                   'assets/splash/landing_page.png',
-                  fit: fit,
+                  fit: BoxFit.cover,
                   alignment: _photoAlignment(aircraft),
                   filterQuality: FilterQuality.high,
                 ),
@@ -647,218 +669,530 @@ class _AircraftPhoto extends StatelessWidget {
   }
 }
 
-class _PhotoGallery extends StatelessWidget {
-  final List<String> photos;
-
-  const _PhotoGallery({required this.photos});
-
-  @override
-  Widget build(BuildContext context) {
-    return _InfoPanel(
-      title: 'Fotogalerie',
-      icon: Icons.photo_library_rounded,
-      children: [
-        SizedBox(
-          height: 96,
-          child: ListView.separated(
-            scrollDirection: Axis.horizontal,
-            itemCount: photos.length,
-            separatorBuilder: (context, index) => const SizedBox(width: 10),
-            itemBuilder: (context, index) => ClipRRect(
-              borderRadius: BorderRadius.circular(8),
-              child: SizedBox(
-                width: 132,
-                height: 96,
-                child: Image.memory(
-                  _bytesFromDataUri(photos[index]),
-                  fit: BoxFit.cover,
-                  filterQuality: FilterQuality.high,
-                  gaplessPlayback: true,
-                ),
-              ),
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class _FlightTimeGraphic extends StatelessWidget {
+class _AircraftPhotoCarousel extends StatefulWidget {
   final AircraftModel aircraft;
 
-  const _FlightTimeGraphic({required this.aircraft});
+  const _AircraftPhotoCarousel({required this.aircraft});
 
   @override
-  Widget build(BuildContext context) {
-    final maxHours =
-        (aircraft.flightHours < 25 ? 25 : aircraft.flightHours).ceilToDouble();
-    final averageMinutes = aircraft.totalFlights == 0
-        ? 0
-        : (aircraft.flightHours * 60 / aircraft.totalFlights).round();
-    final segments = [
-      _FlightTimeSegment(
-          'Gesamt', aircraft.flightHours, const Color(0xFF0A84FF)),
-      _FlightTimeSegment(
-        'Starts',
-        aircraft.totalFlights / 4,
-        const Color(0xFF16A34A),
-      ),
-      _FlightTimeSegment(
-        'Schnitt',
-        averageMinutes / 3,
-        const Color(0xFFFFB84D),
-      ),
-    ];
+  State<_AircraftPhotoCarousel> createState() => _AircraftPhotoCarouselState();
+}
 
-    return _InfoPanel(
-      title: 'Flugzeit-Grafik',
-      icon: Icons.bar_chart_rounded,
-      children: [
-        for (final segment in segments)
-          Padding(
-            padding: const EdgeInsets.only(bottom: 12),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        segment.label,
-                        style: const TextStyle(fontWeight: FontWeight.w900),
-                      ),
-                    ),
-                    Text(
-                      switch (segment.label) {
-                        'Gesamt' =>
-                          '${aircraft.flightHours.toStringAsFixed(1)} h',
-                        'Starts' => '${aircraft.totalFlights} Fluege',
-                        _ => '$averageMinutes min',
-                      },
-                      style: const TextStyle(
-                        color: Color(0xFF475569),
-                        fontWeight: FontWeight.w800,
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 7),
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(8),
-                  child: LinearProgressIndicator(
-                    minHeight: 14,
-                    value: (segment.value / maxHours).clamp(0.04, 1),
-                    color: segment.color,
-                    backgroundColor: const Color(0xFFE2E8F0),
-                  ),
-                ),
-              ],
-            ),
-          ),
-      ],
-    );
+class _AircraftPhotoCarouselState extends State<_AircraftPhotoCarousel> {
+  int _index = 0;
+
+  @override
+  void didUpdateWidget(covariant _AircraftPhotoCarousel oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.aircraft.id != widget.aircraft.id) {
+      _index = 0;
+    }
   }
-}
-
-class _FlightTimeSegment {
-  final String label;
-  final double value;
-  final Color color;
-
-  const _FlightTimeSegment(this.label, this.value, this.color);
-}
-
-class _AssignedBatteriesPanel extends StatelessWidget {
-  final List<BatteryPack> batteries;
-
-  const _AssignedBatteriesPanel({required this.batteries});
 
   @override
   Widget build(BuildContext context) {
-    return _InfoPanel(
-      title: 'Zugeordnete Akkus',
-      icon: Icons.battery_charging_full_rounded,
+    final photos = widget.aircraft.photos;
+    final hasMultiplePhotos = photos.length > 1;
+    final safeIndex = photos.isEmpty ? 0 : _index.clamp(0, photos.length - 1);
+
+    return Stack(
+      fit: StackFit.expand,
       children: [
-        if (batteries.isEmpty)
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(14),
-            decoration: BoxDecoration(
-              color: const Color(0xFFEFF6FF),
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: const Text(
-              'Diesem Modell sind noch keine Akkus zugeordnet.',
-              style: TextStyle(
-                color: Color(0xFF334155),
-                fontWeight: FontWeight.w800,
-              ),
-            ),
+        if (photos.isEmpty)
+          Image.asset(
+            'assets/splash/landing_page.png',
+            fit: BoxFit.cover,
+            alignment: _photoAlignment(widget.aircraft),
+            filterQuality: FilterQuality.high,
           )
         else
-          SizedBox(
-            height: 152,
-            child: ListView.separated(
-              scrollDirection: Axis.horizontal,
-              itemCount: batteries.length,
-              separatorBuilder: (context, index) => const SizedBox(width: 12),
-              itemBuilder: (context, index) =>
-                  _BatteryImageCard(battery: batteries[index]),
+          Image.memory(
+            _bytesFromDataUri(photos[safeIndex]),
+            fit: BoxFit.cover,
+            filterQuality: FilterQuality.high,
+            gaplessPlayback: true,
+          ),
+        if (hasMultiplePhotos) ...[
+          Positioned(
+            left: 12,
+            top: 0,
+            bottom: 0,
+            child: _PhotoArrowButton(
+              icon: Icons.chevron_left_rounded,
+              onTap: () => setState(
+                () => _index = (_index - 1 + photos.length) % photos.length,
+              ),
             ),
           ),
+          Positioned(
+            right: 12,
+            top: 0,
+            bottom: 0,
+            child: _PhotoArrowButton(
+              icon: Icons.chevron_right_rounded,
+              onTap: () =>
+                  setState(() => _index = (_index + 1) % photos.length),
+            ),
+          ),
+        ],
       ],
     );
   }
 }
 
-class _BatteryImageCard extends StatelessWidget {
-  final BatteryPack battery;
+class _PhotoArrowButton extends StatelessWidget {
+  final IconData icon;
+  final VoidCallback onTap;
 
-  const _BatteryImageCard({required this.battery});
+  const _PhotoArrowButton({
+    required this.icon,
+    required this.onTap,
+  });
 
   @override
   Widget build(BuildContext context) {
-    final color = switch (battery.status) {
-      BatteryStatus.charged => const Color(0xFF16A34A),
-      BatteryStatus.storage => const Color(0xFF0A84FF),
-      BatteryStatus.charging => const Color(0xFF7C3AED),
-      BatteryStatus.service => const Color(0xFFEA580C),
-    };
+    return Center(
+      child: Material(
+        color: Colors.black.withValues(alpha: 0.42),
+        shape: const CircleBorder(),
+        child: InkWell(
+          customBorder: const CircleBorder(),
+          onTap: onTap,
+          child: SizedBox(
+            width: 42,
+            height: 42,
+            child: Icon(icon, color: Colors.white, size: 30),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _FlightTimerResult {
+  final DateTime startedAt;
+  final Duration elapsed;
+  final String location;
+
+  const _FlightTimerResult({
+    required this.startedAt,
+    required this.elapsed,
+    required this.location,
+  });
+}
+
+class _FlightTimerDialog extends StatefulWidget {
+  final AircraftModel aircraft;
+  final String homeAirfield;
+  final List<String> flightAreas;
+
+  const _FlightTimerDialog({
+    required this.aircraft,
+    required this.homeAirfield,
+    required this.flightAreas,
+  });
+
+  @override
+  State<_FlightTimerDialog> createState() => _FlightTimerDialogState();
+}
+
+class _FlightTimerDialogState extends State<_FlightTimerDialog> {
+  DateTime? _startedAt;
+  DateTime? _lastTickAt;
+  Duration _elapsed = Duration.zero;
+  final ValueNotifier<Duration> _elapsedNotifier = ValueNotifier(Duration.zero);
+  final TextEditingController _customLocationController =
+      TextEditingController();
+  String? _selectedHomeLocation;
+  Timer? _timer;
+  bool _paused = false;
+  bool _customLocation = false;
+
+  String get _selectedLocation {
+    final home = _selectedHomeLocation?.trim() ?? widget.homeAirfield.trim();
+    if (_customLocation) {
+      final custom = _customLocationController.text.trim();
+      return custom.isEmpty
+          ? (home.isEmpty ? 'Eigener Startplatz' : home)
+          : custom;
+    }
+    return home.isEmpty ? 'Heimatflugplatz' : home;
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _selectedHomeLocation = _availableHomeLocations.first;
+    _customLocationController.addListener(_syncCustomLocationPreview);
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    _elapsedNotifier.dispose();
+    _customLocationController.removeListener(_syncCustomLocationPreview);
+    _customLocationController.dispose();
+    super.dispose();
+  }
+
+  void _syncCustomLocationPreview() {
+    if (mounted && _customLocation) {
+      setState(() {});
+    }
+  }
+
+  List<String> get _availableHomeLocations {
+    final values = <String>[
+      widget.homeAirfield.trim(),
+      for (final area in widget.flightAreas) area.trim(),
+    ].where((area) => area.isNotEmpty).toSet().toList();
+    return values.isEmpty ? ['Heimatflugplatz'] : values;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final photoDataUri =
+        widget.aircraft.photos.isEmpty ? null : widget.aircraft.photos.first;
+    final running = _startedAt != null;
+
+    return Dialog(
+      backgroundColor: Colors.transparent,
+      surfaceTintColor: Colors.transparent,
+      insetPadding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+      child: SizedBox(
+        width: 640,
+        height: 871,
+        child: Stack(
+          children: [
+            Positioned.fill(
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(22),
+                child: Image.asset(
+                  'assets/widgets/timer_bg.jpg',
+                  fit: BoxFit.cover,
+                  filterQuality: FilterQuality.high,
+                ),
+              ),
+            ),
+            Positioned(
+              left: 30,
+              top: 123,
+              width: 329,
+              height: 183,
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(10),
+                child: photoDataUri == null
+                    ? Image.asset(
+                        'assets/splash/landing_page.png',
+                        fit: BoxFit.cover,
+                        alignment: _photoAlignment(widget.aircraft),
+                        filterQuality: FilterQuality.high,
+                      )
+                    : Image.memory(
+                        _bytesFromDataUri(photoDataUri),
+                        fit: BoxFit.cover,
+                        filterQuality: FilterQuality.high,
+                        gaplessPlayback: true,
+                      ),
+              ),
+            ),
+            if (!running)
+              Positioned(
+                right: 28,
+                top: 18,
+                child: IconButton(
+                  tooltip: 'Schliessen',
+                  onPressed: () => Navigator.of(context).pop(),
+                  icon: const Icon(Icons.close_rounded),
+                  color: const Color(0xFFF4F1DE),
+                  style: IconButton.styleFrom(
+                    backgroundColor: Colors.black.withValues(alpha: 0.26),
+                  ),
+                ),
+              ),
+            Positioned(
+              left: 55,
+              top: 537,
+              width: 88,
+              height: 88,
+              child: _PanelStatusLight(active: running && !_paused),
+            ),
+            Positioned(
+              left: 187,
+              top: 436,
+              width: 277,
+              height: 277,
+              child: _CockpitTimerGauge(
+                elapsedListenable: _elapsedNotifier,
+                running: running && !_paused,
+                paused: _paused,
+              ),
+            ),
+            Positioned(
+              left: 42,
+              top: 361,
+              width: 102,
+              height: 44,
+              child: _CockpitButton(
+                label: 'Reset',
+                icon: Icons.restart_alt_rounded,
+                onPressed: _resetTimer,
+                accent: const Color(0xFF93C5FD),
+              ),
+            ),
+            Positioned(
+              left: 201,
+              top: 361,
+              width: 102,
+              height: 44,
+              child: _CockpitButton(
+                label: 'Verwerfen',
+                icon: Icons.delete_outline_rounded,
+                onPressed: _discardFlight,
+                accent: const Color(0xFFFCA5A5),
+                compact: true,
+              ),
+            ),
+            Positioned(
+              left: 351,
+              top: 361,
+              width: 102,
+              height: 44,
+              child: _CockpitButton(
+                label: 'Start',
+                icon: Icons.play_arrow_rounded,
+                onPressed: running ? null : _startTimer,
+                accent: const Color(0xFF38BDF8),
+              ),
+            ),
+            Positioned(
+              left: 508,
+              top: 361,
+              width: 102,
+              height: 44,
+              child: _CockpitButton(
+                label: _paused ? 'Weiter' : 'Pause',
+                icon: _paused ? Icons.play_arrow_rounded : Icons.pause_rounded,
+                onPressed: running ? _togglePause : null,
+                accent: const Color(0xFFFACC15),
+              ),
+            ),
+            Positioned(
+              left: 508,
+              top: 461,
+              width: 102,
+              height: 44,
+              child: _CockpitButton(
+                label: 'Beenden',
+                icon: Icons.stop_rounded,
+                onPressed: running ? _finishFlight : null,
+                accent: const Color(0xFF22C55E),
+                compact: true,
+              ),
+            ),
+            Positioned(
+              left: 86,
+              top: 758,
+              width: 470,
+              child: _FlightLocationSelector(
+                homeAirfield: widget.homeAirfield,
+                flightAreas: _availableHomeLocations,
+                selectedHomeLocation:
+                    _selectedHomeLocation ?? _availableHomeLocations.first,
+                customLocation: _customLocation,
+                controller: _customLocationController,
+                onHomeLocationChanged: (location) =>
+                    setState(() => _selectedHomeLocation = location),
+                onModeChanged: (custom) =>
+                    setState(() => _customLocation = custom),
+              ),
+            ),
+            Positioned(
+              left: 376,
+              top: 132,
+              width: 222,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    widget.aircraft.name,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: Color(0xFFF4F1DE),
+                      fontSize: 30,
+                      fontWeight: FontWeight.w900,
+                      height: 1.02,
+                      shadows: [
+                        Shadow(
+                          color: Colors.black,
+                          blurRadius: 6,
+                          offset: Offset(0, 2),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  Text(
+                    widget.aircraft.type,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: Color(0xFFD6B98C),
+                      fontSize: 15,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                  const SizedBox(height: 7),
+                  Text(
+                    '${widget.aircraft.registration}\n${widget.aircraft.flightHours.toStringAsFixed(1)} h gesamt',
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: const Color(0xFFF4F1DE).withValues(alpha: 0.72),
+                      fontSize: 13,
+                      fontWeight: FontWeight.w800,
+                      height: 1.2,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _startTimer() {
+    _timer?.cancel();
+    final now = DateTime.now();
+    setState(() {
+      _startedAt = now;
+      _lastTickAt = now;
+      _paused = false;
+      _elapsed = Duration.zero;
+      _elapsedNotifier.value = _elapsed;
+    });
+
+    _timer = Timer.periodic(const Duration(milliseconds: 33), (_) {
+      if (!mounted || _paused) {
+        return;
+      }
+      final now = DateTime.now();
+      final previous = _lastTickAt ?? now;
+      _elapsed += now.difference(previous);
+      _lastTickAt = now;
+      _elapsedNotifier.value = _elapsed;
+    });
+  }
+
+  void _resetTimer() {
+    final now = DateTime.now();
+    setState(() {
+      _elapsed = Duration.zero;
+      _elapsedNotifier.value = _elapsed;
+      if (_startedAt != null) {
+        _startedAt = now;
+        _lastTickAt = now;
+      }
+    });
+  }
+
+  void _togglePause() {
+    setState(() {
+      if (_paused) {
+        _lastTickAt = DateTime.now();
+        _paused = false;
+      } else {
+        _paused = true;
+      }
+    });
+  }
+
+  void _finishFlight() {
+    final startedAt = _startedAt;
+    if (startedAt == null) {
+      return;
+    }
+
+    Navigator.of(context).pop(
+      _FlightTimerResult(
+        startedAt: startedAt,
+        elapsed: _elapsed,
+        location: _selectedLocation,
+      ),
+    );
+  }
+
+  void _discardFlight() {
+    Navigator.of(context).pop();
+  }
+}
+
+class _FlightLocationSelector extends StatelessWidget {
+  final String homeAirfield;
+  final List<String> flightAreas;
+  final String selectedHomeLocation;
+  final bool customLocation;
+  final TextEditingController controller;
+  final ValueChanged<String> onHomeLocationChanged;
+  final ValueChanged<bool> onModeChanged;
+
+  const _FlightLocationSelector({
+    required this.homeAirfield,
+    required this.flightAreas,
+    required this.selectedHomeLocation,
+    required this.customLocation,
+    required this.controller,
+    required this.onHomeLocationChanged,
+    required this.onModeChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final homeOptions = flightAreas.isEmpty
+        ? [
+            homeAirfield.trim().isEmpty
+                ? 'Heimatflugplatz'
+                : homeAirfield.trim(),
+          ]
+        : flightAreas;
+    final selectedHome = homeOptions.contains(selectedHomeLocation)
+        ? selectedHomeLocation
+        : homeOptions.first;
 
     return Container(
-      width: 190,
-      padding: const EdgeInsets.all(12),
+      padding: const EdgeInsets.all(10),
       decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: const Color(0xFFE2E8F0)),
+        color: Colors.black.withValues(alpha: 0.34),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: const Color(0xFFD6B98C).withValues(alpha: 0.20),
+        ),
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      child: Row(
         children: [
           Expanded(
-            child: CustomPaint(
-              painter: _BatteryPackPainter(
-                color: color,
-                percent: battery.chargePercent / 100,
-              ),
-              child: const SizedBox.expand(),
+            child: _StartPlaceOptionField(
+              selected: !customLocation,
+              label: 'Heimatflugplatz',
+              value: selectedHome,
+              options: homeOptions,
+              onOptionChanged: onHomeLocationChanged,
+              readOnly: true,
+              onSelected: () => onModeChanged(false),
             ),
           ),
-          const SizedBox(height: 10),
-          Text(
-            battery.label,
-            overflow: TextOverflow.ellipsis,
-            style: const TextStyle(fontWeight: FontWeight.w900),
-          ),
-          Text(
-            '${battery.cells}S ${battery.capacityMah} mAh - ${battery.status.label}',
-            overflow: TextOverflow.ellipsis,
-            style: const TextStyle(
-              color: Color(0xFF64748B),
-              fontSize: 12,
-              fontWeight: FontWeight.w700,
+          const SizedBox(width: 12),
+          Expanded(
+            child: _StartPlaceOptionField(
+              selected: customLocation,
+              label: 'Anderer Startplatz',
+              value: null,
+              controller: controller,
+              readOnly: false,
+              onSelected: () => onModeChanged(true),
             ),
           ),
         ],
@@ -867,80 +1201,663 @@ class _BatteryImageCard extends StatelessWidget {
   }
 }
 
-class _BatteryPackPainter extends CustomPainter {
-  final Color color;
-  final double percent;
+class _StartPlaceOptionField extends StatelessWidget {
+  final bool selected;
+  final String label;
+  final String? value;
+  final List<String> options;
+  final ValueChanged<String>? onOptionChanged;
+  final TextEditingController? controller;
+  final bool readOnly;
+  final VoidCallback onSelected;
 
-  const _BatteryPackPainter({
-    required this.color,
-    required this.percent,
+  const _StartPlaceOptionField({
+    required this.selected,
+    required this.label,
+    required this.value,
+    this.options = const [],
+    this.onOptionChanged,
+    this.controller,
+    required this.readOnly,
+    required this.onSelected,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    const fillColor = Color(0xFF0D0C0A);
+    const textColor = Color(0xFFF4F1DE);
+
+    return InkWell(
+      borderRadius: BorderRadius.circular(10),
+      onTap: onSelected,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 140),
+        padding: const EdgeInsets.all(8),
+        decoration: BoxDecoration(
+          color: selected
+              ? const Color(0xFF1E1A14)
+              : Colors.black.withValues(alpha: 0.18),
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(
+            color: selected
+                ? const Color(0xFF22C55E).withValues(alpha: 0.82)
+                : const Color(0xFFD6B98C).withValues(alpha: 0.14),
+          ),
+        ),
+        child: Row(
+          children: [
+            AnimatedContainer(
+              duration: const Duration(milliseconds: 140),
+              width: 18,
+              height: 18,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                border: Border.all(
+                  color: selected
+                      ? const Color(0xFF22C55E)
+                      : const Color(0xFF8A7A63),
+                  width: 2,
+                ),
+                color: selected
+                    ? const Color(0xFF16A34A)
+                    : Colors.black.withValues(alpha: 0.25),
+                boxShadow: selected
+                    ? [
+                        BoxShadow(
+                          color:
+                              const Color(0xFF22C55E).withValues(alpha: 0.58),
+                          blurRadius: 8,
+                          spreadRadius: 1,
+                        ),
+                      ]
+                    : null,
+              ),
+              child: selected
+                  ? Center(
+                      child: Container(
+                        width: 7,
+                        height: 7,
+                        decoration: const BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: Color(0xFFEFFFEF),
+                        ),
+                      ),
+                    )
+                  : null,
+            ),
+            const SizedBox(width: 6),
+            Expanded(
+              child: readOnly && options.isNotEmpty
+                  ? DropdownButtonFormField<String>(
+                      initialValue:
+                          options.contains(value) ? value : options.first,
+                      items: [
+                        for (final option in options)
+                          DropdownMenuItem(
+                            value: option,
+                            child: Text(
+                              option,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                      ],
+                      onChanged: selected
+                          ? (location) {
+                              if (location != null) {
+                                onOptionChanged?.call(location);
+                              }
+                            }
+                          : null,
+                      decoration: _startPlaceDecoration(
+                        label: label,
+                        hint: value,
+                        fillColor: fillColor,
+                        textColor: textColor,
+                      ),
+                      dropdownColor: const Color(0xFF16120E),
+                      style: const TextStyle(
+                        color: textColor,
+                        fontWeight: FontWeight.w800,
+                        fontSize: 12,
+                      ),
+                    )
+                  : TextField(
+                      controller: controller,
+                      readOnly: readOnly,
+                      enabled: selected || readOnly,
+                      onTap: onSelected,
+                      style: const TextStyle(
+                        color: textColor,
+                        fontWeight: FontWeight.w800,
+                        fontSize: 12,
+                      ),
+                      decoration: _startPlaceDecoration(
+                        label: label,
+                        hint: readOnly ? value : 'Startplatz eintragen',
+                        fillColor: fillColor,
+                        textColor: textColor,
+                      ),
+                    ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+InputDecoration _startPlaceDecoration({
+  required String label,
+  required String? hint,
+  required Color fillColor,
+  required Color textColor,
+}) {
+  return InputDecoration(
+    labelText: label,
+    labelStyle: const TextStyle(
+      color: Color(0xFFE6D3B1),
+      fontSize: 12,
+      fontWeight: FontWeight.w900,
+    ),
+    hintText: hint,
+    hintStyle: TextStyle(
+      color: textColor.withValues(alpha: 0.92),
+      fontWeight: FontWeight.w800,
+    ),
+    isDense: true,
+    filled: true,
+    fillColor: fillColor,
+    contentPadding: const EdgeInsets.symmetric(
+      horizontal: 10,
+      vertical: 10,
+    ),
+    border: OutlineInputBorder(
+      borderRadius: BorderRadius.circular(8),
+      borderSide: BorderSide(
+        color: const Color(0xFFD6B98C).withValues(alpha: 0.18),
+      ),
+    ),
+    enabledBorder: OutlineInputBorder(
+      borderRadius: BorderRadius.circular(8),
+      borderSide: BorderSide(
+        color: const Color(0xFFD6B98C).withValues(alpha: 0.18),
+      ),
+    ),
+    disabledBorder: OutlineInputBorder(
+      borderRadius: BorderRadius.circular(8),
+      borderSide: BorderSide(
+        color: const Color(0xFFD6B98C).withValues(alpha: 0.18),
+      ),
+    ),
+    focusedBorder: OutlineInputBorder(
+      borderRadius: BorderRadius.circular(8),
+      borderSide: const BorderSide(color: Color(0xFFE6D3B1)),
+    ),
+  );
+}
+
+class _CockpitTimerGauge extends StatelessWidget {
+  final ValueListenable<Duration> elapsedListenable;
+  final bool running;
+  final bool paused;
+
+  const _CockpitTimerGauge({
+    required this.elapsedListenable,
+    required this.running,
+    required this.paused,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<int>(
+      stream: Stream.periodic(
+        const Duration(milliseconds: 33),
+        (tick) => tick,
+      ),
+      builder: (context, snapshot) {
+        return CustomPaint(
+          painter: _CockpitTimerGaugePainter(
+            elapsed: elapsedListenable.value,
+            localTime: DateTime.now(),
+            running: running,
+            paused: paused,
+          ),
+          child: const SizedBox.expand(),
+        );
+      },
+    );
+  }
+}
+
+String _formatCockpitElapsed(Duration duration) {
+  final hours = duration.inHours;
+  final minutes = duration.inMinutes.remainder(60);
+  final seconds = duration.inSeconds.remainder(60);
+  return '${hours.toString().padLeft(2, '0')}:'
+      '${minutes.toString().padLeft(2, '0')}:'
+      '${seconds.toString().padLeft(2, '0')}';
+}
+
+class _PanelStatusLight extends StatefulWidget {
+  final bool active;
+
+  const _PanelStatusLight({required this.active});
+
+  @override
+  State<_PanelStatusLight> createState() => _PanelStatusLightState();
+}
+
+class _PanelStatusLightState extends State<_PanelStatusLight> {
+  Timer? _blinkTimer;
+  bool _bright = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _syncBlinkTimer();
+  }
+
+  @override
+  void didUpdateWidget(covariant _PanelStatusLight oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.active != widget.active) {
+      _syncBlinkTimer();
+    }
+  }
+
+  @override
+  void dispose() {
+    _blinkTimer?.cancel();
+    super.dispose();
+  }
+
+  void _syncBlinkTimer() {
+    _blinkTimer?.cancel();
+    _blinkTimer = null;
+    _bright = true;
+    if (!widget.active) {
+      return;
+    }
+    _blinkTimer = Timer.periodic(const Duration(milliseconds: 520), (_) {
+      if (mounted) {
+        setState(() => _bright = !_bright);
+      }
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final color =
+        widget.active ? const Color(0xFF22C55E) : const Color(0xFF14532D);
+    final opacity = widget.active && !_bright ? 0.38 : 1.0;
+
+    return Center(
+      child: AnimatedOpacity(
+        opacity: opacity,
+        duration: const Duration(milliseconds: 180),
+        child: Container(
+          width: 68,
+          height: 68,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            gradient: RadialGradient(
+              colors: [
+                widget.active
+                    ? const Color(0xFFE5FFE9)
+                    : const Color(0xFF4ADE80).withValues(alpha: 0.46),
+                color,
+                Colors.transparent,
+              ],
+            ),
+            boxShadow: widget.active
+                ? [
+                    BoxShadow(
+                      color: color.withValues(alpha: 0.9),
+                      blurRadius: 24,
+                      spreadRadius: 7,
+                    ),
+                  ]
+                : null,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _CockpitButton extends StatelessWidget {
+  final String label;
+  final IconData icon;
+  final VoidCallback? onPressed;
+  final Color accent;
+  final bool compact;
+
+  const _CockpitButton({
+    required this.label,
+    required this.icon,
+    required this.onPressed,
+    required this.accent,
+    this.compact = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final enabled = onPressed != null;
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(4),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(999),
+        gradient: const LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            Color(0xFF090807),
+            Color(0xFF342A21),
+            Color(0xFF050505),
+          ],
+        ),
+        border: Border.all(
+          color: const Color(0xFFD6B98C).withValues(alpha: 0.18),
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.60),
+            blurRadius: 8,
+            offset: const Offset(0, 3),
+          ),
+          BoxShadow(
+            color: const Color(0xFFC46D3C).withValues(alpha: 0.12),
+            blurRadius: 5,
+            offset: const Offset(-1, -1),
+          ),
+        ],
+      ),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: onPressed,
+          borderRadius: BorderRadius.circular(999),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 140),
+            width: double.infinity,
+            padding: EdgeInsets.symmetric(
+              horizontal: compact ? 8 : 10,
+              vertical: 5,
+            ),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(999),
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: enabled
+                    ? [
+                        const Color(0xFF181512),
+                        const Color(0xFF2B241D),
+                        const Color(0xFF070707),
+                      ]
+                    : [
+                        const Color(0xFF11100E),
+                        const Color(0xFF080807),
+                      ],
+              ),
+              border: Border.all(
+                color: enabled
+                    ? accent.withValues(alpha: 0.58)
+                    : const Color(0xFF2A2722),
+                width: 1.1,
+              ),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.70),
+                  blurRadius: 5,
+                  offset: const Offset(0, -2),
+                  spreadRadius: -1,
+                ),
+                BoxShadow(
+                  color: Colors.white.withValues(alpha: enabled ? 0.08 : 0.02),
+                  blurRadius: 2,
+                  offset: const Offset(0, 1),
+                ),
+              ],
+            ),
+            child: Row(
+              children: [
+                Icon(
+                  icon,
+                  color: enabled ? accent : const Color(0xFF64748B),
+                  size: compact ? 14 : 17,
+                ),
+                SizedBox(width: compact ? 5 : 8),
+                Expanded(
+                  child: Text(
+                    label,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: enabled
+                          ? const Color(0xFFF8FAFC)
+                          : const Color(0xFF64748B),
+                      fontSize: compact ? 10.5 : 12,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _CockpitTimerGaugePainter extends CustomPainter {
+  final Duration elapsed;
+  final DateTime localTime;
+  final bool running;
+  final bool paused;
+
+  const _CockpitTimerGaugePainter({
+    required this.elapsed,
+    required this.localTime,
+    required this.running,
+    required this.paused,
   });
 
   @override
   void paint(Canvas canvas, Size size) {
-    final body = RRect.fromRectAndRadius(
-      Rect.fromLTWH(4, size.height * 0.18, size.width - 18, size.height * 0.58),
-      const Radius.circular(8),
-    );
-    final terminal = RRect.fromRectAndRadius(
-      Rect.fromLTWH(
-        size.width - 14,
-        size.height * 0.34,
-        10,
-        size.height * 0.26,
-      ),
-      const Radius.circular(4),
-    );
-    final fillWidth = (size.width - 30) * percent.clamp(0, 1);
-    final fill = RRect.fromRectAndRadius(
-      Rect.fromLTWH(10, size.height * 0.26, fillWidth, size.height * 0.42),
-      const Radius.circular(6),
-    );
-    final paint = Paint()..style = PaintingStyle.fill;
+    final center = Offset(size.width / 2, size.height / 2);
+    final radius = size.shortestSide / 2;
+    final faceRadius = radius * 0.71;
 
-    paint.color = const Color(0xFFE2E8F0);
-    canvas.drawRRect(body, paint);
-    canvas.drawRRect(terminal, paint);
+    final seconds = localTime.second + localTime.millisecond / 1000;
+    final minutes = localTime.minute + seconds / 60;
+    final hours = localTime.hour.remainder(12) + minutes / 60;
+    final secondsAngle = -math.pi / 2 + seconds / 60 * math.pi * 2;
+    final minutesAngle = -math.pi / 2 + minutes / 60 * math.pi * 2;
+    final hoursAngle = -math.pi / 2 + hours / 12 * math.pi * 2;
 
-    paint.color = color;
-    canvas.drawRRect(fill, paint);
-
-    final linePaint = Paint()
-      ..color = Colors.white.withValues(alpha: 0.46)
-      ..strokeWidth = 2;
-    for (var i = 1; i < 4; i++) {
-      final x = 10 + (size.width - 30) * i / 4;
-      canvas.drawLine(
-        Offset(x, size.height * 0.28),
-        Offset(x, size.height * 0.66),
-        linePaint,
-      );
-    }
-
-    final textPainter = TextPainter(
-      text: TextSpan(
-        text: '${(percent * 100).round()}%',
-        style: const TextStyle(
-          color: Color(0xFF0F172A),
-          fontSize: 13,
-          fontWeight: FontWeight.w900,
-        ),
-      ),
-      textDirection: TextDirection.ltr,
-    )..layout();
-    textPainter.paint(
+    _drawStilettoHand(
       canvas,
-      Offset(
-        (size.width - textPainter.width) / 2,
-        size.height * 0.79,
+      center,
+      angle: hoursAngle,
+      length: faceRadius * 0.52,
+      width: 9.4,
+      color: const Color(0xFFF4F1DE),
+      shadowColor: Colors.black.withValues(alpha: 0.74),
+      tailLength: 9,
+    );
+    _drawStilettoHand(
+      canvas,
+      center,
+      angle: minutesAngle,
+      length: faceRadius * 0.86,
+      width: 6.5,
+      color: const Color(0xFFF4F1DE),
+      shadowColor: Colors.black.withValues(alpha: 0.74),
+      tailLength: 10,
+    );
+    _drawNeedleHand(
+      canvas,
+      center,
+      angle: secondsAngle,
+      length: faceRadius * 0.93,
+      color: const Color(0xFFF4F1DE),
+      tailLength: 28,
+    );
+
+    final hubPaint = Paint()
+      ..shader = const RadialGradient(
+        colors: [Color(0xFF333333), Color(0xFF111111), Color(0xFF050505)],
+      ).createShader(Rect.fromCircle(center: center, radius: 14));
+    canvas.drawCircle(center, 14, hubPaint);
+    canvas.drawCircle(
+      center,
+      7,
+      Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 2
+        ..color = const Color(0xFFF4F1DE).withValues(alpha: 0.18),
+    );
+    canvas.drawCircle(center, 4, Paint()..color = const Color(0xFF0A0A0A));
+
+    final timerEngaged = running || paused;
+    final elapsedBox = RRect.fromRectAndRadius(
+      Rect.fromCenter(
+        center: Offset(center.dx, size.height - 9),
+        width: 194,
+        height: 42,
       ),
+      const Radius.circular(12),
+    );
+    canvas.drawRRect(
+      elapsedBox,
+      Paint()
+        ..color = Colors.black.withValues(alpha: timerEngaged ? 0.84 : 0.34),
+    );
+    canvas.drawRRect(
+      elapsedBox,
+      Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1
+        ..color =
+            (timerEngaged ? const Color(0xFFEF4444) : const Color(0xFFF4F1DE))
+                .withValues(alpha: timerEngaged ? 0.42 : 0.08),
+    );
+    _drawGaugeText(
+      canvas,
+      _formatCockpitElapsed(elapsed),
+      Offset(center.dx, size.height - 9),
+      fontSize: 22,
+      color: timerEngaged
+          ? const Color(0xFFFF3B30)
+          : const Color(0xFFF4F1DE).withValues(alpha: 0.36),
+      fontWeight: FontWeight.w900,
     );
   }
 
   @override
-  bool shouldRepaint(covariant _BatteryPackPainter oldDelegate) {
-    return oldDelegate.color != color || oldDelegate.percent != percent;
+  bool shouldRepaint(covariant _CockpitTimerGaugePainter oldDelegate) {
+    return oldDelegate.elapsed != elapsed ||
+        oldDelegate.localTime.millisecond != localTime.millisecond ||
+        oldDelegate.localTime.second != localTime.second ||
+        oldDelegate.running != running ||
+        oldDelegate.paused != paused;
   }
+}
+
+void _drawGaugeText(
+  Canvas canvas,
+  String text,
+  Offset center, {
+  required double fontSize,
+  required Color color,
+  FontWeight fontWeight = FontWeight.w900,
+  double letterSpacing = 0,
+}) {
+  final painter = TextPainter(
+    text: TextSpan(
+      text: text,
+      style: TextStyle(
+        color: color,
+        fontFamily: 'Bahnschrift',
+        fontSize: fontSize,
+        fontWeight: fontWeight,
+        letterSpacing: letterSpacing,
+      ),
+    ),
+    textAlign: TextAlign.center,
+    textDirection: TextDirection.ltr,
+  )..layout();
+
+  painter.paint(
+    canvas,
+    Offset(center.dx - painter.width / 2, center.dy - painter.height / 2),
+  );
+}
+
+void _drawStilettoHand(
+  Canvas canvas,
+  Offset center, {
+  required double angle,
+  required double length,
+  required double width,
+  required Color color,
+  required Color shadowColor,
+  required double tailLength,
+}) {
+  final direction = Offset(math.cos(angle), math.sin(angle));
+  final normal = Offset(-direction.dy, direction.dx);
+  final tip = center + direction * length;
+  final tail = center - direction * tailLength;
+  final shoulder = center + direction * 14;
+  final path = Path()
+    ..moveTo(tip.dx, tip.dy)
+    ..lineTo(
+      shoulder.dx + normal.dx * width,
+      shoulder.dy + normal.dy * width,
+    )
+    ..lineTo(center.dx + normal.dx * (width * 0.48),
+        center.dy + normal.dy * (width * 0.48))
+    ..lineTo(tail.dx, tail.dy)
+    ..lineTo(center.dx - normal.dx * (width * 0.48),
+        center.dy - normal.dy * (width * 0.48))
+    ..lineTo(
+      shoulder.dx - normal.dx * width,
+      shoulder.dy - normal.dy * width,
+    )
+    ..close();
+
+  canvas.drawShadow(path, shadowColor, 4, false);
+  canvas.drawPath(path, Paint()..color = color);
+  canvas.drawPath(
+    path,
+    Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 0.8
+      ..color = const Color(0xFF0A0A0A).withValues(alpha: 0.46),
+  );
+}
+
+void _drawNeedleHand(
+  Canvas canvas,
+  Offset center, {
+  required double angle,
+  required double length,
+  required Color color,
+  required double tailLength,
+}) {
+  final direction = Offset(math.cos(angle), math.sin(angle));
+  final tip = center + direction * length;
+  final tail = center - direction * tailLength;
+  final paint = Paint()
+    ..color = color
+    ..strokeWidth = 1.8
+    ..strokeCap = StrokeCap.round;
+
+  canvas.drawLine(tail, tip, paint);
+  canvas.drawCircle(tip, 2.1, Paint()..color = color);
 }
 
 enum _AircraftDetailsAction { edit, delete }
@@ -959,15 +1876,19 @@ class _AircraftInfoTable extends StatelessWidget {
     final rows = [
       ('Kategorie', aircraft.type),
       ('Hersteller', aircraft.manufacturer),
-      ('Kennung', aircraft.registration),
       ('Spannweite', '${aircraft.wingspanMeters.toStringAsFixed(2)} m'),
       ('Laenge', '${aircraft.lengthMeters.toStringAsFixed(2)} m'),
       ('Gewicht', '${aircraft.weightKg.toStringAsFixed(1)} kg'),
+      ('Sender', _fallback(aircraft.transmitter)),
+      ('Sender-Speicherplatz', _fallback(aircraft.transmitterMemorySlot)),
       ('Antrieb', _fallback(aircraft.drive)),
       ('Empfaenger', _fallback(aircraft.receiver)),
       ('Propeller', _fallback(aircraft.propeller)),
+      ('Material\nRumpf/Flaeche', _fallback(aircraft.materialFuselageWing)),
+      ('Tragflaechen-\nbelastung', _fallback(aircraft.wingLoading)),
+      ('Servos', _fallback(aircraft.servos)),
       ('Kaufdatum', formatter.format(aircraft.purchaseDate)),
-      ('Akkus', '${aircraft.batteryCount}'),
+      ('Akku-Typ', _batteryCellsLabel(aircraft.batteryCells)),
       ('Fluege', '${aircraft.totalFlights}'),
       ('Flugzeit', '${aircraft.flightHours.toStringAsFixed(1)} h'),
       ('Status', aircraft.status.label),
@@ -975,49 +1896,49 @@ class _AircraftInfoTable extends StatelessWidget {
 
     return _InfoPanel(
       title: 'Modelldaten',
-      icon: Icons.table_chart_rounded,
+      icon: Icons.fact_check_rounded,
+      iconSize: 18,
+      iconColor: const Color(0xFF38BDF8),
+      framed: false,
       children: [
-        ClipRRect(
-          borderRadius: BorderRadius.circular(8),
-          child: Table(
-            columnWidths: const {
-              0: FixedColumnWidth(110),
-              1: FlexColumnWidth(),
-              2: FixedColumnWidth(110),
-              3: FlexColumnWidth(),
-            },
-            border: const TableBorder(
-              horizontalInside: BorderSide(color: Color(0xFFE2E8F0)),
-              verticalInside: BorderSide(color: Color(0xFFE2E8F0)),
-            ),
-            children: [
-              for (var index = 0; index < rows.length; index += 2)
-                TableRow(
-                  decoration: BoxDecoration(
-                    color: (index ~/ 2).isEven
-                        ? Colors.white
-                        : const Color(0xFFF1F5F9),
+        Table(
+          columnWidths: const {
+            0: FixedColumnWidth(110),
+            1: FlexColumnWidth(),
+            2: FixedColumnWidth(110),
+            3: FlexColumnWidth(),
+          },
+          border: const TableBorder(
+            horizontalInside: BorderSide(color: Color(0xFFE2E8F0)),
+            verticalInside: BorderSide(color: Color(0xFFE2E8F0)),
+          ),
+          children: [
+            for (var index = 0; index < rows.length; index += 2)
+              TableRow(
+                decoration: BoxDecoration(
+                  color: (index ~/ 2).isEven
+                      ? Colors.white
+                      : const Color(0xFFF1F5F9),
+                ),
+                children: [
+                  _InfoTableCell(
+                    text: rows[index].$1,
+                    isLabel: true,
                   ),
-                  children: [
+                  _InfoTableCell(text: rows[index].$2),
+                  if (index + 1 < rows.length) ...[
                     _InfoTableCell(
-                      text: rows[index].$1,
+                      text: rows[index + 1].$1,
                       isLabel: true,
                     ),
-                    _InfoTableCell(text: rows[index].$2),
-                    if (index + 1 < rows.length) ...[
-                      _InfoTableCell(
-                        text: rows[index + 1].$1,
-                        isLabel: true,
-                      ),
-                      _InfoTableCell(text: rows[index + 1].$2),
-                    ] else ...[
-                      const SizedBox.shrink(),
-                      const SizedBox.shrink(),
-                    ],
+                    _InfoTableCell(text: rows[index + 1].$2),
+                  ] else ...[
+                    const SizedBox.shrink(),
+                    const SizedBox.shrink(),
                   ],
-                ),
-            ],
-          ),
+                ],
+              ),
+          ],
         ),
       ],
     );
@@ -1026,6 +1947,14 @@ class _AircraftInfoTable extends StatelessWidget {
   String _fallback(String value) {
     return value.trim().isEmpty ? '-' : value.trim();
   }
+}
+
+String _batteryCellsLabel(List<int> cells) {
+  final normalized = {
+    for (final cell in cells) cell.clamp(1, 6),
+  }.toList()
+    ..sort();
+  return normalized.map((cell) => '${cell}S').join(', ');
 }
 
 class _InfoTableCell extends StatelessWidget {
@@ -1049,7 +1978,7 @@ class _InfoTableCell extends StatelessWidget {
           color: isLabel ? const Color(0xFF475569) : const Color(0xFF0F172A),
           fontSize: 13,
           height: 1.15,
-          fontWeight: isLabel ? FontWeight.w900 : FontWeight.w700,
+          fontWeight: isLabel ? FontWeight.w800 : FontWeight.w500,
         ),
       ),
     );
@@ -1059,11 +1988,17 @@ class _InfoTableCell extends StatelessWidget {
 class _InfoPanel extends StatelessWidget {
   final String title;
   final IconData icon;
+  final double iconSize;
+  final Color iconColor;
+  final bool framed;
   final List<Widget> children;
 
   const _InfoPanel({
     required this.title,
     required this.icon,
+    this.iconSize = 24,
+    this.iconColor = const Color(0xFF0A84FF),
+    this.framed = true,
     required this.children,
   });
 
@@ -1071,18 +2006,20 @@ class _InfoPanel extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: const Color(0xFFF8FAFC),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: const Color(0xFFE2E8F0)),
-      ),
+      padding: framed ? const EdgeInsets.all(16) : EdgeInsets.zero,
+      decoration: framed
+          ? BoxDecoration(
+              color: const Color(0xFFF8FAFC),
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: const Color(0xFFE2E8F0)),
+            )
+          : null,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              Icon(icon, color: const Color(0xFF0A84FF)),
+              Icon(icon, color: iconColor, size: iconSize),
               const SizedBox(width: 8),
               Text(
                 title,
@@ -1095,34 +2032,6 @@ class _InfoPanel extends StatelessWidget {
           ),
           const SizedBox(height: 12),
           ...children,
-        ],
-      ),
-    );
-  }
-}
-
-class _InfoLine extends StatelessWidget {
-  final String label;
-  final String value;
-
-  const _InfoLine({required this.label, required this.value});
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
-      child: Row(
-        children: [
-          Expanded(
-            child: Text(
-              label,
-              style: const TextStyle(
-                color: Color(0xFF64748B),
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-          ),
-          Text(value, style: const TextStyle(fontWeight: FontWeight.w900)),
         ],
       ),
     );
@@ -1148,10 +2057,12 @@ class _EmptyFleet extends StatelessWidget {
 
 class _AircraftDialog extends StatefulWidget {
   final AircraftModel? aircraft;
+  final List<String> transmitterOptions;
   final ValueChanged<AircraftModel> onSubmit;
 
   const _AircraftDialog({
     this.aircraft,
+    required this.transmitterOptions,
     required this.onSubmit,
   });
 
@@ -1167,18 +2078,25 @@ class _AircraftDialogState extends State<_AircraftDialog> {
   final _wingspan = TextEditingController(text: '1.80');
   final _length = TextEditingController(text: '1.50');
   final _weight = TextEditingController(text: '2.4');
+  final _transmitter = TextEditingController();
+  final _transmitterMemorySlot = TextEditingController();
   final _receiver = TextEditingController();
   final _propeller = TextEditingController();
+  final _materialFuselageWing = TextEditingController();
+  final _wingLoading = TextEditingController();
+  final _servos = TextEditingController();
   final _purchaseDate = TextEditingController(
     text: DateFormat('dd.MM.yyyy').format(DateTime.now()),
   );
   final _drive = TextEditingController();
-  final _batteries = TextEditingController(text: '2');
   final _notes = TextEditingController();
+  final _repairNotes = TextEditingController();
   final _imagePicker = ImagePicker();
   final List<String> _photoDataUris = [];
   AircraftStatus _status = AircraftStatus.ready;
   String _type = _aircraftTypes.first;
+  String _selectedTransmitter = '';
+  final Set<int> _batteryCells = {2};
 
   bool get _isEditing => widget.aircraft != null;
 
@@ -1197,12 +2115,21 @@ class _AircraftDialogState extends State<_AircraftDialog> {
     _wingspan.text = aircraft.wingspanMeters.toStringAsFixed(2);
     _length.text = aircraft.lengthMeters.toStringAsFixed(2);
     _weight.text = aircraft.weightKg.toStringAsFixed(1);
+    _transmitter.text = aircraft.transmitter;
+    _selectedTransmitter = aircraft.transmitter;
+    _transmitterMemorySlot.text = aircraft.transmitterMemorySlot;
     _receiver.text = aircraft.receiver;
     _propeller.text = aircraft.propeller;
+    _materialFuselageWing.text = aircraft.materialFuselageWing;
+    _wingLoading.text = aircraft.wingLoading;
+    _servos.text = aircraft.servos;
     _purchaseDate.text = DateFormat('dd.MM.yyyy').format(aircraft.purchaseDate);
     _drive.text = aircraft.drive;
-    _batteries.text = '${aircraft.batteryCount}';
+    _batteryCells
+      ..clear()
+      ..addAll(aircraft.batteryCells.map((cell) => cell.clamp(1, 6)));
     _notes.text = aircraft.notes;
+    _repairNotes.text = aircraft.repairNotes;
     _status = aircraft.status;
     _photoDataUris.addAll(aircraft.photos);
   }
@@ -1215,12 +2142,17 @@ class _AircraftDialogState extends State<_AircraftDialog> {
     _wingspan.dispose();
     _length.dispose();
     _weight.dispose();
+    _transmitter.dispose();
+    _transmitterMemorySlot.dispose();
     _receiver.dispose();
     _propeller.dispose();
+    _materialFuselageWing.dispose();
+    _wingLoading.dispose();
+    _servos.dispose();
     _purchaseDate.dispose();
     _drive.dispose();
-    _batteries.dispose();
     _notes.dispose();
+    _repairNotes.dispose();
     super.dispose();
   }
 
@@ -1251,7 +2183,11 @@ class _AircraftDialogState extends State<_AircraftDialog> {
                   width: 260,
                   child: DropdownButtonFormField<String>(
                     initialValue: _type,
-                    decoration: const InputDecoration(labelText: 'Kategorie'),
+                    style: _aircraftDialogInputStyle,
+                    decoration: const InputDecoration(
+                      labelText: 'Kategorie',
+                      labelStyle: _aircraftDialogLabelStyle,
+                    ),
                     items: [
                       for (final type in _aircraftTypes)
                         DropdownMenuItem(value: type, child: Text(type)),
@@ -1261,10 +2197,15 @@ class _AircraftDialogState extends State<_AircraftDialog> {
                   ),
                 ),
                 _TextField(controller: _manufacturer, label: 'Hersteller'),
-                _TextField(controller: _registration, label: 'Kennung'),
                 _TextField(controller: _wingspan, label: 'Spannweite m'),
                 _TextField(controller: _length, label: 'Laenge m'),
                 _TextField(controller: _weight, label: 'Gewicht kg'),
+                _buildTransmitterInput(),
+                _TextField(
+                  controller: _transmitterMemorySlot,
+                  label: 'Sender-Speicherplatz',
+                  requiredField: false,
+                ),
                 _TextField(
                   controller: _drive,
                   label: 'Antrieb',
@@ -1281,15 +2222,48 @@ class _AircraftDialogState extends State<_AircraftDialog> {
                   requiredField: false,
                 ),
                 _TextField(
+                  controller: _materialFuselageWing,
+                  label: 'Material Rumpf/Flaeche',
+                  requiredField: false,
+                ),
+                _TextField(
+                  controller: _wingLoading,
+                  label: 'Tragflaechenbelastung',
+                  requiredField: false,
+                ),
+                _TextField(
+                  controller: _servos,
+                  label: 'Servos',
+                  requiredField: false,
+                ),
+                _TextField(
                   controller: _purchaseDate,
                   label: 'Kaufdatum TT.MM.JJJJ',
                 ),
-                _TextField(controller: _batteries, label: 'Akkus'),
+                SizedBox(
+                  width: 532,
+                  child: _BatteryCellsMultiSelect(
+                    selectedCells: _batteryCells,
+                    onChanged: (cell, selected) {
+                      setState(() {
+                        if (selected) {
+                          _batteryCells.add(cell);
+                        } else if (_batteryCells.length > 1) {
+                          _batteryCells.remove(cell);
+                        }
+                      });
+                    },
+                  ),
+                ),
                 SizedBox(
                   width: 260,
                   child: DropdownButtonFormField<AircraftStatus>(
                     initialValue: _status,
-                    decoration: const InputDecoration(labelText: 'Status'),
+                    style: _aircraftDialogInputStyle,
+                    decoration: const InputDecoration(
+                      labelText: 'Status',
+                      labelStyle: _aircraftDialogLabelStyle,
+                    ),
                     items: [
                       for (final status in AircraftStatus.values)
                         DropdownMenuItem(
@@ -1301,13 +2275,31 @@ class _AircraftDialogState extends State<_AircraftDialog> {
                         setState(() => _status = value ?? _status),
                   ),
                 ),
+                if (_status == AircraftStatus.maintenance)
+                  SizedBox(
+                    width: 532,
+                    child: TextFormField(
+                      controller: _repairNotes,
+                      minLines: 2,
+                      maxLines: 3,
+                      style: _aircraftDialogInputStyle,
+                      decoration: const InputDecoration(
+                        labelText: 'Was muss repariert werden?',
+                        labelStyle: _aircraftDialogLabelStyle,
+                      ),
+                    ),
+                  ),
                 SizedBox(
                   width: 532,
                   child: TextFormField(
                     controller: _notes,
                     minLines: 2,
                     maxLines: 4,
-                    decoration: const InputDecoration(labelText: 'Notizen'),
+                    style: _aircraftDialogInputStyle,
+                    decoration: const InputDecoration(
+                      labelText: 'Notizen',
+                      labelStyle: _aircraftDialogLabelStyle,
+                    ),
                   ),
                 ),
               ],
@@ -1328,6 +2320,54 @@ class _AircraftDialogState extends State<_AircraftDialog> {
     );
   }
 
+  Widget _buildTransmitterInput() {
+    final options = _availableTransmitters();
+    if (options.isEmpty) {
+      return _TextField(
+        controller: _transmitter,
+        label: 'Sender',
+        requiredField: false,
+      );
+    }
+
+    final value =
+        options.contains(_selectedTransmitter) ? _selectedTransmitter : '';
+
+    return SizedBox(
+      width: 260,
+      child: DropdownButtonFormField<String>(
+        initialValue: value,
+        style: _aircraftDialogInputStyle,
+        decoration: const InputDecoration(
+          labelText: 'Sender',
+          labelStyle: _aircraftDialogLabelStyle,
+        ),
+        items: [
+          const DropdownMenuItem(value: '', child: Text('Kein Sender')),
+          for (final transmitter in options)
+            DropdownMenuItem(value: transmitter, child: Text(transmitter)),
+        ],
+        onChanged: (value) {
+          final selected = value ?? '';
+          setState(() {
+            _selectedTransmitter = selected;
+            _transmitter.text = selected;
+          });
+        },
+      ),
+    );
+  }
+
+  List<String> _availableTransmitters() {
+    final values = <String>{
+      for (final transmitter in widget.transmitterOptions)
+        if (transmitter.trim().isNotEmpty) transmitter.trim(),
+      if (_transmitter.text.trim().isNotEmpty) _transmitter.text.trim(),
+    }.toList()
+      ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+    return values;
+  }
+
   void _submit() {
     if (!_formKey.currentState!.validate()) {
       return;
@@ -1338,29 +2378,37 @@ class _AircraftDialogState extends State<_AircraftDialog> {
     final purchaseDate = _parseGermanDate(_purchaseDate.text.trim()) ??
         existing?.purchaseDate ??
         now;
+    final notesText = _notes.text.trim();
+    final repairText = _repairNotes.text.trim();
     widget.onSubmit(
       AircraftModel(
         id: existing?.id ?? const Uuid().v4(),
         name: _name.text.trim(),
         type: _type,
         manufacturer: _manufacturer.text.trim(),
-        registration: _registration.text.trim(),
+        registration: existing?.registration ?? '',
         wingspanMeters: double.parse(_wingspan.text.replaceAll(',', '.')),
         lengthMeters: double.parse(_length.text.replaceAll(',', '.')),
         weightKg: double.parse(_weight.text.replaceAll(',', '.')),
+        transmitter: _transmitter.text.trim(),
+        transmitterMemorySlot: _transmitterMemorySlot.text.trim(),
         receiver: _receiver.text.trim(),
         propeller: _propeller.text.trim(),
+        materialFuselageWing: _materialFuselageWing.text.trim(),
+        wingLoading: _wingLoading.text.trim(),
+        recommendedDriveBattery: existing?.recommendedDriveBattery ?? '',
+        servos: _servos.text.trim(),
         purchaseDate: purchaseDate,
         drive: _drive.text.trim(),
-        batteryCount: int.parse(_batteries.text),
+        batteryCount: (_batteryCells.toList()..sort()).first,
+        batteryCellOptions: List.unmodifiable(_batteryCells.toList()..sort()),
         totalFlights: existing?.totalFlights ?? 0,
         flightHours: existing?.flightHours ?? 0,
         status: _status,
         lastService: existing?.lastService ?? now,
         nextService: existing?.nextService ?? now.add(const Duration(days: 60)),
-        notes: _notes.text.trim().isEmpty
-            ? 'Noch keine Notizen hinterlegt.'
-            : _notes.text.trim(),
+        notes: notesText.isEmpty ? 'Noch keine Notizen hinterlegt.' : notesText,
+        repairNotes: repairText,
         photoDataUris: List.unmodifiable(_photoDataUris),
       ),
     );
@@ -1513,6 +2561,43 @@ class _PhotoPickerPanel extends StatelessWidget {
   }
 }
 
+class _BatteryCellsMultiSelect extends StatelessWidget {
+  final Set<int> selectedCells;
+  final void Function(int cell, bool selected) onChanged;
+
+  const _BatteryCellsMultiSelect({
+    required this.selectedCells,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return InputDecorator(
+      decoration: const InputDecoration(labelText: 'Akku-Typ'),
+      child: Wrap(
+        spacing: 8,
+        runSpacing: 8,
+        children: [
+          for (var cell = 1; cell <= 6; cell++)
+            FilterChip(
+              label: Text('${cell}S'),
+              selected: selectedCells.contains(cell),
+              onSelected: (selected) => onChanged(cell, selected),
+              selectedColor: const Color(0xFFDCEEFF),
+              checkmarkColor: const Color(0xFF0A84FF),
+              labelStyle: TextStyle(
+                color: selectedCells.contains(cell)
+                    ? const Color(0xFF075985)
+                    : const Color(0xFF334155),
+                fontWeight: FontWeight.w900,
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
 class _TextField extends StatelessWidget {
   final TextEditingController controller;
   final String label;
@@ -1530,7 +2615,11 @@ class _TextField extends StatelessWidget {
       width: 260,
       child: TextFormField(
         controller: controller,
-        decoration: InputDecoration(labelText: label),
+        style: _aircraftDialogInputStyle,
+        decoration: InputDecoration(
+          labelText: label,
+          labelStyle: _aircraftDialogLabelStyle,
+        ),
         validator: (value) {
           if (!requiredField) {
             return null;
@@ -1541,6 +2630,17 @@ class _TextField extends StatelessWidget {
     );
   }
 }
+
+const _aircraftDialogInputStyle = TextStyle(
+  color: Color(0xFF06172E),
+  fontSize: 13,
+  fontWeight: FontWeight.w500,
+);
+
+const _aircraftDialogLabelStyle = TextStyle(
+  fontSize: 13,
+  fontWeight: FontWeight.w600,
+);
 
 Color _statusColor(AircraftStatus status) {
   return switch (status) {

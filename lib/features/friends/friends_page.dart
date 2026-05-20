@@ -19,7 +19,7 @@ class _FriendsPageState extends ConsumerState<FriendsPage> {
     const _FriendRow(
       name: 'Martin Keller',
       club: 'LMFC Lohburg',
-      availability: 'Samstag',
+      lastOnline: 'gerade eben',
       flyingModel: 'ASW 28',
       status: _FriendStatus.atField,
       locationSharingEnabled: true,
@@ -30,7 +30,7 @@ class _FriendsPageState extends ConsumerState<FriendsPage> {
     const _FriendRow(
       name: 'Claudia Stein',
       club: 'MFC Adler',
-      availability: 'Sonntag',
+      lastOnline: 'vor 18 Min.',
       flyingModel: '',
       status: _FriendStatus.home,
       locationSharingEnabled: false,
@@ -41,7 +41,7 @@ class _FriendsPageState extends ConsumerState<FriendsPage> {
     const _FriendRow(
       name: 'Jens Hoffmann',
       club: 'Modellflug Nord',
-      availability: 'Mittwoch',
+      lastOnline: 'gestern 20:14',
       flyingModel: '',
       status: _FriendStatus.home,
       locationSharingEnabled: false,
@@ -52,7 +52,7 @@ class _FriendsPageState extends ConsumerState<FriendsPage> {
     const _FriendRow(
       name: 'Sabine Wolf',
       club: 'LMFC Lohburg',
-      availability: 'Freitag',
+      lastOnline: 'gerade eben',
       flyingModel: 'Slowflyer',
       status: _FriendStatus.flying,
       locationSharingEnabled: true,
@@ -97,6 +97,7 @@ class _FriendsPageState extends ConsumerState<FriendsPage> {
           friends: _friends,
           showChatColumn: showChatColumn,
           onChat: _showChatDialog,
+          onDelete: _confirmDeleteFriend,
         ),
       ],
     );
@@ -120,6 +121,35 @@ class _FriendsPageState extends ConsumerState<FriendsPage> {
       context: context,
       builder: (context) => _FriendChatDialog(friend: friend),
     );
+  }
+
+  Future<void> _confirmDeleteFriend(_FriendRow friend) async {
+    final delete = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Freund loeschen'),
+        content: Text(
+          '${friend.name} wirklich aus der Freundesliste entfernen?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Abbrechen'),
+          ),
+          FilledButton.icon(
+            onPressed: () => Navigator.of(context).pop(true),
+            icon: const Icon(Icons.delete_rounded),
+            label: const Text('Loeschen'),
+          ),
+        ],
+      ),
+    );
+
+    if (delete != true) {
+      return;
+    }
+
+    setState(() => _friends.remove(friend));
   }
 }
 
@@ -150,7 +180,7 @@ class _FriendsToolbar extends StatelessWidget {
       _FriendStatCard(
         icon: Icons.chat_bubble_rounded,
         value: '$chatReachableCount',
-        label: 'Direkt erreichbar',
+        label: 'Online',
       ),
     ];
 
@@ -196,12 +226,12 @@ class _FriendStatCard extends StatelessWidget {
     return IntrinsicWidth(
       child: Card(
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(icon, color: const Color(0xFF0A84FF), size: 28),
-              const SizedBox(width: 10),
+              Icon(icon, color: const Color(0xFF0A84FF), size: 22),
+              const SizedBox(width: 8),
               Column(
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -210,7 +240,7 @@ class _FriendStatCard extends StatelessWidget {
                     value,
                     style: const TextStyle(
                       color: Color(0xFF06172E),
-                      fontSize: 20,
+                      fontSize: 17,
                       fontWeight: FontWeight.w900,
                     ),
                   ),
@@ -232,78 +262,128 @@ class _FriendStatCard extends StatelessWidget {
   }
 }
 
-class _FriendsTable extends StatelessWidget {
+class _FriendsTable extends StatefulWidget {
   final List<_FriendRow> friends;
   final bool showChatColumn;
   final ValueChanged<_FriendRow> onChat;
+  final ValueChanged<_FriendRow> onDelete;
 
   const _FriendsTable({
     required this.friends,
     required this.showChatColumn,
     required this.onChat,
+    required this.onDelete,
   });
 
   @override
+  State<_FriendsTable> createState() => _FriendsTableState();
+}
+
+class _FriendsTableState extends State<_FriendsTable> {
+  final ScrollController _horizontalController = ScrollController();
+
+  @override
+  void dispose() {
+    _horizontalController.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
-    return SizedBox(
-      width: 760,
-      child: Card(
-        clipBehavior: Clip.antiAlias,
-        child: SingleChildScrollView(
-          scrollDirection: Axis.horizontal,
-          child: DataTable(
-            headingRowHeight: 38,
-            dataRowMinHeight: 52,
-            dataRowMaxHeight: 58,
-            horizontalMargin: 16,
-            columnSpacing: 30,
-            headingRowColor: WidgetStateProperty.all(
-              const Color(0xFF0A84FF),
-            ),
-            headingTextStyle: const TextStyle(
-              color: Colors.white,
-              fontSize: 12,
-              fontWeight: FontWeight.w900,
-            ),
-            dataTextStyle: const TextStyle(
-              color: Color(0xFF334155),
-              fontSize: 12,
-              fontWeight: FontWeight.w700,
-            ),
-            columns: [
-              const DataColumn(label: Text('Freund')),
-              const DataColumn(label: Text('Verein')),
-              const DataColumn(label: Text('Naechster Flugtag')),
-              const DataColumn(label: Text('Fliegt mit...')),
-              const DataColumn(label: Text('Status')),
-              if (showChatColumn) const DataColumn(label: Text('Chat')),
-            ],
-            rows: [
-              for (final friend in friends)
-                DataRow(
-                  cells: [
-                    DataCell(_FriendIdentity(friend)),
-                    DataCell(Text(friend.club)),
-                    DataCell(Text(friend.availability)),
-                    DataCell(Text(friend.flyingModel)),
-                    DataCell(_FriendStatusPill(friend)),
-                    if (showChatColumn)
-                      DataCell(
-                        friend.chatReachable
-                            ? IconButton(
-                                tooltip: 'Chat mit ${friend.name}',
-                                icon: const Icon(Icons.chat_rounded),
-                                color: const Color(0xFF0A84FF),
-                                onPressed: () => onChat(friend),
-                              )
-                            : const SizedBox.shrink(),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final tableWidth =
+            constraints.maxWidth < 980 ? 980.0 : constraints.maxWidth;
+
+        return ClipRect(
+          child: SizedBox(
+            width: constraints.maxWidth,
+            child: Card(
+              clipBehavior: Clip.antiAlias,
+              child: Scrollbar(
+                controller: _horizontalController,
+                thumbVisibility: true,
+                interactive: true,
+                notificationPredicate: (notification) =>
+                    notification.metrics.axis == Axis.horizontal,
+                child: SingleChildScrollView(
+                  controller: _horizontalController,
+                  scrollDirection: Axis.horizontal,
+                  primary: false,
+                  padding: const EdgeInsets.only(bottom: 12),
+                  child: ConstrainedBox(
+                    constraints: BoxConstraints(minWidth: tableWidth),
+                    child: DataTable(
+                      headingRowHeight: 38,
+                      dataRowMinHeight: 82,
+                      dataRowMaxHeight: 88,
+                      horizontalMargin: 16,
+                      columnSpacing: 30,
+                      headingRowColor: WidgetStateProperty.all(
+                        const Color(0xFFDCEBFF),
                       ),
-                  ],
+                      headingTextStyle: const TextStyle(
+                        color: Color(0xFF06172E),
+                        fontSize: 13,
+                        letterSpacing: 0.2,
+                        fontWeight: FontWeight.w900,
+                      ),
+                      dataTextStyle: const TextStyle(
+                        color: Color(0xFF334155),
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                      ),
+                      columns: [
+                        const DataColumn(label: Text('Freund')),
+                        const DataColumn(label: Text('Verein')),
+                        const DataColumn(label: Text('Zuletzt online...')),
+                        const DataColumn(label: Text('Fliegt mit...')),
+                        const DataColumn(label: Text('Status')),
+                        if (widget.showChatColumn)
+                          const DataColumn(label: Text('Chat')),
+                        const DataColumn(label: Text('Aktion')),
+                      ],
+                      rows: [
+                        for (final friend in widget.friends)
+                          DataRow(
+                            cells: [
+                              DataCell(_FriendIdentity(friend)),
+                              DataCell(Text(friend.club)),
+                              DataCell(Text(friend.lastOnline)),
+                              DataCell(
+                                friend.locationSharingEnabled
+                                    ? Text(friend.flyingModel)
+                                    : const _OfflineText(),
+                              ),
+                              DataCell(_FriendStatusPill(friend)),
+                              if (widget.showChatColumn)
+                                DataCell(
+                                  friend.chatReachable
+                                      ? IconButton(
+                                          tooltip: 'Chat mit ${friend.name}',
+                                          icon: const Icon(
+                                            Icons.chat_rounded,
+                                            size: 28,
+                                          ),
+                                          color: const Color(0xFF0A84FF),
+                                          onPressed: () =>
+                                              widget.onChat(friend),
+                                        )
+                                      : const SizedBox.shrink(),
+                                ),
+                              DataCell(_FriendActions(
+                                  friend: friend, onDelete: widget.onDelete)),
+                            ],
+                          ),
+                      ],
+                    ),
+                  ),
                 ),
-            ],
+              ),
+            ),
           ),
-        ),
-      ),
+        );
+      },
     );
   }
 }
@@ -319,7 +399,7 @@ class _FriendIdentity extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       children: [
         CircleAvatar(
-          radius: 18,
+          radius: 35,
           backgroundColor: friend.color,
           foregroundImage: friend.settingsPhotoDataUri == null
               ? null
@@ -330,7 +410,7 @@ class _FriendIdentity extends StatelessWidget {
                   friend.initials,
                   style: const TextStyle(
                     color: Colors.white,
-                    fontSize: 12,
+                    fontSize: 19,
                     fontWeight: FontWeight.w900,
                   ),
                 ),
@@ -338,6 +418,41 @@ class _FriendIdentity extends StatelessWidget {
         const SizedBox(width: 10),
         Text(friend.name),
       ],
+    );
+  }
+}
+
+class _FriendActions extends StatelessWidget {
+  final _FriendRow friend;
+  final ValueChanged<_FriendRow> onDelete;
+
+  const _FriendActions({
+    required this.friend,
+    required this.onDelete,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return PopupMenuButton<String>(
+      tooltip: 'Aktionen fuer ${friend.name}',
+      icon: const Icon(Icons.more_vert_rounded),
+      itemBuilder: (context) => const [
+        PopupMenuItem(
+          value: 'delete',
+          child: Row(
+            children: [
+              Icon(Icons.delete_rounded, size: 18),
+              SizedBox(width: 8),
+              Text('Loeschen'),
+            ],
+          ),
+        ),
+      ],
+      onSelected: (value) {
+        if (value == 'delete') {
+          onDelete(friend);
+        }
+      },
     );
   }
 }
@@ -355,7 +470,7 @@ enum _FriendStatus {
 class _FriendRow {
   final String name;
   final String club;
-  final String availability;
+  final String lastOnline;
   final String flyingModel;
   final _FriendStatus status;
   final bool locationSharingEnabled;
@@ -367,7 +482,7 @@ class _FriendRow {
   const _FriendRow({
     required this.name,
     required this.club,
-    required this.availability,
+    required this.lastOnline,
     required this.flyingModel,
     required this.status,
     required this.locationSharingEnabled,
@@ -386,14 +501,7 @@ class _FriendStatusPill extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (!friend.locationSharingEnabled) {
-      return const Text(
-        'Unbekannt',
-        style: TextStyle(
-          color: Color(0xFF64748B),
-          fontSize: 11,
-          fontWeight: FontWeight.w900,
-        ),
-      );
+      return const _OfflineText();
     }
 
     final dotColor = switch (friend.status) {
@@ -431,6 +539,23 @@ class _FriendStatusPill extends StatelessWidget {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+class _OfflineText extends StatelessWidget {
+  const _OfflineText();
+
+  @override
+  Widget build(BuildContext context) {
+    return const Text(
+      'Offline',
+      style: TextStyle(
+        color: Color(0xFF94A3B8),
+        fontSize: 10,
+        fontStyle: FontStyle.italic,
+        fontWeight: FontWeight.w600,
       ),
     );
   }
@@ -496,7 +621,7 @@ class _FriendDialogState extends State<_FriendDialog> {
       _FriendRow(
         name: name,
         club: _club.text.trim(),
-        availability: '',
+        lastOnline: 'noch nie',
         flyingModel: '',
         status: _FriendStatus.home,
         locationSharingEnabled: false,

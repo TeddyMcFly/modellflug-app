@@ -22,7 +22,9 @@ final appRouter = GoRouter(
     ),
     GoRoute(
       path: '/models',
-      builder: (context, state) => const ModelsPage(),
+      builder: (context, state) => ModelsPage(
+        initialSelectedAircraftId: state.uri.queryParameters['model'],
+      ),
     ),
     GoRoute(
       path: '/aircraft',

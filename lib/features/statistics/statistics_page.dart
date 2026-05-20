@@ -83,6 +83,11 @@ class StatisticsPage extends ConsumerWidget {
         ),
         const SizedBox(height: 10),
         _FlightTimeBars(flights: fleet.flights),
+        const SizedBox(height: 10),
+        _CategoryUsageStats(
+          aircraft: fleet.aircraft,
+          flights: fleet.flights,
+        ),
       ],
     );
   }
@@ -176,7 +181,7 @@ class _AircraftHoursChart extends StatelessWidget {
     );
 
     return SizedBox(
-      width: 540,
+      width: 500,
       child: Card(
         child: Padding(
           padding: const EdgeInsets.all(18),
@@ -210,7 +215,7 @@ class _AircraftHoursChart extends StatelessWidget {
                         children: [
                           PieChart(
                             PieChartData(
-                              centerSpaceRadius: 54,
+                              centerSpaceRadius: 66,
                               sectionsSpace: 3,
                               sections: [
                                 for (var i = 0;
@@ -220,7 +225,7 @@ class _AircraftHoursChart extends StatelessWidget {
                                     value: aircraftWithHours[i].flightHours,
                                     color: _aircraftChartColor(i),
                                     title: '',
-                                    radius: 60,
+                                    radius: 44,
                                   ),
                               ],
                             ),
@@ -250,7 +255,7 @@ class _AircraftHoursChart extends StatelessWidget {
                     ),
                     const SizedBox(width: 24),
                     SizedBox(
-                      width: 280,
+                      width: 236,
                       child: _AircraftHoursLegend(
                         aircraft: aircraftWithHours,
                         totalHours: totalHours,
@@ -311,7 +316,7 @@ class _AircraftHoursLegendItem extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return SizedBox(
-      width: 210,
+      width: 176,
       child: Row(
         children: [
           Container(
@@ -694,10 +699,10 @@ class _TopModelsTable extends StatelessWidget {
         return b.minutes.compareTo(a.minutes);
       });
 
-    final visibleStats = stats.where((item) => item.flights > 0).take(6);
+    final visibleStats = stats.where((item) => item.flights > 0).take(5);
 
     return SizedBox(
-      width: 450,
+      width: 390,
       child: Card(
         clipBehavior: Clip.antiAlias,
         child: Padding(
@@ -723,19 +728,19 @@ class _TopModelsTable extends StatelessWidget {
               SingleChildScrollView(
                 scrollDirection: Axis.horizontal,
                 child: DataTable(
-                  headingRowHeight: 36,
-                  dataRowMinHeight: 38,
-                  dataRowMaxHeight: 42,
+                  headingRowHeight: 30,
+                  dataRowMinHeight: 30,
+                  dataRowMaxHeight: 34,
                   horizontalMargin: 0,
-                  columnSpacing: 12,
+                  columnSpacing: 10,
                   headingTextStyle: const TextStyle(
                     color: Color(0xFF64748B),
-                    fontSize: 11,
+                    fontSize: 10,
                     fontWeight: FontWeight.w900,
                   ),
                   dataTextStyle: const TextStyle(
                     color: Color(0xFF334155),
-                    fontSize: 12,
+                    fontSize: 11,
                     fontWeight: FontWeight.w800,
                   ),
                   columns: const [
@@ -755,12 +760,12 @@ class _TopModelsTable extends StatelessWidget {
                             Row(
                               mainAxisSize: MainAxisSize.min,
                               children: [
-                                Icon(
-                                  _categoryIcon(entry.$2.aircraft.type),
-                                  color: const Color(0xFF0A84FF),
-                                  size: 18,
+                                _CategoryUsageIcon(
+                                  category: entry.$2.aircraft.type,
+                                  size: 24,
+                                  imageHeight: 18,
                                 ),
-                                const SizedBox(width: 7),
+                                const SizedBox(width: 6),
                                 Text(entry.$2.aircraft.type),
                               ],
                             ),
@@ -788,6 +793,260 @@ class _TopModelsTable extends StatelessWidget {
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+class _CategoryUsageStats extends StatelessWidget {
+  final List<AircraftModel> aircraft;
+  final List<FlightLogEntry> flights;
+
+  const _CategoryUsageStats({
+    required this.aircraft,
+    required this.flights,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final aircraftById = {for (final model in aircraft) model.id: model};
+    final statsByCategory = <String, _CategoryUsage>{};
+
+    for (final flight in flights) {
+      final category = aircraftById[flight.aircraftId]?.type ?? 'Unbekannt';
+      final current = statsByCategory[category] ?? const _CategoryUsage();
+      statsByCategory[category] = current.add(flight.durationMinutes);
+    }
+
+    final stats = statsByCategory.entries.toList()
+      ..sort((a, b) {
+        final minutesCompare = b.value.minutes.compareTo(a.value.minutes);
+        if (minutesCompare != 0) {
+          return minutesCompare;
+        }
+        return b.value.flights.compareTo(a.value.flights);
+      });
+    final totalFlights = stats.fold<int>(
+      0,
+      (sum, entry) => sum + entry.value.flights,
+    );
+
+    return SizedBox(
+      width: 900,
+      child: Card(
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Row(
+                children: [
+                  Icon(
+                    Icons.category_rounded,
+                    color: Color(0xFF0A84FF),
+                    size: 24,
+                  ),
+                  SizedBox(width: 10),
+                  Text(
+                    'Flüge nach Typ',
+                    style: _sectionTitleStyle,
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              if (stats.isEmpty)
+                const Text(
+                  'Noch keine Kategorie-Daten vorhanden.',
+                  style: TextStyle(
+                    color: Color(0xFF64748B),
+                    fontWeight: FontWeight.w800,
+                  ),
+                )
+              else
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
+                    SizedBox(
+                      width: 230,
+                      height: 230,
+                      child: Stack(
+                        alignment: Alignment.center,
+                        children: [
+                          PieChart(
+                            PieChartData(
+                              startDegreeOffset: -90,
+                              centerSpaceRadius: 68,
+                              sectionsSpace: 3,
+                              sections: [
+                                for (var i = 0; i < stats.length; i++)
+                                  PieChartSectionData(
+                                    value: stats[i].value.flights.toDouble(),
+                                    color: _categoryChartColor(i),
+                                    title: '',
+                                    radius: 48,
+                                  ),
+                              ],
+                            ),
+                          ),
+                          Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(
+                                '$totalFlights',
+                                style: _numberTextStyle(
+                                  color: const Color(0xFF06172E),
+                                  fontSize: 24,
+                                  fontWeight: FontWeight.w900,
+                                ),
+                              ),
+                              const Text(
+                                'Flüge',
+                                style: TextStyle(
+                                  color: Color(0xFF64748B),
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w800,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 30),
+                    Expanded(
+                      child: Wrap(
+                        spacing: 16,
+                        runSpacing: 10,
+                        children: [
+                          for (var i = 0; i < stats.length; i++)
+                            _CategoryUsageLegendItem(
+                              color: _categoryChartColor(i),
+                              category: stats[i].key,
+                              usage: stats[i].value,
+                              percent: totalFlights == 0
+                                  ? 0
+                                  : stats[i].value.flights / totalFlights * 100,
+                            ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _CategoryUsage {
+  final int flights;
+  final int minutes;
+
+  const _CategoryUsage({
+    this.flights = 0,
+    this.minutes = 0,
+  });
+
+  _CategoryUsage add(int durationMinutes) {
+    return _CategoryUsage(
+      flights: flights + 1,
+      minutes: minutes + durationMinutes,
+    );
+  }
+
+  double get hours => minutes / 60;
+}
+
+class _CategoryUsageLegendItem extends StatelessWidget {
+  final Color color;
+  final String category;
+  final _CategoryUsage usage;
+  final double percent;
+
+  const _CategoryUsageLegendItem({
+    required this.color,
+    required this.category,
+    required this.usage,
+    required this.percent,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: 245,
+      child: Row(
+        children: [
+          Container(
+            width: 12,
+            height: 34,
+            decoration: BoxDecoration(
+              color: color,
+              borderRadius: BorderRadius.circular(999),
+            ),
+          ),
+          const SizedBox(width: 9),
+          _CategoryUsageIcon(category: category),
+          const SizedBox(width: 9),
+          Expanded(
+            child: Text(
+              category,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                color: Color(0xFF06172E),
+                fontSize: 12,
+                fontWeight: FontWeight.w900,
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+          Text(
+            '${usage.flights} (${percent.toStringAsFixed(0)}%)',
+            style: _numberTextStyle(
+              color: const Color(0xFF475569),
+              fontSize: 12,
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _CategoryUsageIcon extends StatelessWidget {
+  final String category;
+  final double size;
+  final double imageHeight;
+
+  const _CategoryUsageIcon({
+    required this.category,
+    this.size = 38,
+    this.imageHeight = 28,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final asset = _categoryImageAsset(category);
+
+    return SizedBox(
+      width: size,
+      height: size,
+      child: Center(
+        child: asset == null
+            ? Icon(
+                _categoryIcon(category),
+                color: const Color(0xFF0A84FF),
+                size: imageHeight,
+              )
+            : Image.asset(
+                asset,
+                width: _categoryImageWidth(category, iconSize: size),
+                height: imageHeight,
+                fit: BoxFit.contain,
+              ),
       ),
     );
   }
@@ -993,6 +1252,49 @@ const _sectionTitleStyle = TextStyle(
   fontWeight: FontWeight.w900,
 );
 
+String? _categoryImageAsset(String category) {
+  if (_isKunstflugCategory(category)) {
+    return 'assets/icons/kunstflug_icon.png';
+  }
+  if (_isElektroCategory(category)) {
+    return 'assets/icons/motorflugz_icon.png';
+  }
+  if (_isSeglerCategory(category)) {
+    return 'assets/icons/segler_icon.png';
+  }
+  if (_isScaleCategory(category)) {
+    return 'assets/icons/scale_icon.png';
+  }
+  return null;
+}
+
+double _categoryImageWidth(String category, {double iconSize = 38}) {
+  if (_isSeglerCategory(category)) {
+    return iconSize * 0.84;
+  }
+  if (_isScaleCategory(category)) {
+    return iconSize * 0.79;
+  }
+  return iconSize * 0.9;
+}
+
+bool _isKunstflugCategory(String category) {
+  return category.toLowerCase().contains('kunst');
+}
+
+bool _isElektroCategory(String category) {
+  final value = category.toLowerCase();
+  return value.contains('elektro') || value.contains('motor');
+}
+
+bool _isSeglerCategory(String category) {
+  return category.toLowerCase().contains('segler');
+}
+
+bool _isScaleCategory(String category) {
+  return category.toLowerCase().contains('scale');
+}
+
 IconData _categoryIcon(String category) {
   final value = category.toLowerCase();
 
@@ -1047,6 +1349,21 @@ Color _aircraftChartColor(int index) {
     Color(0xFF0891B2),
     Color(0xFFDC2626),
     Color(0xFFF59E0B),
+    Color(0xFF475569),
+  ];
+
+  return colors[index % colors.length];
+}
+
+Color _categoryChartColor(int index) {
+  const colors = [
+    Color(0xFF0A84FF),
+    Color(0xFF2563EB),
+    Color(0xFF0891B2),
+    Color(0xFF16A34A),
+    Color(0xFFF59E0B),
+    Color(0xFF7C3AED),
+    Color(0xFFDC2626),
     Color(0xFF475569),
   ];
 

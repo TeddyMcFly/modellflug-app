@@ -7,15 +7,17 @@ import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 
 import '../../core/widgets/app_scaffold.dart';
-import '../webcam/webcam_page.dart';
 import '../../shared/models/aircraft_model.dart';
 import '../../shared/providers/fleet_provider.dart';
+import '../../shared/services/open_meteo_service.dart';
+import '../webcam/webcam_page.dart';
 
 const _dashboardHeadingStyle = TextStyle(
   color: Color(0xFF06172E),
   fontSize: 18,
   fontWeight: FontWeight.w900,
 );
+const _dashboardPreviewCardHeight = 318.0;
 
 class DashboardPage extends ConsumerWidget {
   const DashboardPage({super.key});
@@ -26,8 +28,7 @@ class DashboardPage extends ConsumerWidget {
 
     return AppScaffold(
       title: 'Dashboard',
-      subtitle:
-          'Flotte, Wartung und letzte Fluege auf einen Blick fuer den naechsten Flugtag.',
+      subtitle: 'Alles, was wichtig ist fuer einen tollen Flugtag...',
       children: [
         Wrap(
           spacing: 10,
@@ -50,10 +51,16 @@ class DashboardPage extends ConsumerWidget {
             ),
             _MetricCard(
               icon: Icons.build_circle_rounded,
-              label: 'Wartung offen',
-              value: '${fleet.serviceDueCount}',
+              label: 'Reparatur offen',
+              value:
+                  '${fleet.aircraft.where((item) => item.status == AircraftStatus.maintenance).length}',
+              onTap: () => _showRepairInfoDialog(context, fleet.aircraft),
             ),
-            _WeatherForecastCard(fleet: fleet),
+            const _MetricCard(
+              icon: Icons.group_rounded,
+              label: 'Freunde aktiv',
+              value: '2',
+            ),
           ],
         ),
         const SizedBox(height: 12),
@@ -61,26 +68,22 @@ class DashboardPage extends ConsumerWidget {
         const SizedBox(height: 12),
         LayoutBuilder(
           builder: (context, constraints) {
-            final isWide = constraints.maxWidth >= 920;
-            const previewHeight = 375.0;
+            final isWide = constraints.maxWidth >= 900;
             if (isWide) {
               return Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  SizedBox(
-                    height: previewHeight,
-                    child: ConstrainedBox(
-                      constraints: const BoxConstraints(maxWidth: 390),
-                      child: _LastFlightCard(fleet: fleet),
+                  Expanded(
+                    child: SizedBox(
+                      height: _dashboardPreviewCardHeight,
+                      child: _WeatherForecastCard(fleet: fleet),
                     ),
                   ),
                   const SizedBox(width: 12),
                   SizedBox(
-                    height: previewHeight,
-                    child: ConstrainedBox(
-                      constraints: const BoxConstraints(maxWidth: 420),
-                      child: _HomeAirfieldWebcamCard(fleet: fleet),
-                    ),
+                    width: 340,
+                    height: _dashboardPreviewCardHeight,
+                    child: _HomeAirfieldWebcamCard(fleet: fleet),
                   ),
                 ],
               );
@@ -88,13 +91,9 @@ class DashboardPage extends ConsumerWidget {
 
             return Column(
               children: [
-                SizedBox(
-                  height: previewHeight,
-                  child: _LastFlightCard(fleet: fleet),
-                ),
+                _WeatherForecastCard(fleet: fleet),
                 const SizedBox(height: 12),
-                SizedBox(
-                  height: previewHeight,
+                Center(
                   child: _HomeAirfieldWebcamCard(fleet: fleet),
                 ),
               ],
@@ -104,23 +103,17 @@ class DashboardPage extends ConsumerWidget {
         const SizedBox(height: 12),
         LayoutBuilder(
           builder: (context, constraints) {
-            final isWide = constraints.maxWidth >= 760;
-            final maintenance = ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 390),
-              child: _MaintenanceList(fleet: fleet),
-            );
-            final activeFriends = ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 390),
-              child: const _ActiveFriendsCard(),
-            );
-
+            final isWide = constraints.maxWidth >= 820;
             if (isWide) {
               return Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  maintenance,
+                  ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 360),
+                    child: _LastFlightCard(fleet: fleet),
+                  ),
                   const SizedBox(width: 12),
-                  activeFriends,
+                  Expanded(child: _TransmitterAssignmentsTable(fleet: fleet)),
                 ],
               );
             }
@@ -128,9 +121,12 @@ class DashboardPage extends ConsumerWidget {
             return Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                maintenance,
+                ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 360),
+                  child: _LastFlightCard(fleet: fleet),
+                ),
                 const SizedBox(height: 12),
-                activeFriends,
+                _TransmitterAssignmentsTable(fleet: fleet),
               ],
             );
           },
@@ -211,7 +207,11 @@ class _ModelPhotoOverviewState extends State<_ModelPhotoOverview> {
                         const SizedBox(width: 12),
                     itemBuilder: (context, index) => SizedBox(
                       width: 122,
-                      child: _AircraftPhotoTile(aircraft: aircraft[index]),
+                      child: _AircraftPhotoTile(
+                        aircraft: aircraft[index],
+                        onTap: () =>
+                            context.go('/models?model=${aircraft[index].id}'),
+                      ),
                     ),
                   ),
                 ),
@@ -225,67 +225,82 @@ class _ModelPhotoOverviewState extends State<_ModelPhotoOverview> {
 
 class _AircraftPhotoTile extends StatelessWidget {
   final AircraftModel aircraft;
+  final VoidCallback onTap;
 
-  const _AircraftPhotoTile({required this.aircraft});
+  const _AircraftPhotoTile({
+    required this.aircraft,
+    required this.onTap,
+  });
 
   @override
   Widget build(BuildContext context) {
     final photo = aircraft.photos.isEmpty ? null : aircraft.photos.first;
     final statusColor = _statusColor(aircraft.status);
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        ClipRRect(
-          borderRadius: BorderRadius.circular(8),
-          child: SizedBox.square(
-            dimension: 108,
-            child: photo == null
-                ? Container(
-                    color: const Color(0xFFE2E8F0),
-                    child: const Icon(
-                      Icons.flight_rounded,
-                      color: Color(0xFF64748B),
-                      size: 32,
-                    ),
-                  )
-                : Image.memory(
-                    _bytesFromDataUri(photo),
-                    fit: BoxFit.cover,
-                    errorBuilder: (context, error, stackTrace) => Container(
-                      color: const Color(0xFFE2E8F0),
-                      child: const Icon(
-                        Icons.flight_rounded,
-                        color: Color(0xFF64748B),
-                        size: 32,
-                      ),
-                    ),
-                  ),
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(8),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.all(2),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              ClipRRect(
+                borderRadius: BorderRadius.circular(8),
+                child: SizedBox.square(
+                  dimension: 108,
+                  child: photo == null
+                      ? Container(
+                          color: const Color(0xFFE2E8F0),
+                          child: const Icon(
+                            Icons.flight_rounded,
+                            color: Color(0xFF64748B),
+                            size: 32,
+                          ),
+                        )
+                      : Image.memory(
+                          _bytesFromDataUri(photo),
+                          fit: BoxFit.cover,
+                          errorBuilder: (context, error, stackTrace) =>
+                              Container(
+                            color: const Color(0xFFE2E8F0),
+                            child: const Icon(
+                              Icons.flight_rounded,
+                              color: Color(0xFF64748B),
+                              size: 32,
+                            ),
+                          ),
+                        ),
+                ),
+              ),
+              const SizedBox(height: 7),
+              Text(
+                aircraft.name,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  color: Color(0xFF06172E),
+                  fontSize: 12,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                '${aircraft.status.label} - ${aircraft.flightHours.toStringAsFixed(1)} h',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: statusColor,
+                  fontSize: 10,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ],
           ),
         ),
-        const SizedBox(height: 7),
-        Text(
-          aircraft.name,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: const TextStyle(
-            color: Color(0xFF06172E),
-            fontSize: 12,
-            fontWeight: FontWeight.w900,
-          ),
-        ),
-        const SizedBox(height: 2),
-        Text(
-          '${aircraft.status.label} - ${aircraft.flightHours.toStringAsFixed(1)} h',
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: TextStyle(
-            color: statusColor,
-            fontSize: 10,
-            fontWeight: FontWeight.w800,
-          ),
-        ),
-      ],
+      ),
     );
   }
 }
@@ -315,126 +330,106 @@ class _LastFlightCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            ClipRRect(
-              borderRadius: BorderRadius.circular(8),
+            Center(
               child: SizedBox(
-                width: double.infinity,
-                height: 188,
-                child: Stack(
-                  fit: StackFit.expand,
-                  children: [
-                    photo == null
-                        ? Container(
-                            color: const Color(0xFFE2E8F0),
-                            child: const Icon(
-                              Icons.flight_takeoff_rounded,
-                              color: Color(0xFF64748B),
-                              size: 44,
-                            ),
-                          )
-                        : Image.memory(
-                            _bytesFromDataUri(photo),
-                            fit: BoxFit.cover,
-                            errorBuilder: (context, error, stackTrace) =>
-                                Container(
-                              color: const Color(0xFFE2E8F0),
-                              child: const Icon(
-                                Icons.flight_takeoff_rounded,
-                                color: Color(0xFF64748B),
-                                size: 44,
+                width: 336,
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(8),
+                  child: SizedBox(
+                    height: 252,
+                    child: Stack(
+                      fit: StackFit.expand,
+                      children: [
+                        photo == null
+                            ? Container(
+                                color: const Color(0xFFE2E8F0),
+                                child: const Icon(
+                                  Icons.flight_takeoff_rounded,
+                                  color: Color(0xFF64748B),
+                                  size: 44,
+                                ),
+                              )
+                            : Image.memory(
+                                _bytesFromDataUri(photo),
+                                fit: BoxFit.cover,
+                                errorBuilder: (context, error, stackTrace) =>
+                                    Container(
+                                  color: const Color(0xFFE2E8F0),
+                                  child: const Icon(
+                                    Icons.flight_takeoff_rounded,
+                                    color: Color(0xFF64748B),
+                                    size: 44,
+                                  ),
+                                ),
                               ),
+                        DecoratedBox(
+                          decoration: BoxDecoration(
+                            gradient: LinearGradient(
+                              begin: Alignment.topCenter,
+                              end: Alignment.bottomCenter,
+                              colors: [
+                                Colors.black.withValues(alpha: 0.42),
+                                Colors.transparent,
+                                Colors.black.withValues(alpha: 0.08),
+                              ],
                             ),
                           ),
-                    DecoratedBox(
-                      decoration: BoxDecoration(
-                        gradient: LinearGradient(
-                          begin: Alignment.topCenter,
-                          end: Alignment.bottomCenter,
-                          colors: [
-                            Colors.black.withValues(alpha: 0.42),
-                            Colors.transparent,
-                            Colors.black.withValues(alpha: 0.08),
-                          ],
                         ),
-                      ),
-                    ),
-                    const Positioned(
-                      left: 12,
-                      top: 10,
-                      child: Text(
-                        'Letzter Flug',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 18,
-                          fontWeight: FontWeight.w900,
-                          shadows: [
-                            Shadow(
-                              color: Colors.black54,
-                              blurRadius: 8,
-                              offset: Offset(0, 1),
+                        const Positioned(
+                          left: 12,
+                          top: 10,
+                          child: Text(
+                            'Letzter Flug',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 18,
+                              fontWeight: FontWeight.w900,
+                              shadows: [
+                                Shadow(
+                                  color: Colors.black54,
+                                  blurRadius: 8,
+                                  offset: Offset(0, 1),
+                                ),
+                              ],
                             ),
-                          ],
+                          ),
                         ),
-                      ),
+                        Positioned(
+                          left: 12,
+                          right: 12,
+                          bottom: 10,
+                          child: flight == null
+                              ? const Text(
+                                  'Noch kein Flug im Flugbuch erfasst.',
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.w800,
+                                    shadows: [
+                                      Shadow(
+                                        color: Colors.black54,
+                                        blurRadius: 8,
+                                        offset: Offset(0, 1),
+                                      ),
+                                    ],
+                                  ),
+                                )
+                              : _LastFlightImageInfo(
+                                  aircraftName:
+                                      aircraft?.name ?? 'Unbekanntes Modell',
+                                  date: formatter.format(flight.date),
+                                  location: flight.location,
+                                  duration: '${flight.durationMinutes} Minuten',
+                                ),
+                        ),
+                      ],
                     ),
-                  ],
+                  ),
                 ),
               ),
             ),
             const SizedBox(height: 8),
-            SizedBox(
-              height: 64,
-              child: flight == null
-                  ? const Text(
-                      'Noch kein Flug im Flugbuch erfasst.',
-                      maxLines: 3,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        color: Color(0xFF64748B),
-                        fontWeight: FontWeight.w700,
-                      ),
-                    )
-                  : Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          children: [
-                            Expanded(
-                              child: _FlightInfoLine(
-                                icon: Icons.flight_rounded,
-                                text: aircraft?.name ?? 'Unbekanntes Modell',
-                              ),
-                            ),
-                            const SizedBox(width: 8),
-                            Expanded(
-                              child: _FlightInfoLine(
-                                icon: Icons.calendar_month_rounded,
-                                text: formatter.format(flight.date),
-                              ),
-                            ),
-                          ],
-                        ),
-                        Row(
-                          children: [
-                            Expanded(
-                              child: _FlightInfoLine(
-                                icon: Icons.place_rounded,
-                                text: flight.location,
-                              ),
-                            ),
-                            const SizedBox(width: 8),
-                            Expanded(
-                              child: _FlightInfoLine(
-                                icon: Icons.timer_rounded,
-                                text: '${flight.durationMinutes} Minuten',
-                              ),
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
-            ),
-            const Spacer(),
             Center(
               child: SizedBox(
                 width: 168,
@@ -474,6 +469,71 @@ class _LastFlightCard extends StatelessWidget {
   }
 }
 
+class _LastFlightImageInfo extends StatelessWidget {
+  final String aircraftName;
+  final String date;
+  final String location;
+  final String duration;
+
+  const _LastFlightImageInfo({
+    required this.aircraftName,
+    required this.date,
+    required this.location,
+    required this.duration,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: Colors.black.withValues(alpha: 0.34),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 7),
+        child: Column(
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: _FlightInfoLine(
+                    icon: Icons.flight_rounded,
+                    text: aircraftName,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: _FlightInfoLine(
+                    icon: Icons.calendar_month_rounded,
+                    text: date,
+                  ),
+                ),
+              ],
+            ),
+            Row(
+              children: [
+                Expanded(
+                  child: _FlightInfoLine(
+                    icon: Icons.place_rounded,
+                    text: location,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: _FlightInfoLine(
+                    icon: Icons.timer_rounded,
+                    text: duration,
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class _FlightInfoLine extends StatelessWidget {
   final IconData icon;
   final String text;
@@ -489,16 +549,23 @@ class _FlightInfoLine extends StatelessWidget {
       padding: const EdgeInsets.only(bottom: 3),
       child: Row(
         children: [
-          Icon(icon, color: const Color(0xFF0A84FF), size: 15),
+          Icon(icon, color: Colors.white, size: 15),
           const SizedBox(width: 7),
           Expanded(
             child: Text(
               text,
               overflow: TextOverflow.ellipsis,
               style: const TextStyle(
-                color: Color(0xFF334155),
+                color: Colors.white,
                 fontSize: 11,
                 fontWeight: FontWeight.w800,
+                shadows: [
+                  Shadow(
+                    color: Colors.black54,
+                    blurRadius: 6,
+                    offset: Offset(0, 1),
+                  ),
+                ],
               ),
             ),
           ),
@@ -520,74 +587,93 @@ class _HomeAirfieldWebcamCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          AspectRatio(
-            aspectRatio: 4 / 3,
-            child: Stack(
-              fit: StackFit.expand,
-              children: [
-                Image.asset(WebcamPage.livePlaceholderAsset, fit: BoxFit.cover),
-                DecoratedBox(
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: Alignment.topCenter,
-                      end: Alignment.bottomCenter,
-                      colors: [
-                        Colors.black.withValues(alpha: 0.02),
-                        Colors.black.withValues(alpha: 0.38),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
+            child: Center(
+              child: SizedBox(
+                width: 336,
+                child: AspectRatio(
+                  aspectRatio: 4 / 3,
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(8),
+                    child: Stack(
+                      fit: StackFit.expand,
+                      children: [
+                        Image.asset(
+                          WebcamPage.livePlaceholderAsset,
+                          fit: BoxFit.cover,
+                        ),
+                        DecoratedBox(
+                          decoration: BoxDecoration(
+                            gradient: LinearGradient(
+                              begin: Alignment.topCenter,
+                              end: Alignment.bottomCenter,
+                              colors: [
+                                Colors.black.withValues(alpha: 0.02),
+                                Colors.black.withValues(alpha: 0.38),
+                              ],
+                            ),
+                          ),
+                        ),
+                        const Positioned(
+                          left: 12,
+                          top: 12,
+                          child: _DashboardLiveBadge(),
+                        ),
+                        Positioned(
+                          left: 14,
+                          right: 14,
+                          bottom: 12,
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'Webcam ${fleet.pilotProfile.homeAirfield}',
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.w900,
+                                ),
+                              ),
+                              const SizedBox(height: 4),
+                              const Text(
+                                'Bahnansicht - letztes Bild vor 18 Sekunden',
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  color: Color(0xFFE2E8F0),
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
                       ],
                     ),
                   ),
                 ),
-                const Positioned(
-                  left: 12,
-                  top: 12,
-                  child: _DashboardLiveBadge(),
-                ),
-                Positioned(
-                  left: 14,
-                  right: 14,
-                  bottom: 12,
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Webcam ${fleet.pilotProfile.homeAirfield}',
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 18,
-                          fontWeight: FontWeight.w900,
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-                      const Text(
-                        'Bahnansicht - letztes Bild vor 18 Sekunden',
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          color: Color(0xFFE2E8F0),
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
+              ),
             ),
           ),
           Padding(
             padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
-            child: FilledButton.icon(
-              onPressed: () => context.go('/webcam'),
-              style: FilledButton.styleFrom(
-                textStyle: const TextStyle(
-                  fontSize: 11,
-                  fontWeight: FontWeight.w900,
+            child: Center(
+              child: SizedBox(
+                width: 168,
+                child: FilledButton.icon(
+                  onPressed: () => context.go('/webcam'),
+                  style: FilledButton.styleFrom(
+                    textStyle: const TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                  icon: const Icon(Icons.videocam_rounded),
+                  label: const Text(
+                    'Webcam oeffnen',
+                    overflow: TextOverflow.ellipsis,
+                  ),
                 ),
-              ),
-              icon: const Icon(Icons.videocam_rounded),
-              label: const Text(
-                'Webcam oeffnen',
-                overflow: TextOverflow.ellipsis,
               ),
             ),
           ),
@@ -627,51 +713,56 @@ class _MetricCard extends StatelessWidget {
   final IconData icon;
   final String label;
   final String value;
+  final VoidCallback? onTap;
 
   const _MetricCard({
     required this.icon,
     required this.label,
     required this.value,
+    this.onTap,
   });
 
   @override
   Widget build(BuildContext context) {
     return SizedBox(
-      height: 92,
+      height: 58,
       child: IntrinsicWidth(
         child: Card(
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.center,
-              children: [
-                Icon(icon, color: const Color(0xFF0A84FF), size: 24),
-                const SizedBox(width: 8),
-                Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      value,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w900,
+          clipBehavior: Clip.antiAlias,
+          child: InkWell(
+            onTap: onTap,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  Icon(icon, color: const Color(0xFF0A84FF), size: 20),
+                  const SizedBox(width: 7),
+                  Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        value,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w900,
+                        ),
                       ),
-                    ),
-                    const SizedBox(height: 1),
-                    Text(
-                      label,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        color: Color(0xFF64748B),
-                        fontSize: 10,
-                        fontWeight: FontWeight.w700,
+                      Text(
+                        label,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: Color(0xFF64748B),
+                          fontSize: 9,
+                          fontWeight: FontWeight.w700,
+                        ),
                       ),
-                    ),
-                  ],
-                ),
-              ],
+                    ],
+                  ),
+                ],
+              ),
             ),
           ),
         ),
@@ -680,68 +771,455 @@ class _MetricCard extends StatelessWidget {
   }
 }
 
-class _WeatherForecastCard extends StatelessWidget {
+Future<void> _showRepairInfoDialog(
+  BuildContext context,
+  List<AircraftModel> aircraft,
+) async {
+  final repairAircraft = aircraft
+      .where((item) => item.status == AircraftStatus.maintenance)
+      .toList();
+
+  await showDialog<void>(
+    context: context,
+    builder: (context) => AlertDialog(
+      title: const Text('Offene Reparaturen'),
+      content: SizedBox(
+        width: 460,
+        child: repairAircraft.isEmpty
+            ? const Text('Aktuell sind keine Reparaturen hinterlegt.')
+            : Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  for (var index = 0;
+                      index < repairAircraft.length;
+                      index++) ...[
+                    _RepairInfoRow(aircraft: repairAircraft[index]),
+                    if (index < repairAircraft.length - 1)
+                      const Divider(height: 18),
+                  ],
+                ],
+              ),
+      ),
+      actions: [
+        FilledButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Schliessen'),
+        ),
+      ],
+    ),
+  );
+}
+
+class _RepairInfoRow extends StatelessWidget {
+  final AircraftModel aircraft;
+
+  const _RepairInfoRow({required this.aircraft});
+
+  @override
+  Widget build(BuildContext context) {
+    final photo = aircraft.photos.isNotEmpty ? aircraft.photos.first : null;
+    final repairText = aircraft.repairNotes.trim().isNotEmpty
+        ? aircraft.repairNotes.trim()
+        : 'Noch keine Reparaturhinweise hinterlegt.';
+
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        ClipRRect(
+          borderRadius: BorderRadius.circular(8),
+          child: SizedBox(
+            width: 72,
+            height: 54,
+            child: photo == null
+                ? Container(
+                    color: const Color(0xFFEFF6FF),
+                    child: const Icon(
+                      Icons.airplanemode_active_rounded,
+                      color: Color(0xFF0A84FF),
+                    ),
+                  )
+                : Image.memory(
+                    _bytesFromDataUri(photo),
+                    fit: BoxFit.cover,
+                    gaplessPlayback: true,
+                  ),
+          ),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                aircraft.name,
+                style: const TextStyle(
+                  color: Color(0xFF06172E),
+                  fontSize: 14,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                repairText,
+                style: const TextStyle(
+                  color: Color(0xFF475569),
+                  fontSize: 12,
+                  height: 1.3,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _WeatherForecastCard extends ConsumerStatefulWidget {
   final FleetState fleet;
 
   const _WeatherForecastCard({required this.fleet});
 
   @override
+  ConsumerState<_WeatherForecastCard> createState() =>
+      _WeatherForecastCardState();
+}
+
+class _WeatherForecastCardState extends ConsumerState<_WeatherForecastCard> {
+  late String _selectedLocation;
+  final TextEditingController _customLocation = TextEditingController();
+
+  List<String> get _knownLocations {
+    final profile = widget.fleet.pilotProfile;
+    final locations = <String>[
+      if (profile.homeAirfield.trim().isNotEmpty) profile.homeAirfield.trim(),
+      ...profile.flightAreas.where((area) => area.trim().isNotEmpty),
+    ];
+    final uniqueLocations = locations.toSet().toList();
+    return uniqueLocations.isEmpty ? ['Flugplatz'] : uniqueLocations;
+  }
+
+  String get _weatherLocation {
+    final custom = _customLocation.text.trim();
+    return custom.isNotEmpty ? custom : _selectedLocation;
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _selectedLocation = _knownLocations.first;
+  }
+
+  @override
+  void didUpdateWidget(covariant _WeatherForecastCard oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!_knownLocations.contains(_selectedLocation)) {
+      _selectedLocation = _knownLocations.first;
+    }
+  }
+
+  @override
+  void dispose() {
+    _customLocation.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
-    return SizedBox(
-      height: 92,
-      child: IntrinsicWidth(
-        child: Card(
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.center,
+    final settings = widget.fleet.appSettings;
+    final weatherAsync = ref.watch(
+      weatherForecastProvider(
+        WeatherQuery(
+          location: _weatherLocation,
+          timeZone: settings.timeZone,
+        ),
+      ),
+    );
+    final weather = weatherAsync.maybeWhen(
+      data: (weather) => weather,
+      orElse: () => fallbackWeather(_weatherLocation),
+    );
+    final rows = _weatherRows(weather, settings);
+
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Row(
               children: [
-                const Icon(
-                  Icons.wb_cloudy_rounded,
-                  color: Color(0xFF0A84FF),
-                  size: 24,
+                Icon(
+                  Icons.wb_sunny_rounded,
+                  color: Color(0xFFF59E0B),
+                  size: 28,
                 ),
-                const SizedBox(width: 8),
-                Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text(
-                      'Wettervorhersage',
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        color: Color(0xFF0F172A),
-                        fontSize: 10,
-                        fontWeight: FontWeight.w900,
-                      ),
-                    ),
-                    const SizedBox(height: 1),
-                    const Text(
-                      '19 C - leicht bewoelkt',
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w900,
-                      ),
-                    ),
-                    Text(
-                      '${fleet.pilotProfile.homeAirfield} - SW 12 km/h',
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        color: Color(0xFF475569),
-                        fontSize: 9,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                  ],
+                SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    'Wettervorhersage',
+                    style: _dashboardHeadingStyle,
+                  ),
                 ),
               ],
             ),
-          ),
+            const SizedBox(height: 16),
+            _WeatherLocationChooser(
+              locations: _knownLocations,
+              selectedLocation: _selectedLocation,
+              customLocation: _customLocation,
+              onSelected: (value) {
+                if (value == null) {
+                  return;
+                }
+                setState(() {
+                  _selectedLocation = value;
+                  _customLocation.clear();
+                });
+              },
+              onCustomChanged: (_) => setState(() {}),
+            ),
+            const SizedBox(height: 28),
+            Text(
+              '$_weatherLocation - ${weather.condition}${weather.isLive ? '' : ' (Fallback)'}',
+              style: const TextStyle(
+                color: Color(0xFF0F172A),
+                fontSize: 15,
+                fontWeight: FontWeight.w900,
+              ),
+            ),
+            const SizedBox(height: 18),
+            SizedBox(
+              width: double.infinity,
+              child: _WeatherTable(rows: rows),
+            ),
+            const SizedBox(height: 14),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                Icon(
+                  weather.assessmentIcon,
+                  color: weather.assessmentColor,
+                  size: 30,
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    weather.assessment,
+                    style: TextStyle(
+                      color: weather.assessmentColor,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w900,
+                      height: 1.22,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ],
         ),
       ),
     );
   }
+}
+
+List<(IconData, String, String)> _weatherRows(
+  OpenMeteoWeather weather,
+  AppSettings settings,
+) {
+  final wind =
+      '${windDirectionLabel(weather.windDirection)} ${formatWindSpeed(weather.windSpeedKmh, settings.windUnit)}';
+  return [
+    (
+      Icons.thermostat_rounded,
+      'Temperatur',
+      '${formatTemperature(weather.temperatureC, settings.temperatureUnit)}, aktuell'
+    ),
+    (Icons.air_rounded, 'Wind', wind),
+    (
+      Icons.speed_rounded,
+      'Boeen',
+      'bis ${formatWindSpeed(weather.gustsKmh, settings.windUnit)}'
+    ),
+    (
+      Icons.water_drop_rounded,
+      'Niederschlag',
+      '${weather.precipitationProbability} %, heute'
+    ),
+    (
+      Icons.visibility_rounded,
+      'Sicht',
+      formatDistance(weather.visibilityKm, settings.distanceUnit)
+    ),
+    (Icons.wb_twilight_rounded, 'Sonnenuntergang', '${weather.sunset} Uhr'),
+  ];
+}
+
+class _WeatherLocationChooser extends StatelessWidget {
+  final List<String> locations;
+  final String selectedLocation;
+  final TextEditingController customLocation;
+  final ValueChanged<String?> onSelected;
+  final ValueChanged<String> onCustomChanged;
+
+  const _WeatherLocationChooser({
+    required this.locations,
+    required this.selectedLocation,
+    required this.customLocation,
+    required this.onSelected,
+    required this.onCustomChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final compact = constraints.maxWidth < 560;
+        final locationPicker = DropdownButtonFormField<String>(
+          initialValue: locations.contains(selectedLocation)
+              ? selectedLocation
+              : locations.first,
+          isExpanded: true,
+          decoration: const InputDecoration(
+            labelText: 'Fluggebiet',
+            isDense: true,
+            prefixIcon: Icon(Icons.place_rounded, size: 18),
+          ),
+          items: [
+            for (final location in locations)
+              DropdownMenuItem(value: location, child: Text(location)),
+          ],
+          onChanged: onSelected,
+        );
+        final customField = TextField(
+          controller: customLocation,
+          onChanged: onCustomChanged,
+          decoration: const InputDecoration(
+            labelText: 'Freier Ort',
+            isDense: true,
+            prefixIcon: Icon(Icons.edit_location_alt_rounded, size: 18),
+          ),
+        );
+
+        if (compact) {
+          return Column(
+            children: [
+              locationPicker,
+              const SizedBox(height: 8),
+              customField,
+            ],
+          );
+        }
+
+        return Row(
+          children: [
+            Expanded(child: locationPicker),
+            const SizedBox(width: 10),
+            Expanded(child: customField),
+          ],
+        );
+      },
+    );
+  }
+}
+
+class _WeatherTable extends StatelessWidget {
+  final List<(IconData, String, String)> rows;
+
+  const _WeatherTable({required this.rows});
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        if (constraints.maxWidth < 560) {
+          return _WeatherRowsTable(rows: rows);
+        }
+
+        final leftRows = rows.take(3).toList();
+        final rightRows = rows.skip(3).toList();
+
+        return Table(
+          columnWidths: const {
+            0: FixedColumnWidth(30),
+            1: FixedColumnWidth(112),
+            2: FlexColumnWidth(),
+            3: FixedColumnWidth(36),
+            4: FixedColumnWidth(30),
+            5: FixedColumnWidth(128),
+            6: FlexColumnWidth(),
+          },
+          defaultVerticalAlignment: TableCellVerticalAlignment.middle,
+          children: [
+            for (var index = 0; index < leftRows.length; index++)
+              TableRow(
+                children: [
+                  ..._weatherCells(leftRows[index]),
+                  const SizedBox(width: 36),
+                  ..._weatherCells(rightRows[index]),
+                ],
+              ),
+          ],
+        );
+      },
+    );
+  }
+}
+
+class _WeatherRowsTable extends StatelessWidget {
+  final List<(IconData, String, String)> rows;
+
+  const _WeatherRowsTable({required this.rows});
+
+  @override
+  Widget build(BuildContext context) {
+    return Table(
+      columnWidths: const {
+        0: FixedColumnWidth(32),
+        1: FixedColumnWidth(142),
+        2: FlexColumnWidth(1.8),
+      },
+      defaultVerticalAlignment: TableCellVerticalAlignment.middle,
+      children: [
+        for (final row in rows)
+          TableRow(
+            children: _weatherCells(row),
+          ),
+      ],
+    );
+  }
+}
+
+List<Widget> _weatherCells((IconData, String, String) row) {
+  return [
+    Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Icon(row.$1, color: const Color(0xFF0A84FF), size: 18),
+    ),
+    Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Text(
+        row.$2,
+        style: const TextStyle(
+          color: Color(0xFF64748B),
+          fontSize: 12,
+          fontWeight: FontWeight.w800,
+        ),
+      ),
+    ),
+    Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Text(
+        row.$3,
+        style: const TextStyle(
+          color: Color(0xFF334155),
+          fontSize: 12,
+          fontWeight: FontWeight.w900,
+        ),
+      ),
+    ),
+  ];
 }
 
 int _weeklyFlightCount(List<FlightLogEntry> flights) {
@@ -761,241 +1239,207 @@ DateTime _currentWeekMonday() {
       .subtract(Duration(days: now.weekday - 1));
 }
 
-class _MaintenanceList extends StatelessWidget {
+class _TransmitterAssignmentsTable extends StatelessWidget {
   final FleetState fleet;
 
-  const _MaintenanceList({required this.fleet});
+  const _TransmitterAssignmentsTable({required this.fleet});
 
   @override
   Widget build(BuildContext context) {
-    final formatter = DateFormat('dd.MM.yyyy');
-    final sorted = [...fleet.aircraft]
-      ..sort((a, b) => a.nextService.compareTo(b.nextService));
+    final sortedAircraft = [...fleet.aircraft]
+      ..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
 
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(18),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              'Naechste Wartungen',
-              style: _dashboardHeadingStyle,
-            ),
-            const SizedBox(height: 10),
-            for (final aircraft in sorted)
-              Padding(
-                padding: const EdgeInsets.only(bottom: 8),
-                child: Row(
-                  children: [
-                    _StatusDot(status: aircraft.status),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            aircraft.name,
-                            style: const TextStyle(fontWeight: FontWeight.w900),
-                          ),
-                          Text(
-                            formatter.format(aircraft.nextService),
-                            style: const TextStyle(color: Color(0xFF64748B)),
-                          ),
-                        ],
-                      ),
-                    ),
-                    Text(
-                      aircraft.status.label,
-                      style: const TextStyle(fontWeight: FontWeight.w800),
-                    ),
-                  ],
-                ),
+    return SizedBox(
+      height: 330,
+      child: Card(
+        child: Padding(
+          padding: const EdgeInsets.all(18),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Row(
+                children: [
+                  Icon(
+                    Icons.settings_remote_rounded,
+                    color: Color(0xFF0A84FF),
+                    size: 26,
+                  ),
+                  SizedBox(width: 10),
+                  Text(
+                    'Sender-Zuordnung',
+                    style: _dashboardHeadingStyle,
+                  ),
+                ],
               ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _ActiveFriendsCard extends StatelessWidget {
-  const _ActiveFriendsCard();
-
-  static const _friends = [
-    _ActiveFriend(
-      name: 'Martin Keller',
-      club: 'LMFC Lohburg',
-      status: _ActiveFriendStatus.atField,
-      flyingModel: 'ASW 28',
-      initials: 'MK',
-      color: Color(0xFF0A84FF),
-    ),
-    _ActiveFriend(
-      name: 'Sabine Wolf',
-      club: 'LMFC Lohburg',
-      status: _ActiveFriendStatus.flying,
-      flyingModel: 'Slowflyer',
-      initials: 'SW',
-      color: Color(0xFFEA580C),
-    ),
-  ];
-
-  @override
-  Widget build(BuildContext context) {
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(18),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              'Freunde aktiv',
-              style: _dashboardHeadingStyle,
-            ),
-            const SizedBox(height: 10),
-            for (final friend in _friends)
-              Padding(
-                padding: const EdgeInsets.only(bottom: 9),
-                child: Row(
-                  children: [
-                    CircleAvatar(
-                      radius: 18,
-                      backgroundColor: friend.color,
-                      child: Text(
-                        friend.initials,
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 11,
-                          fontWeight: FontWeight.w900,
+              const SizedBox(height: 12),
+              if (sortedAircraft.isEmpty)
+                const Text(
+                  'Noch keine Modelle angelegt.',
+                  style: TextStyle(
+                    color: Color(0xFF64748B),
+                    fontWeight: FontWeight.w700,
+                  ),
+                )
+              else
+                Expanded(
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(8),
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        border: Border.all(color: const Color(0xFFE2E8F0)),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: SingleChildScrollView(
+                        child: SingleChildScrollView(
+                          scrollDirection: Axis.horizontal,
+                          child: DataTable(
+                            headingRowHeight: 38,
+                            dataRowMinHeight: 46,
+                            dataRowMaxHeight: 50,
+                            horizontalMargin: 14,
+                            columnSpacing: 26,
+                            headingRowColor: WidgetStateProperty.all(
+                              const Color(0xFFEAF3FF),
+                            ),
+                            columns: const [
+                              DataColumn(
+                                  label: _DashboardTableHeader('Modell')),
+                              DataColumn(
+                                label: _DashboardTableHeader('Kategorie'),
+                              ),
+                              DataColumn(
+                                  label: _DashboardTableHeader('Sender')),
+                              DataColumn(
+                                label: _DashboardTableHeader(
+                                  'Sender-Speicherplatz',
+                                ),
+                              ),
+                            ],
+                            rows: [
+                              for (final aircraft in sortedAircraft)
+                                DataRow(
+                                  cells: [
+                                    DataCell(
+                                      _DashboardAircraftCell(
+                                          aircraft: aircraft),
+                                    ),
+                                    DataCell(
+                                        _DashboardTableText(aircraft.type)),
+                                    DataCell(
+                                      _DashboardTableText(
+                                        _tableFallback(aircraft.transmitter),
+                                      ),
+                                    ),
+                                    DataCell(
+                                      _DashboardTableText(
+                                        _tableFallback(
+                                          aircraft.transmitterMemorySlot,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                            ],
+                          ),
                         ),
                       ),
                     ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            friend.name,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                              color: Color(0xFF06172E),
-                              fontWeight: FontWeight.w900,
-                            ),
-                          ),
-                          Text(
-                            friend.flyingModel.isEmpty
-                                ? friend.club
-                                : '${friend.club} - ${friend.flyingModel}',
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                              color: Color(0xFF64748B),
-                              fontSize: 11,
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(width: 10),
-                    _ActiveFriendStatusBadge(status: friend.status),
-                  ],
+                  ),
                 ),
-              ),
-          ],
+            ],
+          ),
         ),
       ),
     );
   }
 }
 
-class _ActiveFriend {
-  final String name;
-  final String club;
-  final _ActiveFriendStatus status;
-  final String flyingModel;
-  final String initials;
-  final Color color;
+class _DashboardAircraftCell extends StatelessWidget {
+  final AircraftModel aircraft;
 
-  const _ActiveFriend({
-    required this.name,
-    required this.club,
-    required this.status,
-    required this.flyingModel,
-    required this.initials,
-    required this.color,
-  });
-}
-
-enum _ActiveFriendStatus {
-  atField('Am Platz', Color(0xFFFACC15)),
-  flying('Fliegt', Color(0xFF22C55E));
-
-  final String label;
-  final Color color;
-
-  const _ActiveFriendStatus(this.label, this.color);
-}
-
-class _ActiveFriendStatusBadge extends StatelessWidget {
-  final _ActiveFriendStatus status;
-
-  const _ActiveFriendStatusBadge({required this.status});
+  const _DashboardAircraftCell({required this.aircraft});
 
   @override
   Widget build(BuildContext context) {
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Container(
-          width: 9,
-          height: 9,
-          decoration: BoxDecoration(
-            color: status.color,
-            shape: BoxShape.circle,
-            boxShadow: [
-              BoxShadow(
-                color: status.color.withValues(alpha: 0.38),
-                blurRadius: 8,
-              ),
-            ],
+    final photo = aircraft.photos.isEmpty ? null : aircraft.photos.first;
+
+    return SizedBox(
+      width: 178,
+      child: Row(
+        children: [
+          ClipRRect(
+            borderRadius: BorderRadius.circular(6),
+            child: SizedBox.square(
+              dimension: 34,
+              child: photo == null
+                  ? Container(
+                      color: const Color(0xFFE2E8F0),
+                      child: const Icon(
+                        Icons.flight_rounded,
+                        color: Color(0xFF64748B),
+                        size: 18,
+                      ),
+                    )
+                  : Image.memory(
+                      _bytesFromDataUri(photo),
+                      fit: BoxFit.cover,
+                      errorBuilder: (context, error, stackTrace) => Container(
+                        color: const Color(0xFFE2E8F0),
+                        child: const Icon(
+                          Icons.flight_rounded,
+                          color: Color(0xFF64748B),
+                          size: 18,
+                        ),
+                      ),
+                    ),
+            ),
           ),
-        ),
-        const SizedBox(width: 6),
-        Text(
-          status.label,
-          style: const TextStyle(
-            color: Color(0xFF334155),
-            fontSize: 11,
-            fontWeight: FontWeight.w900,
-          ),
-        ),
-      ],
+          const SizedBox(width: 9),
+          Expanded(child: _DashboardTableText(aircraft.name)),
+        ],
+      ),
     );
   }
 }
 
-class _StatusDot extends StatelessWidget {
-  final AircraftStatus status;
+class _DashboardTableHeader extends StatelessWidget {
+  final String text;
 
-  const _StatusDot({required this.status});
+  const _DashboardTableHeader(this.text);
 
   @override
   Widget build(BuildContext context) {
-    final color = switch (status) {
-      AircraftStatus.ready => const Color(0xFF16A34A),
-      AircraftStatus.maintenance => const Color(0xFFEA580C),
-      AircraftStatus.destroyed => const Color(0xFFDC2626),
-    };
-
-    return Container(
-      width: 12,
-      height: 12,
-      decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+    return Text(
+      text,
+      style: const TextStyle(
+        color: Color(0xFF06172E),
+        fontSize: 12,
+        fontWeight: FontWeight.w900,
+      ),
     );
   }
 }
+
+class _DashboardTableText extends StatelessWidget {
+  final String text;
+
+  const _DashboardTableText(this.text);
+
+  @override
+  Widget build(BuildContext context) {
+    return Text(
+      text,
+      overflow: TextOverflow.ellipsis,
+      style: const TextStyle(
+        color: Color(0xFF334155),
+        fontSize: 12,
+        fontWeight: FontWeight.w700,
+      ),
+    );
+  }
+}
+
+String _tableFallback(String value) => value.trim().isEmpty ? '-' : value;
 
 Color _statusColor(AircraftStatus status) {
   return switch (status) {

@@ -33,11 +33,10 @@ class FleetState {
   int get chargedBatteryCount =>
       batteries.where((item) => item.status == BatteryStatus.charged).length;
 
-  int get totalFlights =>
-      aircraft.fold(0, (sum, item) => sum + item.totalFlights);
+  int get totalFlights => flights.length;
 
   double get totalHours =>
-      aircraft.fold(0, (sum, item) => sum + item.flightHours);
+      flights.fold(0, (sum, item) => sum + item.durationMinutes / 60);
 
   FleetState copyWith({
     List<AircraftModel>? aircraft,
@@ -123,8 +122,14 @@ class FleetNotifier extends StateNotifier<FleetState> {
       ],
       batteries: [
         for (final item in state.batteries)
-          if (item.assignedAircraftId == id)
-            item.copyWith(assignedAircraftId: '')
+          if (item.aircraftIds.contains(id))
+            item.copyWith(
+              assignedAircraftId: '',
+              assignedAircraftIds: [
+                for (final aircraftId in item.aircraftIds)
+                  if (aircraftId != id) aircraftId,
+              ],
+            )
           else
             item,
       ],
@@ -147,11 +152,31 @@ class FleetNotifier extends StateNotifier<FleetState> {
     _save();
   }
 
+  void updateBattery(BatteryPack battery) {
+    state = state.copyWith(
+      batteries: [
+        for (final item in state.batteries)
+          if (item.id == battery.id) battery else item,
+      ],
+    );
+    _save();
+  }
+
   void updateBatteryStatus(String id, BatteryStatus status) {
     state = state.copyWith(
       batteries: [
         for (final item in state.batteries)
           if (item.id == id) item.copyWith(status: status) else item,
+      ],
+    );
+    _save();
+  }
+
+  void deleteBattery(String id) {
+    state = state.copyWith(
+      batteries: [
+        for (final item in state.batteries)
+          if (item.id != id) item,
       ],
     );
     _save();
@@ -179,6 +204,21 @@ class FleetNotifier extends StateNotifier<FleetState> {
       appSettings: state.appSettings.copyWith(reachableByChat: enabled),
     );
     _save();
+  }
+
+  void updateAppSettings(AppSettings settings) {
+    state = state.copyWith(appSettings: settings);
+    _save();
+  }
+
+  String exportJson() {
+    return const JsonEncoder.withIndent('  ').convert(state.toJson());
+  }
+
+  Future<void> importJson(String rawJson) async {
+    final decoded = jsonDecode(rawJson) as Map<String, dynamic>;
+    state = FleetState.fromJson(decoded);
+    await _save();
   }
 
   void addFlight(FlightLogEntry entry) {
@@ -294,14 +334,21 @@ final _initialState = FleetState(
     shareLocationWithFriends: false,
     reachableByChat: true,
     presenceStatus: LocationPresenceStatus.offline,
+    timeZone: 'Europe/Berlin',
+    distanceUnit: 'km',
+    windUnit: 'km/h',
+    temperatureUnit: 'Celsius',
+    language: 'Deutsch',
   ),
   pilotProfile: const PilotProfile(
     name: 'Teddy',
     homeAirfield: 'MFC Suedhang',
+    flightAreas: ['LMFC-Fluggelaende'],
     club: 'MFC Adler',
     licenseNumber: '',
     phone: '',
     email: '',
+    transmitters: ['Jeti DS-16', 'Spektrum NX10'],
     notes: 'Modellpilot mit Fokus auf Segler, Drohnen und Kunstflug.',
   ),
   aircraft: [
@@ -314,8 +361,14 @@ final _initialState = FleetState(
       wingspanMeters: 3.2,
       lengthMeters: 1.42,
       weightKg: 4.8,
+      transmitter: 'Jeti DS-16',
+      transmitterMemorySlot: 'ASW28-01',
       receiver: 'Jeti REX 10',
       propeller: 'Klapp 13x8',
+      materialFuselageWing: 'GFK-Rumpf / Styro-Abachi-Flaeche',
+      wingLoading: '58 g/dm2',
+      recommendedDriveBattery: '6S 4000 mAh LiPo',
+      servos: '6x KST X10, 2x KST X12',
       purchaseDate: DateTime(2024, 3, 12),
       drive: 'Elektrosegler, 6S',
       batteryCount: 2,
@@ -335,8 +388,14 @@ final _initialState = FleetState(
       wingspanMeters: 1.8,
       lengthMeters: 1.72,
       weightKg: 3.1,
+      transmitter: 'Spektrum NX10',
+      transmitterMemorySlot: 'EXTRA-300',
       receiver: 'Spektrum AR8020T',
       propeller: '16x8',
+      materialFuselageWing: 'Balsa/CFK-Verstaerkungen',
+      wingLoading: '72 g/dm2',
+      recommendedDriveBattery: '6S 5000 mAh LiPo',
+      servos: '4x Savox 1256TG, 2x Mini HV',
       purchaseDate: DateTime(2025, 7, 4),
       drive: 'Brushless 6S',
       batteryCount: 5,
@@ -356,8 +415,14 @@ final _initialState = FleetState(
       wingspanMeters: 0.52,
       lengthMeters: 0.52,
       weightKg: 1.2,
+      transmitter: 'Radiomaster TX16S',
+      transmitterMemorySlot: 'QUAD-X4',
       receiver: 'ELRS 2.4 GHz',
       propeller: '5.1x4.3',
+      materialFuselageWing: 'Carbonrahmen / Kunststoffarme',
+      wingLoading: '-',
+      recommendedDriveBattery: '4S 1500 mAh LiPo',
+      servos: 'Keine, Flightcontroller direkt',
       purchaseDate: DateTime(2025, 9, 18),
       drive: '4x Brushless',
       batteryCount: 8,
@@ -379,6 +444,7 @@ final _initialState = FleetState(
       chargePercent: 100,
       cycles: 34,
       status: BatteryStatus.charged,
+      purchaseDate: DateTime(2025, 8, 22),
       lastUsed: DateTime(2026, 5, 14),
       assignedAircraftId: 'extra300',
       notes: 'Innenwiderstand stabil, fuer Kunstflug freigegeben.',
@@ -392,6 +458,7 @@ final _initialState = FleetState(
       chargePercent: 62,
       cycles: 35,
       status: BatteryStatus.storage,
+      purchaseDate: DateTime(2025, 8, 22),
       lastUsed: DateTime(2026, 5, 12),
       assignedAircraftId: 'extra300',
       notes: 'Lagerspannung erreicht.',
@@ -405,6 +472,7 @@ final _initialState = FleetState(
       chargePercent: 78,
       cycles: 88,
       status: BatteryStatus.service,
+      purchaseDate: DateTime(2024, 11, 4),
       lastUsed: DateTime(2026, 5, 9),
       assignedAircraftId: 'quadx4',
       notes: 'Zelle 3 beobachten, Spannungsabfall unter Last.',
@@ -418,6 +486,7 @@ final _initialState = FleetState(
       chargePercent: 100,
       cycles: 21,
       status: BatteryStatus.charged,
+      purchaseDate: DateTime(2026, 2, 18),
       lastUsed: DateTime(2026, 5, 15),
       assignedAircraftId: 'asw28',
       notes: 'Empfaengerakku fuer lange Thermikfluege.',
