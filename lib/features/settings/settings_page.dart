@@ -32,7 +32,7 @@ class SettingsPage extends ConsumerWidget {
             children: [
               const _SettingsTabs(),
               Container(
-                height: 1320,
+                height: 1580,
                 decoration: const BoxDecoration(
                   borderRadius: BorderRadius.only(
                     bottomLeft: Radius.circular(8),
@@ -1333,6 +1333,30 @@ class _AppSettingsCard extends StatelessWidget {
                   ],
                 ),
                 _SettingsSection(
+                  title: 'Oberfläche',
+                  icon: Icons.palette_rounded,
+                  children: [
+                    _SwitchSettingTile(
+                      icon: Icons.volume_up_rounded,
+                      title: 'Startsound beim Programmstart abspielen',
+                      value: settings.playStartSound,
+                      onChanged: (value) => onSettingsChanged(
+                        settings.copyWith(playStartSound: value),
+                      ),
+                    ),
+                    _SwitchSettingTile(
+                      icon: Icons.login_rounded,
+                      title: 'Nach 100 % Laden automatisch Dashboard zeigen',
+                      value: settings.autoOpenDashboardAfterLoading,
+                      onChanged: (value) => onSettingsChanged(
+                        settings.copyWith(
+                          autoOpenDashboardAfterLoading: value,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                _SettingsSection(
                   title: 'Sicherung',
                   icon: Icons.backup_rounded,
                   children: [
@@ -1891,7 +1915,7 @@ class _LocationShareSwitch extends StatelessWidget {
                 Text(
                   value
                       ? 'Freunde sehen, ob du am Platz bist.'
-                      : 'Alles bleibt alles anonym.',
+                      : 'Alles bleibt anonym.',
                   style: const TextStyle(
                     color: Color(0xFF64748B),
                     fontSize: 10,

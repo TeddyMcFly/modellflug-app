@@ -407,7 +407,7 @@ class _AircraftInventoryList extends StatelessWidget {
   }
 }
 
-class _CategoryFilterPanel extends StatelessWidget {
+class _CategoryFilterPanel extends StatefulWidget {
   final String? selectedCategory;
   final ValueChanged<String?> onSelected;
 
@@ -415,6 +415,19 @@ class _CategoryFilterPanel extends StatelessWidget {
     required this.selectedCategory,
     required this.onSelected,
   });
+
+  @override
+  State<_CategoryFilterPanel> createState() => _CategoryFilterPanelState();
+}
+
+class _CategoryFilterPanelState extends State<_CategoryFilterPanel> {
+  final ScrollController _categoryScrollController = ScrollController();
+
+  @override
+  void dispose() {
+    _categoryScrollController.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -429,15 +442,15 @@ class _CategoryFilterPanel extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
+          const Row(
             children: [
-              const Icon(
+              Icon(
                 Icons.category_rounded,
                 color: Color(0xFF0A84FF),
                 size: 17,
               ),
-              const SizedBox(width: 7),
-              const Expanded(
+              SizedBox(width: 7),
+              Expanded(
                 child: Text(
                   'Kategorien zur Auswahl',
                   style: TextStyle(
@@ -447,45 +460,97 @@ class _CategoryFilterPanel extends StatelessWidget {
                   ),
                 ),
               ),
-              if (selectedCategory != null)
-                TextButton(
-                  onPressed: () => onSelected(null),
-                  style: TextButton.styleFrom(
-                    minimumSize: const Size(0, 28),
-                    padding: const EdgeInsets.symmetric(horizontal: 8),
-                    textStyle: const TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w900,
-                    ),
-                  ),
-                  child: const Text('Alle'),
-                ),
             ],
           ),
           const SizedBox(height: 8),
           SizedBox(
-            height: 76,
-            child: ListView.separated(
-              scrollDirection: Axis.horizontal,
-              itemCount: aircraftCategoryOptions.length + 1,
-              separatorBuilder: (context, index) => const SizedBox(width: 8),
-              itemBuilder: (context, index) {
-                if (index == aircraftCategoryOptions.length) {
-                  return _RepairFilterButton(
-                    selected: _isRepairFilter(selectedCategory),
-                    onTap: () => onSelected(_repairFilterKey),
+            height: 86,
+            child: Scrollbar(
+              controller: _categoryScrollController,
+              thumbVisibility: true,
+              trackVisibility: true,
+              interactive: true,
+              thickness: 5,
+              radius: const Radius.circular(999),
+              child: ListView.separated(
+                controller: _categoryScrollController,
+                scrollDirection: Axis.horizontal,
+                padding: const EdgeInsets.only(bottom: 12),
+                itemCount: aircraftCategoryOptions.length + 2,
+                separatorBuilder: (context, index) => const SizedBox(width: 8),
+                itemBuilder: (context, index) {
+                  if (index == 0) {
+                    return _AllModelsFilterButton(
+                      selected: widget.selectedCategory == null,
+                      onTap: () => widget.onSelected(null),
+                    );
+                  }
+                  if (index == aircraftCategoryOptions.length + 1) {
+                    return _RepairFilterButton(
+                      selected: _isRepairFilter(widget.selectedCategory),
+                      onTap: () => widget.onSelected(_repairFilterKey),
+                    );
+                  }
+                  final category = aircraftCategoryOptions[index - 1];
+                  return _CategoryFilterButton(
+                    category: category,
+                    selected: category == widget.selectedCategory,
+                    onTap: () => widget.onSelected(category),
                   );
-                }
-                final category = aircraftCategoryOptions[index];
-                return _CategoryFilterButton(
-                  category: category,
-                  selected: category == selectedCategory,
-                  onTap: () => onSelected(category),
-                );
-              },
+                },
+              ),
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _AllModelsFilterButton extends StatelessWidget {
+  final bool selected;
+  final VoidCallback onTap;
+
+  const _AllModelsFilterButton({
+    required this.selected,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: 'Alle Modelle',
+      child: Material(
+        color: selected ? const Color(0xFFE0F2FE) : Colors.white,
+        borderRadius: BorderRadius.circular(8),
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(8),
+          child: Container(
+            width: 72,
+            height: 72,
+            padding: const EdgeInsets.all(6),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(
+                color: selected
+                    ? const Color(0xFF0A84FF)
+                    : const Color(0xFFE2E8F0),
+                width: selected ? 2 : 1,
+              ),
+            ),
+            child: const Center(
+              child: SizedBox.square(
+                dimension: 60,
+                child: Icon(
+                  Icons.apps_rounded,
+                  color: Color(0xFF0A84FF),
+                  size: 54,
+                ),
+              ),
+            ),
+          ),
+        ),
       ),
     );
   }
@@ -592,11 +657,12 @@ class _ModelCategoryIcon extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final asset = _modelCategoryIconAsset(category);
+    final iconSize = _modelCategoryIconSize(category);
     if (asset != null) {
       return Image.asset(
         asset,
-        width: 60,
-        height: 60,
+        width: iconSize,
+        height: iconSize,
         fit: BoxFit.contain,
         filterQuality: FilterQuality.none,
       );
@@ -608,6 +674,13 @@ class _ModelCategoryIcon extends StatelessWidget {
       size: 42,
     );
   }
+}
+
+double _modelCategoryIconSize(String category) {
+  if (category.toLowerCase().contains('slowflyer')) {
+    return 40;
+  }
+  return 60;
 }
 
 class _EmptyCategorySelection extends StatelessWidget {
@@ -3270,6 +3343,9 @@ String? _modelCategoryIconAsset(String category) {
   }
   if (value.contains('paragleiter') || value.contains('para')) {
     return 'assets/icons/paragleiter_60.png';
+  }
+  if (value.contains('nurfl')) {
+    return 'assets/icons/nurfluegler_60.png';
   }
   if (value.contains('scale')) {
     return 'assets/icons/scale_60.png';

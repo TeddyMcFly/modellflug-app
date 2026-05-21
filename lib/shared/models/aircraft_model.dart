@@ -548,6 +548,9 @@ class AppSettings {
   final bool notifyBatteryLimits;
   final bool notifyRepairs;
   final bool notifyGoodWeather;
+  final bool playStartSound;
+  final bool autoOpenDashboardAfterLoading;
+  final bool surfaceSettingsInitialized;
 
   const AppSettings({
     required this.shareLocationWithFriends,
@@ -569,6 +572,9 @@ class AppSettings {
     this.notifyBatteryLimits = true,
     this.notifyRepairs = true,
     this.notifyGoodWeather = true,
+    this.playStartSound = true,
+    this.autoOpenDashboardAfterLoading = true,
+    this.surfaceSettingsInitialized = true,
   });
 
   AppSettings copyWith({
@@ -591,6 +597,9 @@ class AppSettings {
     bool? notifyBatteryLimits,
     bool? notifyRepairs,
     bool? notifyGoodWeather,
+    bool? playStartSound,
+    bool? autoOpenDashboardAfterLoading,
+    bool? surfaceSettingsInitialized,
   }) {
     return AppSettings(
       shareLocationWithFriends:
@@ -616,6 +625,11 @@ class AppSettings {
       notifyBatteryLimits: notifyBatteryLimits ?? this.notifyBatteryLimits,
       notifyRepairs: notifyRepairs ?? this.notifyRepairs,
       notifyGoodWeather: notifyGoodWeather ?? this.notifyGoodWeather,
+      playStartSound: playStartSound ?? this.playStartSound,
+      autoOpenDashboardAfterLoading:
+          autoOpenDashboardAfterLoading ?? this.autoOpenDashboardAfterLoading,
+      surfaceSettingsInitialized:
+          surfaceSettingsInitialized ?? this.surfaceSettingsInitialized,
     );
   }
 
@@ -661,6 +675,11 @@ class AppSettings {
       notifyBatteryLimits: json['notifyBatteryLimits'] as bool? ?? true,
       notifyRepairs: json['notifyRepairs'] as bool? ?? true,
       notifyGoodWeather: json['notifyGoodWeather'] as bool? ?? true,
+      playStartSound: json['playStartSound'] as bool? ?? true,
+      autoOpenDashboardAfterLoading:
+          json['autoOpenDashboardAfterLoading'] as bool? ?? true,
+      surfaceSettingsInitialized:
+          json['surfaceSettingsInitialized'] as bool? ?? false,
     );
   }
 
@@ -688,6 +707,9 @@ class AppSettings {
       'notifyBatteryLimits': notifyBatteryLimits,
       'notifyRepairs': notifyRepairs,
       'notifyGoodWeather': notifyGoodWeather,
+      'playStartSound': playStartSound,
+      'autoOpenDashboardAfterLoading': autoOpenDashboardAfterLoading,
+      'surfaceSettingsInitialized': surfaceSettingsInitialized,
     };
   }
 }

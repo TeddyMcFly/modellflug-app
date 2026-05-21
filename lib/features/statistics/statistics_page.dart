@@ -1271,6 +1271,9 @@ String? _categoryImageAsset(String category) {
   if (_isParagleiterCategory(category)) {
     return 'assets/icons/paragleiter_60.png';
   }
+  if (_isNurflueglerCategory(category)) {
+    return 'assets/icons/nurfluegler_60.png';
+  }
   if (_isSeglerCategory(category)) {
     return 'assets/icons/segler_60.png';
   }
@@ -1325,6 +1328,11 @@ bool _isElektroCategory(String category) {
 bool _isParagleiterCategory(String category) {
   final value = category.toLowerCase();
   return value.contains('paragleiter') || value.contains('para');
+}
+
+bool _isNurflueglerCategory(String category) {
+  final value = category.toLowerCase();
+  return value.contains('nurfl') || value.contains('flying wing');
 }
 
 bool _isSeglerCategory(String category) {

@@ -1,17 +1,23 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
-class LandingPage extends StatefulWidget {
+import '../../shared/providers/fleet_provider.dart';
+import '../../shared/services/start_sound_player.dart';
+
+class LandingPage extends ConsumerStatefulWidget {
   const LandingPage({super.key});
 
   @override
-  State<LandingPage> createState() => _LandingPageState();
+  ConsumerState<LandingPage> createState() => _LandingPageState();
 }
 
-class _LandingPageState extends State<LandingPage> {
+class _LandingPageState extends ConsumerState<LandingPage> {
   static const _landingImage = 'assets/splash/landingpage_01.jpg';
+  static const _startSound = 'assets/audio/prog_start.mp3';
+  static bool _startSoundPlayed = false;
   static const _loadingSteps = [
     'Flotte laden...',
     'Akkus pruefen...',
@@ -21,14 +27,24 @@ class _LandingPageState extends State<LandingPage> {
   ];
 
   Timer? _timer;
+  Timer? _soundDelayTimer;
+  late final StartSoundPlayer _startSoundPlayer;
   double _progress = 0;
   int _stepIndex = 0;
+  bool _isLeaving = false;
+  bool _loadingCompleteHandled = false;
 
   bool get _isReady => _progress >= 1;
 
   @override
   void initState() {
     super.initState();
+    _startSoundPlayer = StartSoundPlayer(_startSound);
+    _soundDelayTimer = Timer(
+      const Duration(milliseconds: 500),
+      _playStartSoundIfAllowed,
+    );
+
     _timer = Timer.periodic(const Duration(milliseconds: 180), (timer) {
       if (!mounted) {
         return;
@@ -43,6 +59,7 @@ class _LandingPageState extends State<LandingPage> {
 
       if (_isReady) {
         timer.cancel();
+        unawaited(_handleLoadingComplete());
       }
     });
   }
@@ -50,11 +67,80 @@ class _LandingPageState extends State<LandingPage> {
   @override
   void dispose() {
     _timer?.cancel();
+    _soundDelayTimer?.cancel();
+    _startSoundPlayer.dispose();
     super.dispose();
+  }
+
+  void _playStartSoundIfAllowed() {
+    if (!mounted || _startSoundPlayed) {
+      return;
+    }
+
+    final fleet = ref.read(fleetProvider);
+    if (!fleet.isLoaded) {
+      _soundDelayTimer?.cancel();
+      _soundDelayTimer = Timer(
+        const Duration(milliseconds: 100),
+        _playStartSoundIfAllowed,
+      );
+      return;
+    }
+
+    if (!fleet.appSettings.playStartSound) {
+      return;
+    }
+
+    _startSoundPlayed = true;
+    unawaited(_startSoundPlayer.play());
+  }
+
+  Future<void> _handleLoadingComplete() async {
+    if (_loadingCompleteHandled) {
+      return;
+    }
+    _loadingCompleteHandled = true;
+
+    while (mounted && !ref.read(fleetProvider).isLoaded) {
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+    }
+
+    if (!mounted) {
+      return;
+    }
+
+    if (ref.read(fleetProvider).appSettings.autoOpenDashboardAfterLoading) {
+      await _openDashboard();
+    }
+  }
+
+  Future<void> _openDashboard() async {
+    if (_isLeaving) {
+      return;
+    }
+    _isLeaving = true;
+    await _startSoundPlayer.fadeOut(
+      duration: const Duration(milliseconds: 900),
+    );
+    if (mounted) {
+      context.go('/dashboard');
+    }
   }
 
   @override
   Widget build(BuildContext context) {
+    final fleet = ref.watch(fleetProvider);
+    if (_isReady &&
+        fleet.isLoaded &&
+        fleet.appSettings.autoOpenDashboardAfterLoading &&
+        !_isLeaving) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          unawaited(_openDashboard());
+        }
+      });
+    }
+
     return Scaffold(
       backgroundColor: const Color(0xFF06172E),
       body: LayoutBuilder(
@@ -116,8 +202,7 @@ class _LandingPageState extends State<LandingPage> {
                                     progress: _progress,
                                     status: _loadingSteps[_stepIndex],
                                     isReady: _isReady,
-                                    onOpenDashboard: () =>
-                                        context.go('/dashboard'),
+                                    onOpenDashboard: _openDashboard,
                                   ),
                                 ),
                               ),

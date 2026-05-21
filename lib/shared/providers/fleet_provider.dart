@@ -14,6 +14,7 @@ class FleetState {
   final List<BatteryPack> batteries;
   final PilotProfile pilotProfile;
   final AppSettings appSettings;
+  final bool isLoaded;
 
   const FleetState({
     required this.aircraft,
@@ -21,6 +22,7 @@ class FleetState {
     required this.batteries,
     required this.pilotProfile,
     required this.appSettings,
+    this.isLoaded = false,
   });
 
   int get readyCount =>
@@ -55,6 +57,7 @@ class FleetState {
     List<BatteryPack>? batteries,
     PilotProfile? pilotProfile,
     AppSettings? appSettings,
+    bool? isLoaded,
   }) {
     return FleetState(
       aircraft: aircraft ?? this.aircraft,
@@ -62,6 +65,7 @@ class FleetState {
       batteries: batteries ?? this.batteries,
       pilotProfile: pilotProfile ?? this.pilotProfile,
       appSettings: appSettings ?? this.appSettings,
+      isLoaded: isLoaded ?? this.isLoaded,
     );
   }
 
@@ -85,6 +89,7 @@ class FleetState {
       appSettings: AppSettings.fromJson(
         json['appSettings'] as Map<String, dynamic>? ?? const {},
       ),
+      isLoaded: true,
     );
   }
 
@@ -302,25 +307,39 @@ class FleetNotifier extends StateNotifier<FleetState> {
     final preferences = await SharedPreferences.getInstance();
     final rawState = preferences.getString(_storageKey);
     if (rawState == null) {
+      state = state.copyWith(isLoaded: true);
       return;
     }
 
     try {
       final decoded = jsonDecode(rawState) as Map<String, dynamic>;
-      state = FleetState.fromJson(decoded);
+      var loadedState = FleetState.fromJson(decoded).copyWith(isLoaded: true);
+      final migratedSurfaceSettings =
+          !loadedState.appSettings.surfaceSettingsInitialized;
+      if (migratedSurfaceSettings) {
+        loadedState = loadedState.copyWith(
+          appSettings: loadedState.appSettings.copyWith(
+            autoOpenDashboardAfterLoading: true,
+            surfaceSettingsInitialized: true,
+          ),
+        );
+      }
+      state = loadedState;
       final missingDemoFlights = [
         for (final flight in _initialState.flights)
           if (!state.flights.any((item) => item.id == flight.id)) flight,
       ];
-      if (missingDemoFlights.isNotEmpty) {
+      if (missingDemoFlights.isNotEmpty || migratedSurfaceSettings) {
         state =
             state.copyWith(flights: [...missingDemoFlights, ...state.flights]);
         _save();
       }
     } on FormatException {
       await preferences.remove(_storageKey);
+      state = state.copyWith(isLoaded: true);
     } on TypeError {
       await preferences.remove(_storageKey);
+      state = state.copyWith(isLoaded: true);
     }
   }
 

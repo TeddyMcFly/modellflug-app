@@ -1570,23 +1570,51 @@ class _NavChip extends StatelessWidget {
 
     return Padding(
       padding: const EdgeInsets.only(right: 8),
-      child: ChoiceChip(
-        selected: selected,
-        avatar: Icon(
-          icon,
-          size: 18,
-          color: selected ? Colors.white : const Color(0xFFBFDBFE),
+      child: Material(
+        color: Colors.transparent,
+        borderRadius: BorderRadius.circular(999),
+        child: InkWell(
+          onTap: selected ? null : () => context.go(path),
+          borderRadius: BorderRadius.circular(999),
+          splashFactory: NoSplash.splashFactory,
+          highlightColor: Colors.transparent,
+          hoverColor: Colors.white.withValues(alpha: 0.06),
+          child: Container(
+            height: 38,
+            padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 8),
+            decoration: BoxDecoration(
+              color: selected
+                  ? _activeNavColor
+                  : Colors.white.withValues(alpha: 0.08),
+              borderRadius: BorderRadius.circular(999),
+              border: Border.all(
+                color: selected
+                    ? Colors.white.withValues(alpha: 0.36)
+                    : Colors.white.withValues(alpha: 0.12),
+              ),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  icon,
+                  size: 18,
+                  color: selected ? Colors.white : const Color(0xFFBFDBFE),
+                ),
+                const SizedBox(width: 7),
+                Text(
+                  label,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: selected ? Colors.white : const Color(0xFFE0F2FE),
+                    fontSize: 13,
+                    fontWeight: selected ? FontWeight.w900 : FontWeight.w800,
+                  ),
+                ),
+              ],
+            ),
+          ),
         ),
-        label: Text(label),
-        labelStyle: TextStyle(
-          color: selected ? Colors.white : const Color(0xFFE0F2FE),
-          fontWeight: FontWeight.w800,
-        ),
-        selectedColor: _activeNavColor,
-        backgroundColor: Colors.white.withValues(alpha: 0.08),
-        side: BorderSide(color: Colors.white.withValues(alpha: 0.12)),
-        showCheckmark: false,
-        onSelected: selected ? null : (_) => context.go(path),
       ),
     );
   }

@@ -158,6 +158,8 @@ class _FlightbookTable extends StatefulWidget {
 
 class _FlightbookTableState extends State<_FlightbookTable> {
   final ScrollController _horizontalController = ScrollController();
+  int _sortColumnIndex = 1;
+  bool _sortAscending = false;
 
   @override
   void dispose() {
@@ -168,8 +170,8 @@ class _FlightbookTableState extends State<_FlightbookTable> {
   @override
   Widget build(BuildContext context) {
     final formatter = DateFormat('dd.MM.yyyy HH:mm');
-    final sortedFlights = [...widget.flights]
-      ..sort((a, b) => b.date.compareTo(a.date));
+    final flightNumbers = _flightNumbersById(widget.flights);
+    final sortedFlights = _sortedFlights(flightNumbers);
 
     return LayoutBuilder(
       builder: (context, constraints) {
@@ -201,6 +203,8 @@ class _FlightbookTableState extends State<_FlightbookTable> {
                           child: ConstrainedBox(
                             constraints: BoxConstraints(minWidth: tableWidth),
                             child: DataTable(
+                              sortColumnIndex: _sortColumnIndex,
+                              sortAscending: _sortAscending,
                               headingRowColor: WidgetStateProperty.all(
                                 const Color(0xFF0A84FF),
                               ),
@@ -220,22 +224,22 @@ class _FlightbookTableState extends State<_FlightbookTable> {
                               horizontalMargin: 16,
                               dataRowMinHeight: 72,
                               dataRowMaxHeight: 82,
-                              columns: const [
-                                DataColumn(label: _TableHeader('Nr.')),
-                                DataColumn(label: _TableHeader('Datum')),
-                                DataColumn(label: _TableHeader('Modell')),
-                                DataColumn(label: _TableHeader('Kategorie')),
-                                DataColumn(label: _TableHeader('Dauer')),
-                                DataColumn(label: _TableHeader('Fluggebiet')),
-                                DataColumn(label: _TableHeader('Pilot')),
-                                DataColumn(label: _TableHeader('Notizen')),
-                                DataColumn(label: _TableHeader('')),
+                              columns: [
+                                _sortableColumn(0, 'Nr.'),
+                                _sortableColumn(1, 'Datum'),
+                                _sortableColumn(2, 'Modell'),
+                                _sortableColumn(3, 'Kategorie'),
+                                _sortableColumn(4, 'Dauer'),
+                                _sortableColumn(5, 'Fluggebiet'),
+                                _sortableColumn(6, 'Pilot'),
+                                _sortableColumn(7, 'Notizen'),
+                                const DataColumn(label: _TableHeader('')),
                               ],
                               rows:
                                   List.generate(sortedFlights.length, (index) {
                                 final flight = sortedFlights[index];
                                 final flightNumber =
-                                    sortedFlights.length - index;
+                                    flightNumbers[flight.id] ?? index + 1;
 
                                 return DataRow(
                                   cells: [
@@ -299,6 +303,63 @@ class _FlightbookTableState extends State<_FlightbookTable> {
         );
       },
     );
+  }
+
+  DataColumn _sortableColumn(int columnIndex, String label) {
+    return DataColumn(
+      label: _TableHeader(label),
+      onSort: (index, ascending) {
+        setState(() {
+          _sortColumnIndex = index;
+          _sortAscending = ascending;
+        });
+      },
+    );
+  }
+
+  Map<String, int> _flightNumbersById(List<FlightLogEntry> flights) {
+    final chronological = [...flights]
+      ..sort((a, b) => a.date.compareTo(b.date));
+    return {
+      for (var index = 0; index < chronological.length; index++)
+        chronological[index].id: index + 1,
+    };
+  }
+
+  List<FlightLogEntry> _sortedFlights(Map<String, int> flightNumbers) {
+    final sorted = [...widget.flights];
+
+    int compareString(String a, String b) =>
+        a.toLowerCase().compareTo(b.toLowerCase());
+
+    int compare(FlightLogEntry a, FlightLogEntry b) {
+      final aircraftA = widget.aircraftById[a.aircraftId];
+      final aircraftB = widget.aircraftById[b.aircraftId];
+
+      return switch (_sortColumnIndex) {
+        0 => (flightNumbers[a.id] ?? 0).compareTo(flightNumbers[b.id] ?? 0),
+        1 => a.date.compareTo(b.date),
+        2 => compareString(
+            aircraftA?.name ?? 'Unbekanntes Modell',
+            aircraftB?.name ?? 'Unbekanntes Modell',
+          ),
+        3 => compareString(aircraftA?.type ?? '-', aircraftB?.type ?? '-'),
+        4 => a.durationMinutes.compareTo(b.durationMinutes),
+        5 => compareString(a.location, b.location),
+        6 => compareString(a.pilot, b.pilot),
+        7 => compareString(a.notes, b.notes),
+        _ => b.date.compareTo(a.date),
+      };
+    }
+
+    sorted.sort((a, b) {
+      final result = compare(a, b);
+      if (result != 0) {
+        return _sortAscending ? result : -result;
+      }
+      return b.date.compareTo(a.date);
+    });
+    return sorted;
   }
 }
 
@@ -492,6 +553,7 @@ class _CategoryCell extends StatelessWidget {
   static const _jetIconAsset = 'assets/icons/jet_60.png';
   static const _kunstflugIconAsset = 'assets/icons/kunstflug_60.png';
   static const _motorflugIconAsset = 'assets/icons/motorflugz_60.png';
+  static const _nurflueglerIconAsset = 'assets/icons/nurfluegler_60.png';
   static const _paragleiterIconAsset = 'assets/icons/paragleiter_60.png';
   static const _scaleIconAsset = 'assets/icons/scale_60.png';
   static const _seglerIconAsset = 'assets/icons/segler_60.png';
@@ -504,6 +566,7 @@ class _CategoryCell extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final imageSize = _categoryImageSize(category);
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -512,8 +575,8 @@ class _CategoryCell extends StatelessWidget {
                 borderRadius: BorderRadius.circular(4),
                 child: Image.asset(
                   _categoryImageAsset(category)!,
-                  width: 60,
-                  height: 60,
+                  width: imageSize,
+                  height: imageSize,
                   fit: BoxFit.contain,
                 ),
               )
@@ -527,6 +590,13 @@ class _CategoryCell extends StatelessWidget {
       ],
     );
   }
+}
+
+double _categoryImageSize(String category) {
+  if (_isSlowflyerCategory(category)) {
+    return 40;
+  }
+  return 60;
 }
 
 String? _categoryImageAsset(String category) {
@@ -547,6 +617,9 @@ String? _categoryImageAsset(String category) {
   }
   if (_isParagleiterCategory(category)) {
     return _CategoryCell._paragleiterIconAsset;
+  }
+  if (_isNurflueglerCategory(category)) {
+    return _CategoryCell._nurflueglerIconAsset;
   }
   if (_isSeglerCategory(category)) {
     return _CategoryCell._seglerIconAsset;
@@ -592,6 +665,11 @@ bool _isElektroCategory(String category) {
 bool _isParagleiterCategory(String category) {
   final value = category.toLowerCase();
   return value.contains('paragleiter') || value.contains('para');
+}
+
+bool _isNurflueglerCategory(String category) {
+  final value = category.toLowerCase();
+  return value.contains('nurfl') || value.contains('flying wing');
 }
 
 bool _isSeglerCategory(String category) {
