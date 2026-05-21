@@ -218,8 +218,8 @@ class _FlightbookTableState extends State<_FlightbookTable> {
                               ),
                               columnSpacing: 22,
                               horizontalMargin: 16,
-                              dataRowMinHeight: 36,
-                              dataRowMaxHeight: 52,
+                              dataRowMinHeight: 72,
+                              dataRowMaxHeight: 82,
                               columns: const [
                                 DataColumn(label: _TableHeader('Nr.')),
                                 DataColumn(label: _TableHeader('Datum')),
@@ -318,25 +318,28 @@ class _AircraftModelCell extends StatelessWidget {
         ClipRRect(
           borderRadius: BorderRadius.circular(7),
           child: SizedBox.square(
-            dimension: 34,
+            dimension: 60,
             child: photo == null
                 ? Container(
                     color: const Color(0xFFE2E8F0),
                     child: const Icon(
                       Icons.flight_rounded,
                       color: Color(0xFF0A84FF),
-                      size: 18,
+                      size: 32,
                     ),
                   )
                 : Image.memory(
                     _bytesFromDataUri(photo),
                     fit: BoxFit.cover,
+                    cacheWidth: 60,
+                    cacheHeight: 60,
+                    filterQuality: FilterQuality.none,
                     errorBuilder: (context, error, stackTrace) => Container(
                       color: const Color(0xFFE2E8F0),
                       child: const Icon(
                         Icons.flight_rounded,
                         color: Color(0xFF0A84FF),
-                        size: 18,
+                        size: 32,
                       ),
                     ),
                   ),
@@ -484,10 +487,16 @@ class _TableHeader extends StatelessWidget {
 }
 
 class _CategoryCell extends StatelessWidget {
-  static const _kunstflugIconAsset = 'assets/icons/kunstflug_icon.png';
-  static const _motorflugIconAsset = 'assets/icons/motorflugz_icon.png';
-  static const _scaleIconAsset = 'assets/icons/scale_icon.png';
-  static const _seglerIconAsset = 'assets/icons/segler_icon.png';
+  static const _drohneIconAsset = 'assets/icons/drohne_60.png';
+  static const _hubschrauberIconAsset = 'assets/icons/hubschrauber_60.png';
+  static const _jetIconAsset = 'assets/icons/jet_60.png';
+  static const _kunstflugIconAsset = 'assets/icons/kunstflug_60.png';
+  static const _motorflugIconAsset = 'assets/icons/motorflugz_60.png';
+  static const _paragleiterIconAsset = 'assets/icons/paragleiter_60.png';
+  static const _scaleIconAsset = 'assets/icons/scale_60.png';
+  static const _seglerIconAsset = 'assets/icons/segler_60.png';
+  static const _slowflyerIconAsset = 'assets/icons/slowflyer_60.png';
+  static const _sonstigeIconAsset = 'assets/icons/sonstige_60.png';
 
   final String category;
 
@@ -503,15 +512,15 @@ class _CategoryCell extends StatelessWidget {
                 borderRadius: BorderRadius.circular(4),
                 child: Image.asset(
                   _categoryImageAsset(category)!,
-                  width: _categoryImageWidth(category),
-                  height: 22,
+                  width: 60,
+                  height: 60,
                   fit: BoxFit.contain,
                 ),
               )
             : Icon(
                 _categoryIcon(category),
                 color: const Color(0xFF0A84FF),
-                size: 18,
+                size: 60,
               ),
         const SizedBox(width: 7),
         Text(category),
@@ -521,29 +530,54 @@ class _CategoryCell extends StatelessWidget {
 }
 
 String? _categoryImageAsset(String category) {
+  if (_isDrohneCategory(category)) {
+    return _CategoryCell._drohneIconAsset;
+  }
+  if (_isHubschrauberCategory(category)) {
+    return _CategoryCell._hubschrauberIconAsset;
+  }
+  if (_isJetCategory(category)) {
+    return _CategoryCell._jetIconAsset;
+  }
   if (_isKunstflugCategory(category)) {
     return _CategoryCell._kunstflugIconAsset;
   }
   if (_isElektroCategory(category)) {
     return _CategoryCell._motorflugIconAsset;
   }
+  if (_isParagleiterCategory(category)) {
+    return _CategoryCell._paragleiterIconAsset;
+  }
   if (_isSeglerCategory(category)) {
     return _CategoryCell._seglerIconAsset;
+  }
+  if (_isSlowflyerCategory(category)) {
+    return _CategoryCell._slowflyerIconAsset;
   }
   if (_isScaleCategory(category)) {
     return _CategoryCell._scaleIconAsset;
   }
+  if (_isSonstigeCategory(category)) {
+    return _CategoryCell._sonstigeIconAsset;
+  }
   return null;
 }
 
-double _categoryImageWidth(String category) {
-  if (_isSeglerCategory(category)) {
-    return 26;
-  }
-  if (_isScaleCategory(category)) {
-    return 25;
-  }
-  return 30;
+bool _isDrohneCategory(String category) {
+  final value = category.toLowerCase();
+  return value.contains('drohne') ||
+      value.contains('drone') ||
+      value.contains('multi') ||
+      value.contains('quad');
+}
+
+bool _isHubschrauberCategory(String category) {
+  final value = category.toLowerCase();
+  return value.contains('hubschrauber') || value.contains('heli');
+}
+
+bool _isJetCategory(String category) {
+  return category.toLowerCase().contains('jet');
 }
 
 bool _isKunstflugCategory(String category) {
@@ -555,18 +589,33 @@ bool _isElektroCategory(String category) {
   return value.contains('elektro') || value.contains('motor');
 }
 
+bool _isParagleiterCategory(String category) {
+  final value = category.toLowerCase();
+  return value.contains('paragleiter') || value.contains('para');
+}
+
 bool _isSeglerCategory(String category) {
-  return category.toLowerCase().contains('segler');
+  final value = category.toLowerCase();
+  return value.contains('segler') || value.contains('segelflug');
+}
+
+bool _isSlowflyerCategory(String category) {
+  return category.toLowerCase().contains('slowflyer');
 }
 
 bool _isScaleCategory(String category) {
   return category.toLowerCase().contains('scale');
 }
 
+bool _isSonstigeCategory(String category) {
+  final value = category.toLowerCase();
+  return value.contains('sonstige') || value.contains('sonstiges');
+}
+
 IconData _categoryIcon(String category) {
   final value = category.toLowerCase();
 
-  if (value.contains('segler')) {
+  if (value.contains('segler') || value.contains('segelflug')) {
     return Icons.air_rounded;
   }
   if (value.contains('elektro')) {

@@ -1253,24 +1253,42 @@ const _sectionTitleStyle = TextStyle(
 );
 
 String? _categoryImageAsset(String category) {
+  if (_isDrohneCategory(category)) {
+    return 'assets/icons/drohne_60.png';
+  }
+  if (_isHubschrauberCategory(category)) {
+    return 'assets/icons/hubschrauber_60.png';
+  }
+  if (_isJetCategory(category)) {
+    return 'assets/icons/jet_60.png';
+  }
   if (_isKunstflugCategory(category)) {
-    return 'assets/icons/kunstflug_icon.png';
+    return 'assets/icons/kunstflug_60.png';
   }
   if (_isElektroCategory(category)) {
-    return 'assets/icons/motorflugz_icon.png';
+    return 'assets/icons/motorflugz_60.png';
+  }
+  if (_isParagleiterCategory(category)) {
+    return 'assets/icons/paragleiter_60.png';
   }
   if (_isSeglerCategory(category)) {
-    return 'assets/icons/segler_icon.png';
+    return 'assets/icons/segler_60.png';
+  }
+  if (_isSlowflyerCategory(category)) {
+    return 'assets/icons/slowflyer_60.png';
   }
   if (_isScaleCategory(category)) {
-    return 'assets/icons/scale_icon.png';
+    return 'assets/icons/scale_60.png';
+  }
+  if (_isSonstigeCategory(category)) {
+    return 'assets/icons/sonstige_60.png';
   }
   return null;
 }
 
 double _categoryImageWidth(String category, {double iconSize = 38}) {
-  if (_isSeglerCategory(category)) {
-    return iconSize * 0.84;
+  if (_isSeglerCategory(category) || _isSlowflyerCategory(category)) {
+    return iconSize * 0.74;
   }
   if (_isScaleCategory(category)) {
     return iconSize * 0.79;
@@ -1282,23 +1300,55 @@ bool _isKunstflugCategory(String category) {
   return category.toLowerCase().contains('kunst');
 }
 
+bool _isDrohneCategory(String category) {
+  final value = category.toLowerCase();
+  return value.contains('drohne') ||
+      value.contains('drone') ||
+      value.contains('multi') ||
+      value.contains('quad');
+}
+
+bool _isHubschrauberCategory(String category) {
+  final value = category.toLowerCase();
+  return value.contains('hubschrauber') || value.contains('heli');
+}
+
+bool _isJetCategory(String category) {
+  return category.toLowerCase().contains('jet');
+}
+
 bool _isElektroCategory(String category) {
   final value = category.toLowerCase();
   return value.contains('elektro') || value.contains('motor');
 }
 
+bool _isParagleiterCategory(String category) {
+  final value = category.toLowerCase();
+  return value.contains('paragleiter') || value.contains('para');
+}
+
 bool _isSeglerCategory(String category) {
-  return category.toLowerCase().contains('segler');
+  final value = category.toLowerCase();
+  return value.contains('segler') || value.contains('segelflug');
+}
+
+bool _isSlowflyerCategory(String category) {
+  return category.toLowerCase().contains('slowflyer');
 }
 
 bool _isScaleCategory(String category) {
   return category.toLowerCase().contains('scale');
 }
 
+bool _isSonstigeCategory(String category) {
+  final value = category.toLowerCase();
+  return value.contains('sonstige') || value.contains('sonstiges');
+}
+
 IconData _categoryIcon(String category) {
   final value = category.toLowerCase();
 
-  if (value.contains('segler')) {
+  if (value.contains('segler') || value.contains('segelflug')) {
     return Icons.air_rounded;
   }
   if (value.contains('elektro')) {

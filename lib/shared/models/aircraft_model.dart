@@ -4,6 +4,83 @@ enum AircraftStatus {
   destroyed,
 }
 
+const aircraftCategoryOptions = [
+  'Drohne',
+  'Hubschrauber',
+  'Jet',
+  'Kunstflieger',
+  'Nurflügler',
+  'Paragleiter',
+  'Scale-Modell',
+  'Segelflugzeug',
+  'Slowflyer',
+  'Sonstige',
+  'Trainer',
+];
+
+const aircraftFeatureOptions = [
+  'Elektro',
+  'Verbrenner',
+  'mehrmotorig',
+  'Einziehfahrwerk',
+  'Landeklappen',
+  'Wasserflugzeug',
+  'Doppeldecker',
+  'Dreifachdecker',
+  'Indoor-geeignet',
+];
+
+String normalizeAircraftFeature(String value) {
+  if (value == 'Doppel-/Dreifachdecker') {
+    return 'Doppeldecker';
+  }
+  return aircraftFeatureOptions.contains(value) ? value : value;
+}
+
+String normalizeAircraftCategory(String value) {
+  if (aircraftCategoryOptions.contains(value)) {
+    return value;
+  }
+
+  final lower = value.toLowerCase();
+  if (lower.contains('segler') || lower.contains('segelflug')) {
+    return 'Segelflugzeug';
+  }
+  if (lower.contains('drohne') ||
+      lower.contains('drone') ||
+      lower.contains('multi') ||
+      lower.contains('quad')) {
+    return 'Drohne';
+  }
+  if (lower.contains('kunst') || lower.contains('acro')) {
+    return 'Kunstflieger';
+  }
+  if (lower.contains('nurfl') || lower.contains('flying wing')) {
+    return 'Nurflügler';
+  }
+  if (lower.contains('paragleiter') ||
+      lower.contains('motorschirm') ||
+      lower.contains('para')) {
+    return 'Paragleiter';
+  }
+  if (lower.contains('scale')) {
+    return 'Scale-Modell';
+  }
+  if (lower.contains('jet')) {
+    return 'Jet';
+  }
+  if (lower.contains('trainer') || lower.contains('schule')) {
+    return 'Trainer';
+  }
+  if (lower.contains('slow')) {
+    return 'Slowflyer';
+  }
+  if (lower.contains('hubschrauber') || lower.contains('heli')) {
+    return 'Hubschrauber';
+  }
+  return 'Sonstige';
+}
+
 extension AircraftStatusText on AircraftStatus {
   String get label {
     switch (this) {
@@ -38,6 +115,7 @@ class AircraftModel {
   final String drive;
   final int batteryCount;
   final List<int> batteryCellOptions;
+  final List<String> featureOptions;
   final int totalFlights;
   final double flightHours;
   final AircraftStatus status;
@@ -69,6 +147,7 @@ class AircraftModel {
     required this.drive,
     required this.batteryCount,
     this.batteryCellOptions = const [],
+    this.featureOptions = const [],
     required this.totalFlights,
     required this.flightHours,
     required this.status,
@@ -118,6 +197,7 @@ class AircraftModel {
     String? drive,
     int? batteryCount,
     List<int>? batteryCellOptions,
+    List<String>? featureOptions,
     int? totalFlights,
     double? flightHours,
     AircraftStatus? status,
@@ -151,6 +231,7 @@ class AircraftModel {
       drive: drive ?? this.drive,
       batteryCount: batteryCount ?? this.batteryCount,
       batteryCellOptions: batteryCellOptions ?? this.batteryCellOptions,
+      featureOptions: featureOptions ?? this.featureOptions,
       totalFlights: totalFlights ?? this.totalFlights,
       flightHours: flightHours ?? this.flightHours,
       status: status ?? this.status,
@@ -167,7 +248,7 @@ class AircraftModel {
     return AircraftModel(
       id: json['id'] as String,
       name: json['name'] as String,
-      type: json['type'] as String,
+      type: normalizeAircraftCategory(json['type'] as String? ?? 'Sonstige'),
       manufacturer: json['manufacturer'] as String,
       registration: json['registration'] as String,
       wingspanMeters: (json['wingspanMeters'] as num).toDouble(),
@@ -188,6 +269,10 @@ class AircraftModel {
       batteryCellOptions: [
         for (final item in json['batteryCellOptions'] as List<dynamic>? ?? [])
           (item as num).toInt(),
+      ],
+      featureOptions: [
+        for (final item in json['featureOptions'] as List<dynamic>? ?? [])
+          normalizeAircraftFeature(item as String),
       ],
       totalFlights: json['totalFlights'] as int,
       flightHours: (json['flightHours'] as num).toDouble(),
@@ -226,6 +311,7 @@ class AircraftModel {
       'drive': drive,
       'batteryCount': batteryCount,
       'batteryCellOptions': batteryCellOptions,
+      'featureOptions': featureOptions,
       'totalFlights': totalFlights,
       'flightHours': flightHours,
       'status': status.name,
@@ -398,7 +484,7 @@ class PilotProfile {
           item as String,
       ],
       notes: json['notes'] as String? ??
-          'Modellpilot mit Fokus auf Segler und Kunstflug.',
+          'Modellpilot mit Fokus auf Segelflugzeuge und Kunstflug.',
       photoDataUri: json['photoDataUri'] as String?,
       insuranceDocumentName: json['insuranceDocumentName'] as String?,
       insuranceDocumentDataUri: json['insuranceDocumentDataUri'] as String?,

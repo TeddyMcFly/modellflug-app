@@ -14,6 +14,8 @@ import '../../core/widgets/app_scaffold.dart';
 import '../../shared/models/aircraft_model.dart';
 import '../../shared/providers/fleet_provider.dart';
 
+const _repairFilterKey = '__repair__';
+
 class ModelsPage extends ConsumerStatefulWidget {
   final String? initialSelectedAircraftId;
 
@@ -28,6 +30,7 @@ class ModelsPage extends ConsumerStatefulWidget {
 
 class _ModelsPageState extends ConsumerState<ModelsPage> {
   String? _selectedAircraftId;
+  String? _selectedCategoryFilter;
 
   @override
   void initState() {
@@ -48,8 +51,9 @@ class _ModelsPageState extends ConsumerState<ModelsPage> {
   Widget build(BuildContext context) {
     final fleet = ref.watch(fleetProvider);
     final aircraft = fleet.aircraft;
+    final visibleAircraft = _filteredAircraft(aircraft);
     final selectedAircraft =
-        aircraft.isEmpty ? null : _selectedAircraft(aircraft);
+        visibleAircraft.isEmpty ? null : _selectedAircraft(visibleAircraft);
 
     return AppScaffold(
       title: 'Meine Modelle',
@@ -69,41 +73,60 @@ class _ModelsPageState extends ConsumerState<ModelsPage> {
             if (aircraft.isEmpty) {
               return const _EmptyFleet();
             }
-
-            final selected = selectedAircraft!;
             if (isWide) {
               return SizedBox(
-                height: 980,
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                height: 1040,
+                child: Column(
                   children: [
-                    SizedBox(
-                      width: 300,
-                      child: _AircraftInventoryList(
-                        aircraft: aircraft,
-                        selectedId: selected.id,
-                        onSelected: _selectAircraft,
-                      ),
+                    _CategoryFilterPanel(
+                      selectedCategory: _selectedCategoryFilter,
+                      onSelected: _selectCategoryFilter,
                     ),
-                    const SizedBox(width: 18),
-                    Flexible(
-                      child: Align(
-                        alignment: Alignment.topLeft,
-                        child: ConstrainedBox(
-                          constraints: const BoxConstraints(maxWidth: 620),
-                          child: _AircraftDetails(
-                            aircraft: selected,
-                            batteries: fleet.batteries,
-                            onEdit: () => _showAircraftDialog(context,
-                                aircraft: selected),
-                            onDelete: () => _confirmDelete(context, selected),
-                            onStartFlight: () =>
-                                _showFlightTimer(context, selected),
-                            onStatusChanged: (status) => ref
-                                .read(fleetProvider.notifier)
-                                .updateStatus(selected.id, status),
+                    const SizedBox(height: 16),
+                    Expanded(
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          SizedBox(
+                            width: 300,
+                            child: _AircraftInventoryList(
+                              aircraft: visibleAircraft,
+                              totalAircraftCount: aircraft.length,
+                              selectedId: selectedAircraft?.id,
+                              selectedCategory: _selectedCategoryFilter,
+                              onSelected: _selectAircraft,
+                            ),
                           ),
-                        ),
+                          const SizedBox(width: 18),
+                          Flexible(
+                            child: Align(
+                              alignment: Alignment.topLeft,
+                              child: ConstrainedBox(
+                                constraints:
+                                    const BoxConstraints(maxWidth: 620),
+                                child: selectedAircraft == null
+                                    ? _NoModelsInCategory(
+                                        category: _selectedCategoryFilter,
+                                      )
+                                    : _AircraftDetails(
+                                        aircraft: selectedAircraft,
+                                        batteries: fleet.batteries,
+                                        onEdit: () => _showAircraftDialog(
+                                            context,
+                                            aircraft: selectedAircraft),
+                                        onDelete: () => _confirmDelete(
+                                            context, selectedAircraft),
+                                        onStartFlight: () => _showFlightTimer(
+                                            context, selectedAircraft),
+                                        onStatusChanged: (status) => ref
+                                            .read(fleetProvider.notifier)
+                                            .updateStatus(
+                                                selectedAircraft.id, status),
+                                      ),
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
                     ),
                   ],
@@ -113,28 +136,41 @@ class _ModelsPageState extends ConsumerState<ModelsPage> {
 
             return Column(
               children: [
+                _CategoryFilterPanel(
+                  selectedCategory: _selectedCategoryFilter,
+                  onSelected: _selectCategoryFilter,
+                ),
+                const SizedBox(height: 18),
                 SizedBox(
                   height: 390,
                   child: _AircraftInventoryList(
-                    aircraft: aircraft,
-                    selectedId: selected.id,
+                    aircraft: visibleAircraft,
+                    totalAircraftCount: aircraft.length,
+                    selectedId: selectedAircraft?.id,
+                    selectedCategory: _selectedCategoryFilter,
                     onSelected: _selectAircraft,
                   ),
                 ),
                 const SizedBox(height: 18),
                 SizedBox(
                   height: 1180,
-                  child: _AircraftDetails(
-                    aircraft: selected,
-                    batteries: fleet.batteries,
-                    onEdit: () =>
-                        _showAircraftDialog(context, aircraft: selected),
-                    onDelete: () => _confirmDelete(context, selected),
-                    onStartFlight: () => _showFlightTimer(context, selected),
-                    onStatusChanged: (status) => ref
-                        .read(fleetProvider.notifier)
-                        .updateStatus(selected.id, status),
-                  ),
+                  child: selectedAircraft == null
+                      ? _NoModelsInCategory(category: _selectedCategoryFilter)
+                      : _AircraftDetails(
+                          aircraft: selectedAircraft,
+                          batteries: fleet.batteries,
+                          onEdit: () => _showAircraftDialog(
+                            context,
+                            aircraft: selectedAircraft,
+                          ),
+                          onDelete: () =>
+                              _confirmDelete(context, selectedAircraft),
+                          onStartFlight: () =>
+                              _showFlightTimer(context, selectedAircraft),
+                          onStatusChanged: (status) => ref
+                              .read(fleetProvider.notifier)
+                              .updateStatus(selectedAircraft.id, status),
+                        ),
                 ),
               ],
             );
@@ -157,6 +193,49 @@ class _ModelsPageState extends ConsumerState<ModelsPage> {
 
   void _selectAircraft(String id) {
     setState(() => _selectedAircraftId = id);
+  }
+
+  List<AircraftModel> _filteredAircraft(List<AircraftModel> aircraft) {
+    final filter = _selectedCategoryFilter;
+    if (filter == null) {
+      return aircraft;
+    }
+    if (_isRepairFilter(filter)) {
+      return [
+        for (final item in aircraft)
+          if (item.status == AircraftStatus.maintenance) item,
+      ];
+    }
+    return [
+      for (final item in aircraft)
+        if (normalizeAircraftCategory(item.type) == filter) item,
+    ];
+  }
+
+  void _selectCategoryFilter(String? category) {
+    final aircraft = ref.read(fleetProvider).aircraft;
+    final nextCategory = category == _selectedCategoryFilter ? null : category;
+    final nextAircraft = nextCategory == null
+        ? aircraft
+        : _isRepairFilter(nextCategory)
+            ? [
+                for (final item in aircraft)
+                  if (item.status == AircraftStatus.maintenance) item,
+              ]
+            : [
+                for (final item in aircraft)
+                  if (normalizeAircraftCategory(item.type) == nextCategory)
+                    item,
+              ];
+
+    setState(() {
+      _selectedCategoryFilter = nextCategory;
+      if (nextAircraft.isEmpty) {
+        _selectedAircraftId = null;
+      } else if (!nextAircraft.any((item) => item.id == _selectedAircraftId)) {
+        _selectedAircraftId = nextAircraft.first.id;
+      }
+    });
   }
 
   void _showAircraftDialog(BuildContext context, {AircraftModel? aircraft}) {
@@ -260,12 +339,16 @@ class _ModelsPageState extends ConsumerState<ModelsPage> {
 
 class _AircraftInventoryList extends StatelessWidget {
   final List<AircraftModel> aircraft;
-  final String selectedId;
+  final int totalAircraftCount;
+  final String? selectedId;
+  final String? selectedCategory;
   final ValueChanged<String> onSelected;
 
   const _AircraftInventoryList({
     required this.aircraft,
+    required this.totalAircraftCount,
     required this.selectedId,
+    required this.selectedCategory,
     required this.onSelected,
   });
 
@@ -288,7 +371,9 @@ class _AircraftInventoryList extends StatelessWidget {
                   ),
                 ),
                 Text(
-                  '${aircraft.length}',
+                  selectedCategory == null
+                      ? '$totalAircraftCount'
+                      : '${aircraft.length}/$totalAircraftCount',
                   style: const TextStyle(
                     color: Color(0xFF0A84FF),
                     fontSize: 22,
@@ -299,21 +384,299 @@ class _AircraftInventoryList extends StatelessWidget {
             ),
             const SizedBox(height: 14),
             Expanded(
-              child: ListView.separated(
-                itemCount: aircraft.length,
-                separatorBuilder: (context, index) =>
-                    const SizedBox(height: 10),
-                itemBuilder: (context, index) {
-                  final item = aircraft[index];
-                  return _AircraftListItem(
-                    aircraft: item,
-                    selected: item.id == selectedId,
-                    onTap: () => onSelected(item.id),
-                  );
-                },
-              ),
+              child: aircraft.isEmpty
+                  ? _EmptyCategorySelection(category: selectedCategory)
+                  : ListView.separated(
+                      itemCount: aircraft.length,
+                      separatorBuilder: (context, index) =>
+                          const SizedBox(height: 10),
+                      itemBuilder: (context, index) {
+                        final item = aircraft[index];
+                        return _AircraftListItem(
+                          aircraft: item,
+                          selected: item.id == selectedId,
+                          onTap: () => onSelected(item.id),
+                        );
+                      },
+                    ),
             ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+class _CategoryFilterPanel extends StatelessWidget {
+  final String? selectedCategory;
+  final ValueChanged<String?> onSelected;
+
+  const _CategoryFilterPanel({
+    required this.selectedCategory,
+    required this.onSelected,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF8FAFC),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: const Color(0xFFE2E8F0)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(
+                Icons.category_rounded,
+                color: Color(0xFF0A84FF),
+                size: 17,
+              ),
+              const SizedBox(width: 7),
+              const Expanded(
+                child: Text(
+                  'Kategorien zur Auswahl',
+                  style: TextStyle(
+                    color: Color(0xFF0F172A),
+                    fontSize: 13,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+              ),
+              if (selectedCategory != null)
+                TextButton(
+                  onPressed: () => onSelected(null),
+                  style: TextButton.styleFrom(
+                    minimumSize: const Size(0, 28),
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    textStyle: const TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                  child: const Text('Alle'),
+                ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          SizedBox(
+            height: 76,
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              itemCount: aircraftCategoryOptions.length + 1,
+              separatorBuilder: (context, index) => const SizedBox(width: 8),
+              itemBuilder: (context, index) {
+                if (index == aircraftCategoryOptions.length) {
+                  return _RepairFilterButton(
+                    selected: _isRepairFilter(selectedCategory),
+                    onTap: () => onSelected(_repairFilterKey),
+                  );
+                }
+                final category = aircraftCategoryOptions[index];
+                return _CategoryFilterButton(
+                  category: category,
+                  selected: category == selectedCategory,
+                  onTap: () => onSelected(category),
+                );
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _RepairFilterButton extends StatelessWidget {
+  final bool selected;
+  final VoidCallback onTap;
+
+  const _RepairFilterButton({
+    required this.selected,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: 'Reparatur',
+      child: Material(
+        color: selected ? const Color(0xFFFFEDD5) : Colors.white,
+        borderRadius: BorderRadius.circular(8),
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(8),
+          child: Container(
+            width: 72,
+            height: 72,
+            padding: const EdgeInsets.all(6),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(
+                color: selected
+                    ? const Color(0xFFEA580C)
+                    : const Color(0xFFE2E8F0),
+                width: selected ? 2 : 1,
+              ),
+            ),
+            child: const Center(
+              child: SizedBox.square(
+                dimension: 60,
+                child: Icon(
+                  Icons.build_circle_rounded,
+                  color: Color(0xFFEA580C),
+                  size: 54,
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _CategoryFilterButton extends StatelessWidget {
+  final String category;
+  final bool selected;
+  final VoidCallback onTap;
+
+  const _CategoryFilterButton({
+    required this.category,
+    required this.selected,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: category,
+      child: Material(
+        color: selected ? const Color(0xFFE0F2FE) : Colors.white,
+        borderRadius: BorderRadius.circular(8),
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(8),
+          child: Container(
+            width: 72,
+            height: 72,
+            padding: const EdgeInsets.all(6),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(
+                color: selected
+                    ? const Color(0xFF0A84FF)
+                    : const Color(0xFFE2E8F0),
+                width: selected ? 2 : 1,
+              ),
+            ),
+            child: Center(
+              child: _ModelCategoryIcon(category: category),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ModelCategoryIcon extends StatelessWidget {
+  final String category;
+
+  const _ModelCategoryIcon({required this.category});
+
+  @override
+  Widget build(BuildContext context) {
+    final asset = _modelCategoryIconAsset(category);
+    if (asset != null) {
+      return Image.asset(
+        asset,
+        width: 60,
+        height: 60,
+        fit: BoxFit.contain,
+        filterQuality: FilterQuality.none,
+      );
+    }
+
+    return Icon(
+      _modelCategoryFallbackIcon(category),
+      color: const Color(0xFF0A84FF),
+      size: 42,
+    );
+  }
+}
+
+class _EmptyCategorySelection extends StatelessWidget {
+  final String? category;
+
+  const _EmptyCategorySelection({required this.category});
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 10),
+        child: Text(
+          category == null
+              ? 'Noch keine Modelle vorhanden.'
+              : _isRepairFilter(category)
+                  ? 'Keine reparaturbeduerftigen Modelle.'
+                  : 'Keine Modelle in dieser Kategorie.',
+          textAlign: TextAlign.center,
+          style: const TextStyle(
+            color: Color(0xFF64748B),
+            fontSize: 13,
+            fontWeight: FontWeight.w700,
+            height: 1.35,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _NoModelsInCategory extends StatelessWidget {
+  final String? category;
+
+  const _NoModelsInCategory({required this.category});
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      child: Center(
+        child: Padding(
+          padding: const EdgeInsets.all(28),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (_isRepairFilter(category))
+                const Icon(
+                  Icons.build_circle_rounded,
+                  color: Color(0xFFEA580C),
+                  size: 60,
+                )
+              else if (category != null)
+                _ModelCategoryIcon(category: category!),
+              const SizedBox(height: 16),
+              Text(
+                category == null
+                    ? 'Kein Modell ausgewaehlt.'
+                    : _isRepairFilter(category)
+                        ? 'Keine reparaturbeduerftigen Modelle vorhanden.'
+                        : 'Keine Modelle in $category vorhanden.',
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  color: Color(0xFF334155),
+                  fontSize: 16,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -597,7 +960,7 @@ class _AircraftDetails extends StatelessWidget {
                     const SizedBox(height: 22),
                   ],
                   _InfoPanel(
-                    title: 'Fliegt am besten mit...',
+                    title: 'Fliegt am besten mit folgenden Akkus...',
                     icon: Icons.battery_charging_full_rounded,
                     iconColor: const Color(0xFF16A34A),
                     children: [
@@ -613,8 +976,9 @@ class _AircraftDetails extends StatelessWidget {
                         aircraft.notes,
                         style: const TextStyle(
                           color: Color(0xFF334155),
-                          height: 1.45,
-                          fontWeight: FontWeight.w600,
+                          fontSize: 12,
+                          height: 1.35,
+                          fontWeight: FontWeight.w500,
                         ),
                       ),
                     ],
@@ -653,8 +1017,9 @@ class _BestBatteryList extends StatelessWidget {
         'Noch keine Akkus fuer dieses Modell ausgewaehlt.',
         style: TextStyle(
           color: Color(0xFF64748B),
+          fontSize: 12,
           height: 1.35,
-          fontWeight: FontWeight.w600,
+          fontWeight: FontWeight.w500,
         ),
       );
     }
@@ -682,8 +1047,9 @@ class _BestBatteryList extends StatelessWidget {
                     _batteryDescription(battery),
                     style: const TextStyle(
                       color: Color(0xFF334155),
-                      height: 1.3,
-                      fontWeight: FontWeight.w700,
+                      fontSize: 12,
+                      height: 1.25,
+                      fontWeight: FontWeight.w500,
                     ),
                   ),
                 ),
@@ -2002,6 +2368,7 @@ class _AircraftInfoTable extends StatelessWidget {
   Widget build(BuildContext context) {
     final rows = [
       ('Kategorie', aircraft.type),
+      ('Ausstattung', _aircraftFeaturesLabel(aircraft.featureOptions)),
       ('Hersteller', aircraft.manufacturer),
       ('Spannweite', '${aircraft.wingspanMeters.toStringAsFixed(2)} m'),
       ('Laenge', '${aircraft.lengthMeters.toStringAsFixed(2)} m'),
@@ -2082,6 +2449,13 @@ String _batteryCellsLabel(List<int> cells) {
   }.toList()
     ..sort();
   return normalized.map((cell) => '${cell}S').join(', ');
+}
+
+String _aircraftFeaturesLabel(List<String> features) {
+  if (features.isEmpty) {
+    return 'Keine Angabe';
+  }
+  return features.join(', ');
 }
 
 class _InfoTableCell extends StatelessWidget {
@@ -2224,6 +2598,7 @@ class _AircraftDialogState extends State<_AircraftDialog> {
   String _type = _aircraftTypes.first;
   String _selectedTransmitter = '';
   final Set<int> _batteryCells = {2};
+  final Set<String> _featureOptions = {};
 
   bool get _isEditing => widget.aircraft != null;
 
@@ -2255,6 +2630,9 @@ class _AircraftDialogState extends State<_AircraftDialog> {
     _batteryCells
       ..clear()
       ..addAll(aircraft.batteryCells.map((cell) => cell.clamp(1, 6)));
+    _featureOptions
+      ..clear()
+      ..addAll(aircraft.featureOptions);
     _notes.text = aircraft.notes;
     _repairNotes.text = aircraft.repairNotes;
     _status = aircraft.status;
@@ -2377,6 +2755,21 @@ class _AircraftDialogState extends State<_AircraftDialog> {
                           _batteryCells.add(cell);
                         } else if (_batteryCells.length > 1) {
                           _batteryCells.remove(cell);
+                        }
+                      });
+                    },
+                  ),
+                ),
+                SizedBox(
+                  width: 532,
+                  child: _AircraftFeaturesMultiSelect(
+                    selectedFeatures: _featureOptions,
+                    onChanged: (feature, selected) {
+                      setState(() {
+                        if (selected) {
+                          _featureOptions.add(feature);
+                        } else {
+                          _featureOptions.remove(feature);
                         }
                       });
                     },
@@ -2529,6 +2922,10 @@ class _AircraftDialogState extends State<_AircraftDialog> {
         drive: _drive.text.trim(),
         batteryCount: (_batteryCells.toList()..sort()).first,
         batteryCellOptions: List.unmodifiable(_batteryCells.toList()..sort()),
+        featureOptions: List.unmodifiable([
+          for (final feature in aircraftFeatureOptions)
+            if (_featureOptions.contains(feature)) feature,
+        ]),
         totalFlights: existing?.totalFlights ?? 0,
         flightHours: existing?.flightHours ?? 0,
         status: _status,
@@ -2700,13 +3097,18 @@ class _BatteryCellsMultiSelect extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return InputDecorator(
-      decoration: const InputDecoration(labelText: 'Akku-Typ'),
+      decoration: const InputDecoration(
+        labelText: 'Akku-Typ',
+        labelStyle: TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+      ),
       child: Wrap(
-        spacing: 8,
-        runSpacing: 8,
+        spacing: 6,
+        runSpacing: 6,
         children: [
           for (var cell = 1; cell <= 6; cell++)
             FilterChip(
+              materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              visualDensity: VisualDensity.compact,
               label: Text('${cell}S'),
               selected: selectedCells.contains(cell),
               onSelected: (selected) => onChanged(cell, selected),
@@ -2716,7 +3118,51 @@ class _BatteryCellsMultiSelect extends StatelessWidget {
                 color: selectedCells.contains(cell)
                     ? const Color(0xFF075985)
                     : const Color(0xFF334155),
+                fontSize: 11,
                 fontWeight: FontWeight.w900,
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _AircraftFeaturesMultiSelect extends StatelessWidget {
+  final Set<String> selectedFeatures;
+  final void Function(String feature, bool selected) onChanged;
+
+  const _AircraftFeaturesMultiSelect({
+    required this.selectedFeatures,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return InputDecorator(
+      decoration: const InputDecoration(
+        labelText: 'Ausstattung',
+        labelStyle: TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+      ),
+      child: Wrap(
+        spacing: 6,
+        runSpacing: 6,
+        children: [
+          for (final feature in aircraftFeatureOptions)
+            FilterChip(
+              materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              visualDensity: VisualDensity.compact,
+              label: Text(feature),
+              selected: selectedFeatures.contains(feature),
+              onSelected: (selected) => onChanged(feature, selected),
+              selectedColor: const Color(0xFFDCEEFF),
+              checkmarkColor: const Color(0xFF0A84FF),
+              labelStyle: TextStyle(
+                color: selectedFeatures.contains(feature)
+                    ? const Color(0xFF075985)
+                    : const Color(0xFF334155),
+                fontSize: 11,
+                fontWeight: FontWeight.w800,
               ),
             ),
         ],
@@ -2795,71 +3241,60 @@ String _mimeTypeForName(String fileName) {
   return 'image/jpeg';
 }
 
-const _aircraftTypes = [
-  'Segler',
-  'Elektromotor-Flieger',
-  'Drohne',
-  'Kunstflug',
-  'Scale-Modell',
-  'Jet',
-  'Trainer',
-  'Indoor',
-  'Slowflyer',
-  'Wasserflugzeug',
-  'Hubschrauber',
-  'Verbrenner',
-  'Motorschirm',
-];
+const _aircraftTypes = aircraftCategoryOptions;
 
 String _normalizeAircraftType(String value) {
-  if (_aircraftTypes.contains(value)) {
-    return value;
-  }
+  return normalizeAircraftCategory(value);
+}
 
-  final lower = value.toLowerCase();
-  if (lower.contains('segler')) {
-    return 'Segler';
+bool _isRepairFilter(String? value) {
+  return value == _repairFilterKey;
+}
+
+String? _modelCategoryIconAsset(String category) {
+  final value = category.toLowerCase();
+  if (value.contains('drohne') ||
+      value.contains('drone') ||
+      value.contains('multi') ||
+      value.contains('quad')) {
+    return 'assets/icons/drohne_60.png';
   }
-  if (lower.contains('drohne') ||
-      lower.contains('drone') ||
-      lower.contains('multi') ||
-      lower.contains('quad')) {
-    return 'Drohne';
+  if (value.contains('hubschrauber') || value.contains('heli')) {
+    return 'assets/icons/hubschrauber_60.png';
   }
-  if (lower.contains('kunst') || lower.contains('acro')) {
-    return 'Kunstflug';
+  if (value.contains('jet')) {
+    return 'assets/icons/jet_60.png';
   }
-  if (lower.contains('scale')) {
-    return 'Scale-Modell';
+  if (value.contains('kunst')) {
+    return 'assets/icons/kunstflug_60.png';
   }
-  if (lower.contains('jet')) {
-    return 'Jet';
+  if (value.contains('paragleiter') || value.contains('para')) {
+    return 'assets/icons/paragleiter_60.png';
   }
-  if (lower.contains('trainer') || lower.contains('schule')) {
-    return 'Trainer';
+  if (value.contains('scale')) {
+    return 'assets/icons/scale_60.png';
   }
-  if (lower.contains('indoor')) {
-    return 'Indoor';
+  if (value.contains('segler') || value.contains('segelflug')) {
+    return 'assets/icons/segler_60.png';
   }
-  if (lower.contains('slow')) {
-    return 'Slowflyer';
+  if (value.contains('slowflyer')) {
+    return 'assets/icons/slowflyer_60.png';
   }
-  if (lower.contains('wasser') || lower.contains('float')) {
-    return 'Wasserflugzeug';
+  if (value.contains('sonstige')) {
+    return 'assets/icons/sonstige_60.png';
   }
-  if (lower.contains('hubschrauber') || lower.contains('heli')) {
-    return 'Hubschrauber';
+  return null;
+}
+
+IconData _modelCategoryFallbackIcon(String category) {
+  final value = category.toLowerCase();
+  if (value.contains('nurfl')) {
+    return Icons.change_history_rounded;
   }
-  if (lower.contains('verbrenner') ||
-      lower.contains('benzin') ||
-      lower.contains('glow') ||
-      lower.contains('nitro')) {
-    return 'Verbrenner';
+  if (value.contains('trainer')) {
+    return Icons.school_rounded;
   }
-  if (lower.contains('motorschirm') || lower.contains('para')) {
-    return 'Motorschirm';
-  }
-  return 'Elektromotor-Flieger';
+  return Icons.airplanemode_active_rounded;
 }
 
 Alignment _photoAlignment(AircraftModel aircraft) {
@@ -2869,7 +3304,9 @@ Alignment _photoAlignment(AircraftModel aircraft) {
   if (id.contains('quad') || type.contains('multi')) {
     return const Alignment(0.88, -0.30);
   }
-  if (id.contains('asw') || type.contains('segler')) {
+  if (id.contains('asw') ||
+      type.contains('segler') ||
+      type.contains('segelflug')) {
     return const Alignment(0.58, 0.28);
   }
   if (type.contains('kunst') || id.contains('extra')) {

@@ -393,13 +393,13 @@ final _initialState = FleetState(
     phone: '',
     email: '',
     transmitters: ['Jeti DS-16', 'Spektrum NX10'],
-    notes: 'Modellpilot mit Fokus auf Segler, Drohnen und Kunstflug.',
+    notes: 'Modellpilot mit Fokus auf Segelflugzeuge, Drohnen und Kunstflug.',
   ),
   aircraft: [
     AircraftModel(
       id: 'asw28',
       name: 'ASW 28',
-      type: 'Segler',
+      type: 'Segelflugzeug',
       manufacturer: 'Schleicher',
       registration: 'D-1872',
       wingspanMeters: 3.2,
@@ -426,7 +426,7 @@ final _initialState = FleetState(
     AircraftModel(
       id: 'extra300',
       name: 'Extra 300',
-      type: 'Kunstflug',
+      type: 'Kunstflieger',
       manufacturer: 'Extreme Flight',
       registration: 'D-ACRO',
       wingspanMeters: 1.8,
@@ -453,7 +453,7 @@ final _initialState = FleetState(
     AircraftModel(
       id: 'quadx4',
       name: 'Quad X4',
-      type: 'Multicopter',
+      type: 'Drohne',
       manufacturer: 'Eigenbau',
       registration: 'FPV-04',
       wingspanMeters: 0.52,
