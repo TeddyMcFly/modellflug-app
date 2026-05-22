@@ -1,59 +1,47 @@
+import 'dart:ui_web' as ui_web;
+
 import 'package:flutter/material.dart';
+import 'package:web/web.dart' as web;
 
 class WebcamEmbedView extends StatelessWidget {
   final String url;
+  final int refreshSerial;
 
-  const WebcamEmbedView({super.key, required this.url});
+  const WebcamEmbedView({
+    super.key,
+    required this.url,
+    required this.refreshSerial,
+  });
 
   @override
   Widget build(BuildContext context) {
-    final host = Uri.tryParse(url)?.host;
     return DecoratedBox(
       decoration: const BoxDecoration(color: Color(0xFF0F172A)),
-      child: Center(
-        child: Padding(
-          padding: const EdgeInsets.all(20),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Icon(
-                Icons.link_rounded,
-                color: Colors.white,
-                size: 36,
-              ),
-              const SizedBox(height: 10),
-              const Text(
-                'Diese Webcam-Adresse ist eine Webseite.',
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.w900,
-                ),
-              ),
-              if (host != null && host.isNotEmpty) ...[
-                const SizedBox(height: 4),
-                Text(
-                  host,
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(
-                    color: Color(0xFFE2E8F0),
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-              ],
-              const SizedBox(height: 8),
-              const Text(
-                'Trage eine direkte Bild- oder Stream-Adresse ein, damit sie hier angezeigt wird.',
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  color: Color(0xFFE2E8F0),
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-            ],
-          ),
-        ),
+      child: HtmlElementView(
+        viewType: _registerWebcamEmbed(url, refreshSerial),
       ),
     );
   }
+}
+
+final _registeredViewTypes = <String>{};
+
+String _registerWebcamEmbed(String url, int refreshSerial) {
+  final viewType = 'modellflug-webcam-embed-${Object.hash(url, refreshSerial)}';
+  if (_registeredViewTypes.add(viewType)) {
+    ui_web.platformViewRegistry.registerViewFactory(viewType, (_) {
+      return web.HTMLIFrameElement()
+        ..src = url
+        ..style.width = '100%'
+        ..style.height = '100%'
+        ..style.border = '0'
+        ..style.display = 'block'
+        ..style.backgroundColor = '#0F172A'
+        ..allow =
+            'accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share; fullscreen'
+        ..referrerPolicy = 'strict-origin-when-cross-origin'
+        ..setAttribute('allowfullscreen', 'true');
+    });
+  }
+  return viewType;
 }

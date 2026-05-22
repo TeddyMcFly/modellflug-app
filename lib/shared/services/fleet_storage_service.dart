@@ -8,6 +8,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../models/aircraft_model.dart';
 import '../models/fleet_state.dart';
+import '../utils/image_thumbnail.dart';
 
 final fleetStorageServiceProvider = Provider<FleetStorageService?>((ref) {
   if (Firebase.apps.isEmpty) {
@@ -92,6 +93,8 @@ class FleetStorageService {
     final photoSource = result.photoSource;
     if (photoSource != null && photoSource.isNotEmpty) {
       if (_isDataUri(photoSource)) {
+        final thumbnailDataUri = result.photoThumbnailDataUri ??
+            createImageThumbnailDataUriFromDataUri(photoSource);
         final uploaded = await _uploadDataUri(
           photoSource,
           pathPrefix: 'users/$uid/profile',
@@ -99,6 +102,7 @@ class FleetStorageService {
         );
         result = result.copyWith(
           photoDataUri: null,
+          photoThumbnailDataUri: thumbnailDataUri,
           photoStoragePath: uploaded.storagePath,
           photoDownloadUrl: uploaded.downloadUrl,
         );
@@ -111,6 +115,7 @@ class FleetStorageService {
     } else {
       result = result.copyWith(
         photoDataUri: null,
+        photoThumbnailDataUri: null,
         photoStoragePath: null,
         photoDownloadUrl: null,
       );

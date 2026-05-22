@@ -442,6 +442,7 @@ class PilotProfile {
   final List<String> transmitters;
   final String notes;
   final String? photoDataUri;
+  final String? photoThumbnailDataUri;
   final String? photoStoragePath;
   final String? photoDownloadUrl;
   final String? insuranceDocumentName;
@@ -460,6 +461,7 @@ class PilotProfile {
     this.transmitters = const [],
     required this.notes,
     this.photoDataUri,
+    this.photoThumbnailDataUri,
     this.photoStoragePath,
     this.photoDownloadUrl,
     this.insuranceDocumentName,
@@ -469,6 +471,8 @@ class PilotProfile {
   });
 
   String? get photoSource => photoDownloadUrl ?? photoDataUri;
+
+  String? get memberPhotoSource => photoThumbnailDataUri;
 
   String? get insuranceDocumentSource =>
       insuranceDocumentDownloadUrl ?? insuranceDocumentDataUri;
@@ -484,6 +488,7 @@ class PilotProfile {
     List<String>? transmitters,
     String? notes,
     Object? photoDataUri = _unset,
+    Object? photoThumbnailDataUri = _unset,
     Object? photoStoragePath = _unset,
     Object? photoDownloadUrl = _unset,
     Object? insuranceDocumentName = _unset,
@@ -504,6 +509,9 @@ class PilotProfile {
       photoDataUri: identical(photoDataUri, _unset)
           ? this.photoDataUri
           : photoDataUri as String?,
+      photoThumbnailDataUri: identical(photoThumbnailDataUri, _unset)
+          ? this.photoThumbnailDataUri
+          : photoThumbnailDataUri as String?,
       photoStoragePath: identical(photoStoragePath, _unset)
           ? this.photoStoragePath
           : photoStoragePath as String?,
@@ -546,6 +554,7 @@ class PilotProfile {
       notes: json['notes'] as String? ??
           'Modellpilot mit Fokus auf Segelflugzeuge und Kunstflug.',
       photoDataUri: json['photoDataUri'] as String?,
+      photoThumbnailDataUri: json['photoThumbnailDataUri'] as String?,
       photoStoragePath: json['photoStoragePath'] as String?,
       photoDownloadUrl: json['photoDownloadUrl'] as String?,
       insuranceDocumentName: json['insuranceDocumentName'] as String?,
@@ -569,6 +578,7 @@ class PilotProfile {
       'transmitters': transmitters,
       'notes': notes,
       'photoDataUri': photoDataUri,
+      'photoThumbnailDataUri': photoThumbnailDataUri,
       'photoStoragePath': photoStoragePath,
       'photoDownloadUrl': photoDownloadUrl,
       'insuranceDocumentName': insuranceDocumentName,
@@ -591,7 +601,7 @@ extension LocationPresenceStatusText on LocationPresenceStatus {
       case LocationPresenceStatus.offline:
         return 'Offline';
       case LocationPresenceStatus.atField:
-        return 'Am Platz';
+        return 'Online';
       case LocationPresenceStatus.flying:
         return 'Beim Fliegen';
     }
@@ -621,6 +631,9 @@ class AppSettings {
   final bool playStartSound;
   final bool autoOpenDashboardAfterLoading;
   final bool surfaceSettingsInitialized;
+  final bool automaticBackupEnabled;
+  final String? lastAutomaticBackupAt;
+  final String? lastAutomaticBackupSignature;
 
   const AppSettings({
     required this.shareLocationWithFriends,
@@ -645,6 +658,9 @@ class AppSettings {
     this.playStartSound = true,
     this.autoOpenDashboardAfterLoading = true,
     this.surfaceSettingsInitialized = true,
+    this.automaticBackupEnabled = true,
+    this.lastAutomaticBackupAt,
+    this.lastAutomaticBackupSignature,
   });
 
   AppSettings copyWith({
@@ -670,6 +686,9 @@ class AppSettings {
     bool? playStartSound,
     bool? autoOpenDashboardAfterLoading,
     bool? surfaceSettingsInitialized,
+    bool? automaticBackupEnabled,
+    String? lastAutomaticBackupAt,
+    String? lastAutomaticBackupSignature,
   }) {
     return AppSettings(
       shareLocationWithFriends:
@@ -700,6 +719,12 @@ class AppSettings {
           autoOpenDashboardAfterLoading ?? this.autoOpenDashboardAfterLoading,
       surfaceSettingsInitialized:
           surfaceSettingsInitialized ?? this.surfaceSettingsInitialized,
+      automaticBackupEnabled:
+          automaticBackupEnabled ?? this.automaticBackupEnabled,
+      lastAutomaticBackupAt:
+          lastAutomaticBackupAt ?? this.lastAutomaticBackupAt,
+      lastAutomaticBackupSignature:
+          lastAutomaticBackupSignature ?? this.lastAutomaticBackupSignature,
     );
   }
 
@@ -750,6 +775,10 @@ class AppSettings {
           json['autoOpenDashboardAfterLoading'] as bool? ?? true,
       surfaceSettingsInitialized:
           json['surfaceSettingsInitialized'] as bool? ?? false,
+      automaticBackupEnabled: json['automaticBackupEnabled'] as bool? ?? true,
+      lastAutomaticBackupAt: json['lastAutomaticBackupAt'] as String?,
+      lastAutomaticBackupSignature:
+          json['lastAutomaticBackupSignature'] as String?,
     );
   }
 
@@ -780,6 +809,9 @@ class AppSettings {
       'playStartSound': playStartSound,
       'autoOpenDashboardAfterLoading': autoOpenDashboardAfterLoading,
       'surfaceSettingsInitialized': surfaceSettingsInitialized,
+      'automaticBackupEnabled': automaticBackupEnabled,
+      'lastAutomaticBackupAt': lastAutomaticBackupAt,
+      'lastAutomaticBackupSignature': lastAutomaticBackupSignature,
     };
   }
 }

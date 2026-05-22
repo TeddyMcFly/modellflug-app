@@ -6,12 +6,15 @@ import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/aircraft_model.dart';
 import '../models/fleet_state.dart';
 import '../services/fleet_cloud_repository.dart';
 import '../services/fleet_storage_service.dart';
+import '../services/member_chat_service.dart';
+import '../utils/image_thumbnail.dart';
 
 export '../models/fleet_state.dart';
 
@@ -31,6 +34,17 @@ enum CloudSyncResult {
   wifiRequired,
 }
 
+enum AutomaticBackupResult {
+  created,
+  disabled,
+  notDue,
+  unchanged,
+  cloudUnavailable,
+  wifiRequired,
+  failed,
+  alreadyRunning,
+}
+
 class FleetNotifier extends StateNotifier<FleetState> {
   final Ref _ref;
   late final Future<void> _bootstrapFuture;
@@ -43,7 +57,9 @@ class FleetNotifier extends StateNotifier<FleetState> {
   int _localRevision = 0;
   DateTime? _ignoreCloudRefreshUntil;
   bool _hasUnsyncedLocalChanges = false;
+  bool _automaticBackupRunning = false;
   bool _disposed = false;
+  String? _lastPublishedMemberSignature;
 
   FleetNotifier(this._ref) : super(_initialState) {
     _bootstrapFuture = _loadBootstrapState();
@@ -54,6 +70,7 @@ class FleetNotifier extends StateNotifier<FleetState> {
   }
 
   static const _legacyStorageKey = 'modellflug_fleet_state';
+  static const _automaticBackupInterval = Duration(days: 1);
 
   void addAircraft(AircraftModel aircraft) {
     state = state.copyWith(aircraft: [aircraft, ...state.aircraft]);
@@ -226,6 +243,7 @@ class FleetNotifier extends StateNotifier<FleetState> {
         state: snapshot,
       ),
     );
+    _publishMemberProfileLater();
   }
 
   void updateLocationSharing(bool enabled) {
@@ -233,11 +251,31 @@ class FleetNotifier extends StateNotifier<FleetState> {
       appSettings: state.appSettings.copyWith(
         shareLocationWithFriends: enabled,
         presenceStatus: enabled
-            ? _determinePresenceStatus(state.flights)
+            ? LocationPresenceStatus.atField
             : LocationPresenceStatus.offline,
       ),
     );
     _persistAppSettingsLater();
+    _publishMemberProfileLater();
+  }
+
+  void updateFlightTimerPresence(bool running) {
+    if (!state.appSettings.shareLocationWithFriends) {
+      return;
+    }
+
+    final nextStatus = running
+        ? LocationPresenceStatus.flying
+        : LocationPresenceStatus.atField;
+    if (state.appSettings.presenceStatus == nextStatus) {
+      return;
+    }
+
+    state = state.copyWith(
+      appSettings: state.appSettings.copyWith(presenceStatus: nextStatus),
+    );
+    _persistAppSettingsLater();
+    _publishMemberProfileLater();
   }
 
   void updateChatReachability(bool enabled) {
@@ -245,11 +283,13 @@ class FleetNotifier extends StateNotifier<FleetState> {
       appSettings: state.appSettings.copyWith(reachableByChat: enabled),
     );
     _persistAppSettingsLater();
+    _publishMemberProfileLater();
   }
 
   void updateAppSettings(AppSettings settings) {
     state = state.copyWith(appSettings: settings);
     _persistAppSettingsLater();
+    _publishMemberProfileLater();
   }
 
   Future<CloudSyncResult> syncNow() async {
@@ -278,6 +318,11 @@ class FleetNotifier extends StateNotifier<FleetState> {
     return synced && state.syncStatus == FleetSyncStatus.cloudActive
         ? CloudSyncResult.synced
         : CloudSyncResult.cloudUnavailable;
+  }
+
+  Future<AutomaticBackupResult> runAutomaticBackupCheck() async {
+    await _bootstrapFuture;
+    return _createAutomaticBackupIfNeeded();
   }
 
   String exportJson() {
@@ -412,6 +457,7 @@ class FleetNotifier extends StateNotifier<FleetState> {
         isLoaded: true,
         syncStatus: FleetSyncStatus.localOnly,
       );
+      _lastPublishedMemberSignature = null;
       return;
     }
 
@@ -472,9 +518,12 @@ class FleetNotifier extends StateNotifier<FleetState> {
           unawaited(_refreshFromCloud(user.uid));
         },
       );
+      unawaited(_createAutomaticBackupIfNeeded());
+      _publishMemberProfileLater();
     } catch (_) {
       state = state.copyWith(syncStatus: FleetSyncStatus.cloudPaused);
       await _saveLocalState(state);
+      _publishMemberProfileLater();
     }
   }
 
@@ -500,8 +549,62 @@ class FleetNotifier extends StateNotifier<FleetState> {
         syncStatus: FleetSyncStatus.cloudActive,
       );
       await _saveLocalState(state);
+      _publishMemberProfileLater();
     } catch (_) {
       state = state.copyWith(syncStatus: FleetSyncStatus.cloudPaused);
+    }
+  }
+
+  void _publishMemberProfileLater() {
+    unawaited(_publishMemberProfile());
+  }
+
+  Future<void> _publishMemberProfile() async {
+    if (Firebase.apps.isEmpty || _activeUid == null) {
+      return;
+    }
+
+    final user = FirebaseAuth.instance.currentUser;
+    final service = _ref.read(memberChatServiceProvider);
+    if (user == null || user.uid != _activeUid || service == null) {
+      return;
+    }
+
+    final snapshot = state;
+    final displayName = _memberDisplayNameFor(user, snapshot.pilotProfile);
+    final photoSource = await _memberPhotoSourceFor(
+      user,
+      snapshot.pilotProfile,
+    );
+    final signature = [
+      user.uid,
+      displayName,
+      snapshot.pilotProfile.club,
+      snapshot.appSettings.reachableByChat,
+      snapshot.appSettings.shareLocationWithFriends,
+      snapshot.appSettings.presenceStatus.name,
+      _hasProfilePhoto(user, snapshot.pilotProfile),
+      photoSource ?? '',
+    ].join('|');
+
+    if (_lastPublishedMemberSignature == signature) {
+      return;
+    }
+    _lastPublishedMemberSignature = signature;
+
+    try {
+      await service.saveCurrentMemberProfile(
+        user: user,
+        displayName: displayName,
+        club: snapshot.pilotProfile.club,
+        reachableByChat: snapshot.appSettings.reachableByChat,
+        shareLocation: snapshot.appSettings.shareLocationWithFriends,
+        presenceStatus: snapshot.appSettings.presenceStatus.name,
+        photoSource: photoSource,
+        clearPhotoSource: !_hasProfilePhoto(user, snapshot.pilotProfile),
+      );
+    } catch (_) {
+      _lastPublishedMemberSignature = null;
     }
   }
 
@@ -559,8 +662,130 @@ class FleetNotifier extends StateNotifier<FleetState> {
     _saveQueue = _saveQueue.catchError((_) {}).then((_) async {
       await _saveLocalState(snapshot);
       await _saveCloudState(snapshot, cloudWrite, revision: revision);
+      unawaited(_createAutomaticBackupIfNeeded());
     });
     return _saveQueue;
+  }
+
+  Future<AutomaticBackupResult> _createAutomaticBackupIfNeeded() async {
+    if (_automaticBackupRunning) {
+      return AutomaticBackupResult.alreadyRunning;
+    }
+
+    _automaticBackupRunning = true;
+    try {
+      final snapshot = state;
+      final settings = snapshot.appSettings;
+      if (!settings.automaticBackupEnabled) {
+        return AutomaticBackupResult.disabled;
+      }
+
+      if (!_automaticBackupDue(settings, DateTime.now())) {
+        return AutomaticBackupResult.notDue;
+      }
+
+      final signature = _automaticBackupSignature(snapshot);
+      if (signature == settings.lastAutomaticBackupSignature) {
+        return AutomaticBackupResult.unchanged;
+      }
+
+      if (Firebase.apps.isEmpty || _activeUid == null) {
+        return AutomaticBackupResult.cloudUnavailable;
+      }
+
+      final user = FirebaseAuth.instance.currentUser;
+      final repository = _ref.read(fleetCloudRepositoryProvider);
+      if (user == null || user.uid != _activeUid || repository == null) {
+        return AutomaticBackupResult.cloudUnavailable;
+      }
+
+      if (!await _canUseCloudSyncNetwork(snapshot)) {
+        if (!_disposed && user.uid == _activeUid) {
+          state = snapshot.copyWith(syncStatus: FleetSyncStatus.cloudPaused);
+          await _saveLocalState(state);
+        }
+        return AutomaticBackupResult.wifiRequired;
+      }
+
+      final now = DateTime.now();
+      final completedAt = now.toUtc().toIso8601String();
+      final preparedSnapshot = await _prepareFilesForCloud(user, snapshot);
+      final backupState = preparedSnapshot.copyWith(
+        appSettings: preparedSnapshot.appSettings.copyWith(
+          lastAutomaticBackupAt: completedAt,
+          lastAutomaticBackupSignature: signature,
+        ),
+        syncStatus: FleetSyncStatus.cloudActive,
+      );
+
+      _ignoreCloudRefreshUntil =
+          DateTime.now().add(const Duration(seconds: 12));
+      await repository.saveAutomaticBackup(
+        user: user,
+        state: backupState,
+        backupId: _automaticBackupId(now),
+        signature: signature,
+      );
+
+      if (!_disposed && user.uid == _activeUid) {
+        final currentState = state.copyWith(
+          appSettings: state.appSettings.copyWith(
+            lastAutomaticBackupAt: completedAt,
+            lastAutomaticBackupSignature: signature,
+          ),
+          syncStatus: FleetSyncStatus.cloudActive,
+        );
+        state = currentState;
+        await _saveLocalState(currentState);
+        await repository.saveAppSettings(user: user, state: currentState);
+      }
+
+      return AutomaticBackupResult.created;
+    } catch (_) {
+      return AutomaticBackupResult.failed;
+    } finally {
+      _automaticBackupRunning = false;
+    }
+  }
+
+  bool _automaticBackupDue(AppSettings settings, DateTime now) {
+    final lastBackupAt = _parseIsoDate(settings.lastAutomaticBackupAt);
+    if (lastBackupAt == null) {
+      return true;
+    }
+    return !now
+        .toUtc()
+        .isBefore(lastBackupAt.toUtc().add(_automaticBackupInterval));
+  }
+
+  DateTime? _parseIsoDate(String? value) {
+    if (value == null || value.trim().isEmpty) {
+      return null;
+    }
+    return DateTime.tryParse(value);
+  }
+
+  String _automaticBackupId(DateTime now) {
+    final local = now.toLocal();
+    final month = local.month.toString().padLeft(2, '0');
+    final day = local.day.toString().padLeft(2, '0');
+    return '${local.year}-$month-$day';
+  }
+
+  String _automaticBackupSignature(FleetState snapshot) {
+    final settingsJson = Map<String, dynamic>.from(
+      snapshot.appSettings.toJson(),
+    )
+      ..remove('lastAutomaticBackupAt')
+      ..remove('lastAutomaticBackupSignature');
+    final raw = jsonEncode({
+      'aircraft': [for (final item in snapshot.aircraft) item.toJson()],
+      'flights': [for (final item in snapshot.flights) item.toJson()],
+      'batteries': [for (final item in snapshot.batteries) item.toJson()],
+      'pilotProfile': snapshot.pilotProfile.toJson(),
+      'appSettings': settingsJson,
+    });
+    return _stableChecksum(raw);
   }
 
   Future<void> _saveLocalState(FleetState snapshot) async {
@@ -691,21 +916,69 @@ bool _hasWifiSyncConnection(List<ConnectivityResult> connections) {
       connections.contains(ConnectivityResult.ethernet);
 }
 
-LocationPresenceStatus _determinePresenceStatus(List<FlightLogEntry> flights) {
-  if (flights.isEmpty) {
-    return LocationPresenceStatus.atField;
+String _stableChecksum(String value) {
+  var hash = 0x811c9dc5;
+  for (final codeUnit in value.codeUnits) {
+    hash ^= codeUnit;
+    hash = (hash * 0x01000193) & 0xFFFFFFFF;
   }
+  return hash.toRadixString(16).padLeft(8, '0');
+}
 
-  final now = DateTime.now();
-  final latestFlight = [...flights]..sort((a, b) => b.date.compareTo(a.date));
-  final latest = latestFlight.first;
-  final flightEnd = latest.date.add(Duration(minutes: latest.durationMinutes));
-
-  if (now.isAfter(latest.date) && now.isBefore(flightEnd)) {
-    return LocationPresenceStatus.flying;
+String _memberDisplayNameFor(User user, PilotProfile profile) {
+  final authName = user.displayName?.trim();
+  if (authName != null && authName.isNotEmpty) {
+    return authName;
   }
+  final profileName = profile.name.trim();
+  if (profileName.isNotEmpty) {
+    return profileName;
+  }
+  return user.email ?? 'Mitglied';
+}
 
-  return LocationPresenceStatus.atField;
+Future<String?> _memberPhotoSourceFor(User user, PilotProfile profile) async {
+  final thumbnail = profile.memberPhotoSource?.trim();
+  if (thumbnail != null && thumbnail.isNotEmpty) {
+    return thumbnail;
+  }
+  final embeddedPhoto = profile.photoDataUri?.trim();
+  if (embeddedPhoto != null && embeddedPhoto.isNotEmpty) {
+    return createImageThumbnailDataUriFromDataUri(embeddedPhoto);
+  }
+  final profilePhoto = profile.photoDownloadUrl?.trim();
+  if (profilePhoto != null && profilePhoto.isNotEmpty) {
+    return _thumbnailFromNetworkImage(profilePhoto);
+  }
+  final authPhoto = user.photoURL?.trim();
+  if (authPhoto != null && authPhoto.isNotEmpty) {
+    return _thumbnailFromNetworkImage(authPhoto);
+  }
+  return null;
+}
+
+bool _hasProfilePhoto(User user, PilotProfile profile) {
+  final thumbnail = profile.memberPhotoSource?.trim();
+  final embeddedPhoto = profile.photoDataUri?.trim();
+  final profilePhoto = profile.photoDownloadUrl?.trim();
+  final authPhoto = user.photoURL?.trim();
+  return (thumbnail != null && thumbnail.isNotEmpty) ||
+      (embeddedPhoto != null && embeddedPhoto.isNotEmpty) ||
+      (profilePhoto != null && profilePhoto.isNotEmpty) ||
+      (authPhoto != null && authPhoto.isNotEmpty);
+}
+
+Future<String?> _thumbnailFromNetworkImage(String source) async {
+  try {
+    final response =
+        await http.get(Uri.parse(source)).timeout(const Duration(seconds: 8));
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      return null;
+    }
+    return createImageThumbnailDataUri(response.bodyBytes);
+  } catch (_) {
+    return null;
+  }
 }
 
 final _initialState = FleetState(

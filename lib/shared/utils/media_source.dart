@@ -26,12 +26,13 @@ ImageProvider<Object>? maybeMediaImageProvider(String? source) {
 
 ImageProvider<Object> mediaImageProvider(String source) {
   if (isNetworkMediaSource(source)) {
-    return NetworkImage(
-      source,
-      webHtmlElementStrategy: WebHtmlElementStrategy.prefer,
-    );
+    return NetworkImage(source);
   }
   return MemoryImage(bytesFromDataUri(source));
+}
+
+ImageProvider<Object> browserVisibleMediaImageProvider(String source) {
+  return mediaImageProvider(source);
 }
 
 Uint8List bytesFromDataUri(String dataUri) {

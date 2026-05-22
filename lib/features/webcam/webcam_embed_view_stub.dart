@@ -2,8 +2,13 @@ import 'package:flutter/material.dart';
 
 class WebcamEmbedView extends StatelessWidget {
   final String url;
+  final int refreshSerial;
 
-  const WebcamEmbedView({super.key, required this.url});
+  const WebcamEmbedView({
+    super.key,
+    required this.url,
+    required this.refreshSerial,
+  });
 
   @override
   Widget build(BuildContext context) {

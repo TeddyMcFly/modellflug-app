@@ -13,6 +13,10 @@ import 'webcam_embed_view.dart';
 
 const _lmfcWebcamImageUrl =
     'https://www.lmfc.de/fileadmin/Modellflug/cam/bilder/webcam.jpg';
+const _brouwersdamYoutubeVideoId = 'KjK02QIm4ZI';
+const _brouwersdamWebcamEmbedUrl =
+    'https://g0.ipcamlive.com/player/player.php?alias=6878d928bbb14&autoplay=1&mute=1&disableautofullscreen=1&disablefullscreen=1&disablezoombutton=1&disableframecapture=1&disabletimelapseplayer=1&disablestorageplayer=1&disabledownloadbutton=1&disableplaybackspeedbutton=1&disablenavigation=1&disableuserpause=1&websocketenabled=1';
+const _naturalHighBrouwersdamEmbedUrl = _brouwersdamWebcamEmbedUrl;
 
 class WebcamPage extends ConsumerStatefulWidget {
   const WebcamPage({super.key});
@@ -44,7 +48,7 @@ class _WebcamPageState extends ConsumerState<WebcamPage> {
     super.initState();
     _weatherRefreshTimer = Timer.periodic(
       const Duration(minutes: 20),
-      (_) => _refreshWeather(),
+      (_) => _refreshWeather(refreshCamera: false),
     );
   }
 
@@ -67,16 +71,25 @@ class _WebcamPageState extends ConsumerState<WebcamPage> {
     super.dispose();
   }
 
-  void _refreshWeather() {
+  void _refreshWeather({bool refreshCamera = true}) {
     if (!mounted) {
       return;
     }
 
-    setState(() => _cameraRefreshSerial++);
+    if (refreshCamera) {
+      setState(() => _cameraRefreshSerial++);
+    }
 
-    final settings = ref.read(fleetProvider).appSettings;
+    final fleet = ref.read(fleetProvider);
+    final settings = fleet.appSettings;
+    final selectedWebcamUrl = _webcamUrlFor(settings, _selectedWebcam);
+    final webcamWeatherLocation = _weatherLocationForWebcam(
+      fleet,
+      _selectedWebcam,
+      selectedWebcamUrl,
+    );
     final webcamQuery = WeatherQuery(
-      location: _selectedWebcam,
+      location: webcamWeatherLocation,
       timeZone: settings.timeZone,
     );
     final forecastQuery = WeatherQuery(
@@ -109,6 +122,12 @@ class _WebcamPageState extends ConsumerState<WebcamPage> {
     if (!forecastLocations.contains(_selectedForecastLocation)) {
       _selectedForecastLocation = forecastLocations.first;
     }
+    final selectedWebcamUrl = _webcamUrlFor(settings, _selectedWebcam);
+    final webcamWeatherLocation = _weatherLocationForWebcam(
+      fleet,
+      _selectedWebcam,
+      selectedWebcamUrl,
+    );
 
     return AppScaffold(
       title: 'Webcams',
@@ -116,7 +135,7 @@ class _WebcamPageState extends ConsumerState<WebcamPage> {
           'Platzkameras, Wetterhinweise und Sichtbedingungen fuer den Flugtag.',
       headerWeatherLocation: _selectedForecastLocation,
       action: FilledButton.icon(
-        onPressed: _refreshWeather,
+        onPressed: () => _refreshWeather(),
         icon: const Icon(Icons.refresh_rounded),
         label: const Text('Aktualisieren'),
       ),
@@ -129,20 +148,31 @@ class _WebcamPageState extends ConsumerState<WebcamPage> {
               selectedWebcam: _selectedWebcam,
               onChanged: (value) {
                 if (value != null) {
-                  setState(() => _selectedWebcam = value);
+                  setState(() {
+                    _selectedWebcam = value;
+                    _cameraRefreshSerial++;
+                  });
                 }
               },
             ),
             const SizedBox(height: 12),
             _CameraPreview(
+              key: ValueKey(
+                '$_selectedWebcam|$selectedWebcamUrl|$_cameraRefreshSerial',
+              ),
               title: _selectedWebcam,
-              sourceUrl: _webcamUrlFor(settings, _selectedWebcam),
+              sourceUrl: selectedWebcamUrl,
               refreshSerial: _cameraRefreshSerial,
             ),
             const SizedBox(height: 12),
-            _AirfieldWeatherCard(webcam: _selectedWebcam),
+            _AirfieldWeatherCard(
+              webcam: _selectedWebcam,
+              weatherLocation: webcamWeatherLocation,
+            ),
             const SizedBox(height: 12),
-            _PressureTrendCard(location: _selectedWebcam),
+            _PressureTrendCard(
+              location: webcamWeatherLocation,
+            ),
             const SizedBox(height: 12),
             _WeeklyWeatherCard(
               locations: forecastLocations,
@@ -306,6 +336,67 @@ class _WebcamChoiceButton extends StatelessWidget {
   }
 }
 
+String _weatherLocationForWebcam(
+  FleetState fleet,
+  String webcam,
+  String? sourceUrl,
+) {
+  final knownLocation = _knownWeatherLocationForWebcam(webcam, sourceUrl);
+  if (knownLocation != null) {
+    return knownLocation;
+  }
+
+  final normalized = webcam.trim().toLowerCase();
+  if (_isWeatherLocationName(normalized)) {
+    return webcam;
+  }
+
+  final flightAreas = fleet.pilotProfile.flightAreas
+      .map((area) => area.trim())
+      .where((area) => area.isNotEmpty)
+      .toList();
+  if (flightAreas.isNotEmpty) {
+    return flightAreas.first;
+  }
+
+  final homeAirfield = fleet.pilotProfile.homeAirfield.trim();
+  if (homeAirfield.isNotEmpty) {
+    return homeAirfield;
+  }
+
+  return webcam;
+}
+
+String? _knownWeatherLocationForWebcam(String webcam, String? sourceUrl) {
+  final normalized = '${webcam.trim()} ${sourceUrl?.trim() ?? ''}'
+      .toLowerCase()
+      .replaceAll('-', ' ');
+
+  if (normalized.contains('brouwersdam') ||
+      normalized.contains('natural high') ||
+      normalized.contains('ouddorp') ||
+      normalized.contains('6878d928bbb14') ||
+      normalized.contains(_brouwersdamYoutubeVideoId.toLowerCase()) ||
+      normalized.contains('bfbmydcnawfcqtjju11hwj8vjqljxehjoknafoyf')) {
+    return 'Ouddorp';
+  }
+
+  return null;
+}
+
+bool _isWeatherLocationName(String normalized) {
+  return normalized.contains('lmfc') ||
+      normalized.contains('lohburg') ||
+      normalized.contains('waltrop') ||
+      normalized.contains('achental') ||
+      normalized.contains('unterwoessen') ||
+      normalized.contains('unterwössen') ||
+      normalized.contains('bochum') ||
+      normalized.contains('suedhang') ||
+      normalized.contains('südhang') ||
+      normalized.contains('nord');
+}
+
 String? _webcamUrlFor(AppSettings settings, String webcam) {
   final webcamNames =
       settings.webcams.isEmpty ? defaultWebcams : settings.webcams;
@@ -333,6 +424,16 @@ String? _normalizedWebcamUrl(String? value) {
 }
 
 String _displayWebcamUrl(String url) {
+  final knownEmbedUrl = _knownWebcamEmbedUrl(url);
+  if (knownEmbedUrl != null) {
+    return knownEmbedUrl;
+  }
+
+  final youtubeEmbedUrl = _youtubeEmbedUrl(url);
+  if (youtubeEmbedUrl != null) {
+    return youtubeEmbedUrl;
+  }
+
   final uri = Uri.tryParse(url);
   if (uri == null || !uri.hasScheme) {
     return url;
@@ -348,6 +449,96 @@ String _displayWebcamUrl(String url) {
   }
 
   return url;
+}
+
+String? _knownWebcamEmbedUrl(String url) {
+  final uri = Uri.tryParse(url);
+  if (uri == null || !uri.hasScheme) {
+    return null;
+  }
+
+  final host = uri.host.toLowerCase();
+  final path = uri.path.toLowerCase();
+  final isBrouwersdam = host == 'brouwersdam.nl' ||
+      host == 'www.brouwersdam.nl' ||
+      host == 'brouwersdam.com' ||
+      host == 'www.brouwersdam.com';
+  if (isBrouwersdam &&
+      (path.contains('/brouwersdam/webcam') ||
+          path.contains('/live-view/') ||
+          path.endsWith('/webcam'))) {
+    return _brouwersdamWebcamEmbedUrl;
+  }
+
+  final isNaturalHigh = host == 'natural-high.nl' ||
+      host == 'www.natural-high.nl' ||
+      host == 'surfshop.natural-high.nl';
+  if (isNaturalHigh && path.contains('webcam-brouwersdam')) {
+    return _naturalHighBrouwersdamEmbedUrl;
+  }
+
+  final isNaturalHighViewer = host == 'live.netcamviewer.nl' &&
+      path.contains('natural-high-brouwersdam-webcam');
+  if (isNaturalHighViewer) {
+    return _naturalHighBrouwersdamEmbedUrl;
+  }
+
+  final isCamStreamerBrouwersdam = host == 'camstreamer.com' &&
+      (path.contains('597679676-live-camera-brouwersdam') ||
+          path.contains('live-camera-brouwersdam') ||
+          (path.startsWith('/embed/') &&
+              url.toLowerCase().contains(
+                    'bfbmydcnawfcqtjju11hwj8vjqljxehjoknafoyf',
+                  )));
+  if (isCamStreamerBrouwersdam) {
+    return _brouwersdamWebcamEmbedUrl;
+  }
+
+  return null;
+}
+
+String? _youtubeEmbedUrl(String url) {
+  final uri = Uri.tryParse(url);
+  if (uri == null || !uri.hasScheme) {
+    return null;
+  }
+
+  final host = uri.host.toLowerCase();
+  String? videoId;
+  if (host == 'youtu.be' && uri.pathSegments.isNotEmpty) {
+    videoId = uri.pathSegments.first;
+  } else if (host == 'youtube.com' ||
+      host == 'www.youtube.com' ||
+      host == 'm.youtube.com') {
+    if (uri.pathSegments.isNotEmpty) {
+      final firstSegment = uri.pathSegments.first;
+      if (firstSegment == 'watch') {
+        videoId = uri.queryParameters['v'];
+      } else if ((firstSegment == 'embed' || firstSegment == 'shorts') &&
+          uri.pathSegments.length > 1) {
+        videoId = uri.pathSegments[1];
+      }
+    }
+  }
+
+  if (videoId == null || videoId.trim().isEmpty) {
+    return null;
+  }
+
+  if (videoId.trim() == _brouwersdamYoutubeVideoId) {
+    return _brouwersdamWebcamEmbedUrl;
+  }
+
+  final query = <String, String>{
+    'autoplay': '1',
+    'mute': '1',
+    'playsinline': '1',
+    'rel': '0',
+    if (uri.queryParameters['start'] != null)
+      'start': uri.queryParameters['start']!,
+  };
+  return Uri.https('www.youtube.com', '/embed/${videoId.trim()}', query)
+      .toString();
 }
 
 bool _isDirectImageFeed(String url) {
@@ -371,18 +562,42 @@ bool _isDirectVideoFeed(String url) {
       lower.contains('.mov');
 }
 
-String _urlWithRefreshToken(String url, int refreshSerial) {
-  if (refreshSerial == 0) {
-    return url;
-  }
+bool _isLiveVideoStream(String url) {
+  final lower = url.toLowerCase();
+  return lower.contains('.m3u8') ||
+      lower.contains('playlist') ||
+      lower.contains('live') ||
+      lower.contains('stream');
+}
 
+Duration _videoRetryDelay(int attempt) {
+  if (attempt <= 0) {
+    return const Duration(seconds: 4);
+  }
+  if (attempt == 1) {
+    return const Duration(seconds: 10);
+  }
+  if (attempt == 2) {
+    return const Duration(seconds: 20);
+  }
+  return const Duration(seconds: 30);
+}
+
+int _imageRefreshTokenSerial = 0;
+
+String _newImageRefreshToken() {
+  _imageRefreshTokenSerial++;
+  return '${DateTime.now().microsecondsSinceEpoch}-$_imageRefreshTokenSerial';
+}
+
+String _urlWithRefreshToken(String url, String refreshToken) {
   final uri = Uri.tryParse(url);
   if (uri == null || !uri.hasScheme) {
     return url;
   }
 
   final query = Map<String, String>.from(uri.queryParameters);
-  query['_modellflug_refresh'] = '$refreshSerial';
+  query['_modellflug_refresh'] = refreshToken;
   return uri.replace(queryParameters: query).toString();
 }
 
@@ -392,6 +607,7 @@ class _CameraPreview extends StatelessWidget {
   final int refreshSerial;
 
   const _CameraPreview({
+    super.key,
     required this.title,
     required this.sourceUrl,
     required this.refreshSerial,
@@ -421,13 +637,22 @@ class _CameraPreview extends StatelessWidget {
                 message: 'Keine Webadresse hinterlegt',
               )
             else if (_isDirectVideoFeed(displayUrl))
-              _VideoCameraFeed(url: displayUrl)
+              _VideoCameraFeed(
+                key: ValueKey(displayUrl),
+                url: displayUrl,
+              )
             else if (_isDirectImageFeed(displayUrl))
               _NetworkCameraImage(
-                url: _urlWithRefreshToken(displayUrl, refreshSerial),
+                key: ValueKey(displayUrl),
+                url: displayUrl,
+                externalRefreshSerial: refreshSerial,
               )
             else
-              WebcamEmbedView(url: displayUrl),
+              WebcamEmbedView(
+                key: ValueKey(displayUrl),
+                url: displayUrl,
+                refreshSerial: refreshSerial,
+              ),
             Container(
               decoration: BoxDecoration(
                 gradient: LinearGradient(
@@ -534,18 +759,112 @@ class _CameraTitleBadge extends StatelessWidget {
   }
 }
 
-class _NetworkCameraImage extends StatelessWidget {
+class _NetworkCameraImage extends StatefulWidget {
   final String url;
+  final int externalRefreshSerial;
 
-  const _NetworkCameraImage({required this.url});
+  const _NetworkCameraImage({
+    super.key,
+    required this.url,
+    required this.externalRefreshSerial,
+  });
+
+  @override
+  State<_NetworkCameraImage> createState() => _NetworkCameraImageState();
+}
+
+class _NetworkCameraImageState extends State<_NetworkCameraImage> {
+  Timer? _retryTimer;
+  Timer? _refreshTimer;
+  Object? _error;
+  late String _refreshToken;
+
+  static const _retryDelay = Duration(seconds: 4);
+  static const _refreshInterval = Duration(minutes: 2);
+
+  @override
+  void initState() {
+    super.initState();
+    _refreshToken = _newImageRefreshToken();
+    _startRefreshTimer();
+  }
+
+  @override
+  void didUpdateWidget(covariant _NetworkCameraImage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.url != widget.url) {
+      _retryTimer?.cancel();
+      _refreshToken = _newImageRefreshToken();
+      _startRefreshTimer();
+      setState(() => _error = null);
+      return;
+    }
+    if (oldWidget.externalRefreshSerial != widget.externalRefreshSerial) {
+      _retryTimer?.cancel();
+      _refreshToken = _newImageRefreshToken();
+      setState(() => _error = null);
+    }
+  }
+
+  @override
+  void dispose() {
+    _retryTimer?.cancel();
+    _refreshTimer?.cancel();
+    super.dispose();
+  }
+
+  String get _effectiveUrl => _urlWithRefreshToken(widget.url, _refreshToken);
+
+  void _handleImageError(Object error) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || _error != null) {
+        return;
+      }
+      setState(() => _error = error);
+      _scheduleRetry();
+    });
+  }
+
+  void _scheduleRetry() {
+    if (_retryTimer?.isActive ?? false) {
+      return;
+    }
+    _retryTimer = Timer(_retryDelay, () {
+      if (!mounted) {
+        return;
+      }
+      _refreshToken = _newImageRefreshToken();
+      setState(() => _error = null);
+    });
+  }
+
+  void _startRefreshTimer() {
+    _refreshTimer?.cancel();
+    _refreshTimer = Timer.periodic(_refreshInterval, (_) {
+      if (!mounted || _error != null) {
+        return;
+      }
+      _refreshToken = _newImageRefreshToken();
+      setState(() {});
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
+    if (_error != null) {
+      return const _CameraFeedStatus(
+        icon: Icons.sync_rounded,
+        message: 'Webcam-Bild wird neu geladen',
+      );
+    }
+
+    final imageUrl = _effectiveUrl;
     return ColoredBox(
       color: const Color(0xFF0F172A),
       child: Image(
+        key: ValueKey(imageUrl),
         image: NetworkImage(
-          url,
+          imageUrl,
           webHtmlElementStrategy: WebHtmlElementStrategy.prefer,
         ),
         fit: BoxFit.contain,
@@ -559,9 +878,10 @@ class _NetworkCameraImage extends StatelessWidget {
           );
         },
         errorBuilder: (context, error, stackTrace) {
+          _handleImageError(error);
           return const _CameraFeedStatus(
-            icon: Icons.broken_image_rounded,
-            message: 'Webcam-Bild konnte nicht geladen werden',
+            icon: Icons.sync_rounded,
+            message: 'Webcam-Bild wird neu geladen',
           );
         },
       ),
@@ -572,7 +892,7 @@ class _NetworkCameraImage extends StatelessWidget {
 class _VideoCameraFeed extends StatefulWidget {
   final String url;
 
-  const _VideoCameraFeed({required this.url});
+  const _VideoCameraFeed({super.key, required this.url});
 
   @override
   State<_VideoCameraFeed> createState() => _VideoCameraFeedState();
@@ -580,8 +900,11 @@ class _VideoCameraFeed extends StatefulWidget {
 
 class _VideoCameraFeedState extends State<_VideoCameraFeed> {
   VideoPlayerController? _controller;
+  Timer? _retryTimer;
   Object? _error;
   int _loadGeneration = 0;
+  bool _isReconnecting = false;
+  int _retryAttempt = 0;
 
   @override
   void initState() {
@@ -600,6 +923,8 @@ class _VideoCameraFeedState extends State<_VideoCameraFeed> {
   @override
   void dispose() {
     _loadGeneration++;
+    _retryTimer?.cancel();
+    _controller?.removeListener(_handleControllerChanged);
     _controller?.dispose();
     super.dispose();
   }
@@ -607,51 +932,104 @@ class _VideoCameraFeedState extends State<_VideoCameraFeed> {
   Future<void> _loadVideo() async {
     final loadGeneration = ++_loadGeneration;
     final previousController = _controller;
-    _controller = null;
-    setState(() => _error = null);
-    await previousController?.dispose();
+    _retryTimer?.cancel();
+    _retryTimer = null;
+    setState(() {
+      if (previousController == null) {
+        _controller = null;
+      }
+      _error = null;
+      _isReconnecting = previousController != null;
+    });
 
     final uri = Uri.tryParse(widget.url);
     if (uri == null || !uri.hasScheme) {
       if (!mounted || loadGeneration != _loadGeneration) {
         return;
       }
-      setState(() => _error = const FormatException('Invalid webcam URL'));
+      _handleVideoLoadError(const FormatException('Invalid webcam URL'));
       return;
     }
 
-    late final VideoPlayerController nextController;
+    VideoPlayerController? nextController;
     try {
       nextController = VideoPlayerController.networkUrl(uri);
-      await nextController.initialize();
-      await nextController.setLooping(true);
+      await nextController.initialize().timeout(const Duration(seconds: 20));
+      await nextController.setLooping(!_isLiveVideoStream(widget.url));
       await nextController.setVolume(0);
       await nextController.play();
       if (!mounted || loadGeneration != _loadGeneration) {
         await nextController.dispose();
         return;
       }
-      setState(() => _controller = nextController);
+      previousController?.removeListener(_handleControllerChanged);
+      nextController.addListener(_handleControllerChanged);
+      setState(() {
+        _controller = nextController;
+        _error = null;
+        _isReconnecting = false;
+        _retryAttempt = 0;
+      });
+      await previousController?.dispose();
     } on Object catch (error) {
       try {
-        await nextController.dispose();
+        await nextController?.dispose();
       } catch (_) {
         // If creating the controller failed, there is nothing useful to clean up.
       }
       if (!mounted || loadGeneration != _loadGeneration) {
         return;
       }
-      setState(() => _error = error);
+      _handleVideoLoadError(error);
     }
+  }
+
+  void _handleControllerChanged() {
+    final controller = _controller;
+    if (!mounted || controller == null) {
+      return;
+    }
+    if (controller.value.hasError) {
+      _handleVideoLoadError(
+        controller.value.errorDescription ?? 'Video stream error',
+      );
+    }
+  }
+
+  void _handleVideoLoadError(Object error) {
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _error = error;
+      _isReconnecting = true;
+    });
+    _scheduleRetry();
+  }
+
+  void _scheduleRetry() {
+    if (_retryTimer?.isActive ?? false) {
+      return;
+    }
+    final delay = _videoRetryDelay(_retryAttempt);
+    _retryAttempt++;
+    _retryTimer = Timer(delay, () {
+      if (!mounted) {
+        return;
+      }
+      _loadVideo();
+    });
   }
 
   @override
   Widget build(BuildContext context) {
     final controller = _controller;
     if (_error != null) {
-      return const _CameraFeedStatus(
-        icon: Icons.videocam_off_rounded,
-        message: 'Webcam-Video konnte nicht geladen werden',
+      return _CameraFeedStatus(
+        icon: _isReconnecting ? Icons.sync_rounded : Icons.videocam_off_rounded,
+        message: _isReconnecting
+            ? 'Webcam-Video wird neu verbunden'
+            : 'Webcam-Video konnte nicht geladen werden',
       );
     }
     if (controller == null || !controller.value.isInitialized) {
@@ -734,20 +1112,24 @@ class _LiveBadge extends StatelessWidget {
 
 class _AirfieldWeatherCard extends ConsumerWidget {
   final String webcam;
+  final String weatherLocation;
 
-  const _AirfieldWeatherCard({required this.webcam});
+  const _AirfieldWeatherCard({
+    required this.webcam,
+    required this.weatherLocation,
+  });
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final settings = ref.watch(fleetProvider).appSettings;
     final weatherAsync = ref.watch(
       weatherForecastProvider(
-        WeatherQuery(location: webcam, timeZone: settings.timeZone),
+        WeatherQuery(location: weatherLocation, timeZone: settings.timeZone),
       ),
     );
     final weather = weatherAsync.maybeWhen(
       data: (weather) => weather,
-      orElse: () => fallbackWeather(webcam),
+      orElse: () => fallbackWeather(weatherLocation),
     );
     final titlePrefix = weather.isLive ? 'Live-' : 'Fallback-';
 

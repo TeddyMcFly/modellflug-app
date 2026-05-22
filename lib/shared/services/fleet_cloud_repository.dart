@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../models/aircraft_model.dart';
 import '../models/fleet_state.dart';
+import 'member_chat_service.dart';
 
 final fleetCloudRepositoryProvider = Provider<FleetCloudRepository?>((ref) {
   if (Firebase.apps.isEmpty) {
@@ -24,6 +25,10 @@ class FleetCloudRepository {
     return _firestore.collection('users').doc(uid);
   }
 
+  DocumentReference<Map<String, dynamic>> _memberDoc(String uid) {
+    return _firestore.collection('members').doc(uid);
+  }
+
   CollectionReference<Map<String, dynamic>> _aircraft(String uid) {
     return _userDoc(uid).collection('aircraft');
   }
@@ -34,6 +39,10 @@ class FleetCloudRepository {
 
   CollectionReference<Map<String, dynamic>> _flights(String uid) {
     return _userDoc(uid).collection('flights');
+  }
+
+  CollectionReference<Map<String, dynamic>> _automaticBackups(String uid) {
+    return _userDoc(uid).collection('backups');
   }
 
   DocumentReference<Map<String, dynamic>> _pilotProfile(String uid) {
@@ -229,6 +238,30 @@ class FleetCloudRepository {
     });
   }
 
+  Future<void> saveAutomaticBackup({
+    required User user,
+    required FleetState state,
+    required String backupId,
+    required String signature,
+  }) {
+    return _writeWithUserTouch(user, state, (batch) {
+      batch.set(
+        _automaticBackups(user.uid).doc(backupId),
+        {
+          'schemaVersion': schemaVersion,
+          'createdAt': FieldValue.serverTimestamp(),
+          'createdAtClient': DateTime.now().toUtc().toIso8601String(),
+          'signature': signature,
+          'aircraftCount': state.aircraft.length,
+          'batteryCount': state.batteries.length,
+          'flightCount': state.flights.length,
+          'state': state.toJson(),
+        },
+        SetOptions(merge: true),
+      );
+    });
+  }
+
   Future<void> deleteAircraft({
     required User user,
     required FleetState state,
@@ -291,17 +324,52 @@ class FleetCloudRepository {
 
   void _queueUserTouch(WriteBatch batch, User user, FleetState state) {
     final now = DateTime.now().toUtc().toIso8601String();
-    batch.set(
-      _userDoc(user.uid),
-      {
-        'email': user.email,
-        'displayName': user.displayName,
-        'schemaVersion': schemaVersion,
-        'updatedAt': FieldValue.serverTimestamp(),
-        'updatedAtClient': now,
-      },
-      SetOptions(merge: true),
-    );
+    final publicName = _publicNameFor(user, state);
+    final publicPhotoSource = _publicPhotoSourceFor(state);
+    final hasProfilePhoto = _hasProfilePhoto(user, state);
+    final userData = <String, dynamic>{
+      'email': user.email,
+      'displayName': user.displayName,
+      'publicName': publicName,
+      'club': state.pilotProfile.club.trim(),
+      'reachableByChat': state.appSettings.reachableByChat,
+      'shareLocation': state.appSettings.shareLocationWithFriends,
+      'presenceStatus': state.appSettings.shareLocationWithFriends
+          ? state.appSettings.presenceStatus.name
+          : 'offline',
+      'lastSeen': FieldValue.serverTimestamp(),
+      'lastSeenClient': now,
+      'schemaVersion': schemaVersion,
+      'updatedAt': FieldValue.serverTimestamp(),
+      'updatedAtClient': now,
+    };
+    final memberData = <String, dynamic>{
+      'uid': user.uid,
+      'active': true,
+      'memberSchemaVersion': MemberChatService.memberSchemaVersion,
+      'displayName': publicName,
+      'displayNameLower': publicName.toLowerCase(),
+      'email': user.email,
+      'club': state.pilotProfile.club.trim(),
+      'reachableByChat': state.appSettings.reachableByChat,
+      'shareLocation': state.appSettings.shareLocationWithFriends,
+      'presenceStatus': state.appSettings.shareLocationWithFriends
+          ? state.appSettings.presenceStatus.name
+          : 'offline',
+      'lastSeen': FieldValue.serverTimestamp(),
+      'lastSeenClient': now,
+    };
+
+    if (publicPhotoSource != null && publicPhotoSource.isNotEmpty) {
+      userData['photoSource'] = publicPhotoSource;
+      memberData['photoSource'] = publicPhotoSource;
+    } else if (!hasProfilePhoto) {
+      userData['photoSource'] = null;
+      memberData['photoSource'] = null;
+    }
+
+    batch.set(_userDoc(user.uid), userData, SetOptions(merge: true));
+    batch.set(_memberDoc(user.uid), memberData, SetOptions(merge: true));
     batch.set(
       _fleetMeta(user.uid),
       {
@@ -350,6 +418,37 @@ class FleetCloudRepository {
       }
     }
   }
+}
+
+String _publicNameFor(User user, FleetState state) {
+  final authName = user.displayName?.trim();
+  if (authName != null && authName.isNotEmpty) {
+    return authName;
+  }
+  final profileName = state.pilotProfile.name.trim();
+  if (profileName.isNotEmpty) {
+    return profileName;
+  }
+  return user.email ?? 'Mitglied';
+}
+
+String? _publicPhotoSourceFor(FleetState state) {
+  final thumbnail = state.pilotProfile.memberPhotoSource?.trim();
+  if (thumbnail != null && thumbnail.isNotEmpty) {
+    return thumbnail;
+  }
+  return null;
+}
+
+bool _hasProfilePhoto(User user, FleetState state) {
+  final thumbnail = state.pilotProfile.memberPhotoSource?.trim();
+  final embeddedPhoto = state.pilotProfile.photoDataUri?.trim();
+  final downloadUrl = state.pilotProfile.photoDownloadUrl?.trim();
+  final authPhoto = user.photoURL?.trim();
+  return (thumbnail != null && thumbnail.isNotEmpty) ||
+      (embeddedPhoto != null && embeddedPhoto.isNotEmpty) ||
+      (downloadUrl != null && downloadUrl.isNotEmpty) ||
+      (authPhoto != null && authPhoto.isNotEmpty);
 }
 
 Map<String, dynamic> _withDocumentMeta(Map<String, dynamic> data) {

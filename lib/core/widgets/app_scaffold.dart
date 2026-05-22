@@ -6,12 +6,12 @@ import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart' show DateFormat;
 
 import '../../shared/models/aircraft_model.dart';
+import '../../shared/providers/app_info_provider.dart';
 import '../../shared/providers/fleet_provider.dart';
 import '../../shared/services/auth_service.dart';
 import '../../shared/services/open_meteo_service.dart';
 import '../../shared/utils/media_source.dart';
 
-const _appVersion = '1.0.0+1';
 const _navigationColor = Color(0xFF06172E);
 const _accentColor = Color(0xFF0A84FF);
 const _activeNavColor = _accentColor;
@@ -307,32 +307,41 @@ class _PageHeader extends StatelessWidget {
             ],
           );
 
+          final headerToolItems = <Widget>[
+            if (action != null) action!,
+            _HeaderNotificationButton(notifications: notifications),
+            _HeaderSunsetBadge(
+              homeAirfield: pilotProfile.homeAirfield,
+              weather: headerWeather,
+            ),
+            _HeaderPilotAvatar(
+              photoDataUri: pilotProfile.photoSource,
+              email: userEmail,
+              onSignOut: onSignOut,
+            ),
+            _HeaderWeatherBadge(
+              homeAirfield: weatherLocation,
+              appSettings: appSettings,
+              weather: headerWeather,
+            ),
+          ];
+
           final headerTools = Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              if (action != null) ...[
-                action!,
-                const SizedBox(width: 12),
+              for (var index = 0; index < headerToolItems.length; index++) ...[
+                if (index > 0) const SizedBox(width: 12),
+                headerToolItems[index],
               ],
-              _HeaderNotificationButton(notifications: notifications),
-              const SizedBox(width: 12),
-              _HeaderSunsetBadge(
-                homeAirfield: pilotProfile.homeAirfield,
-                weather: headerWeather,
-              ),
-              const SizedBox(width: 12),
-              _HeaderPilotAvatar(
-                photoDataUri: pilotProfile.photoSource,
-                email: userEmail,
-                onSignOut: onSignOut,
-              ),
-              const SizedBox(width: 12),
-              _HeaderWeatherBadge(
-                homeAirfield: weatherLocation,
-                appSettings: appSettings,
-                weather: headerWeather,
-              ),
             ],
+          );
+
+          final compactHeaderTools = Wrap(
+            alignment: WrapAlignment.end,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            spacing: 12,
+            runSpacing: 8,
+            children: headerToolItems,
           );
 
           if (constraints.maxWidth < 760) {
@@ -343,10 +352,7 @@ class _PageHeader extends StatelessWidget {
                 const SizedBox(height: 12),
                 Align(
                   alignment: Alignment.centerRight,
-                  child: SingleChildScrollView(
-                    scrollDirection: Axis.horizontal,
-                    child: headerTools,
-                  ),
+                  child: compactHeaderTools,
                 ),
               ],
             );
@@ -995,6 +1001,14 @@ class _HeaderWeatherBadge extends StatelessWidget {
     final gusts = formatWindSpeed(data.gustsKmh, appSettings.windUnit);
     final visibility =
         formatDistance(data.visibilityKm, appSettings.distanceUnit);
+    final locationLabel = _compactWeatherLocationLabel(homeAirfield);
+
+    final detailItems = [
+      sourceLabel,
+      'Wind $wind',
+      'Boeen $gusts',
+      'Sicht $visibility',
+    ];
 
     return Tooltip(
       message: 'Wetter am $homeAirfield: ${data.assessment}',
@@ -1003,34 +1017,64 @@ class _HeaderWeatherBadge extends StatelessWidget {
         children: [
           Icon(data.assessmentIcon, color: data.assessmentColor, size: 22),
           const SizedBox(width: 7),
-          Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                '$temperature  ${data.condition}',
-                style: const TextStyle(
-                  color: _navigationColor,
-                  fontSize: 12,
-                  fontWeight: FontWeight.w900,
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 230),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '$locationLabel:',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: Color(0xFF475569),
+                    fontSize: 10,
+                    fontWeight: FontWeight.w900,
+                  ),
                 ),
-              ),
-              const SizedBox(height: 1),
-              Text(
-                '$sourceLabel  Wind $wind  Boeen $gusts  Sicht $visibility',
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  color: Color(0xFF475569),
-                  fontSize: 10,
-                  fontWeight: FontWeight.w800,
+                const SizedBox(height: 1),
+                Text(
+                  '$temperature  ${data.condition}',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: _navigationColor,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w900,
+                  ),
                 ),
-              ),
-            ],
+                const SizedBox(height: 1),
+                Wrap(
+                  spacing: 7,
+                  runSpacing: 1,
+                  children: [
+                    for (final item in detailItems)
+                      Text(
+                        item,
+                        style: const TextStyle(
+                          color: Color(0xFF475569),
+                          fontSize: 10,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                  ],
+                ),
+              ],
+            ),
           ),
         ],
       ),
     );
   }
+}
+
+String _compactWeatherLocationLabel(String location) {
+  final trimmed = location.trim();
+  if (trimmed.isEmpty) {
+    return 'Flugplatz';
+  }
+  return trimmed;
 }
 
 class _SideNav extends StatelessWidget {
@@ -1320,16 +1364,22 @@ DateTime _timeForConfiguredZone(DateTime localNow, String timeZone) {
   return utcNow.add(offset);
 }
 
-class _AppVersionLabel extends StatelessWidget {
+class _AppVersionLabel extends ConsumerWidget {
   const _AppVersionLabel();
 
   @override
-  Widget build(BuildContext context) {
-    return const Text(
-      'Version $_appVersion',
+  Widget build(BuildContext context, WidgetRef ref) {
+    final appInfo = ref.watch(appInfoProvider);
+    final label = appInfo.maybeWhen(
+      data: formatNavigationAppVersion,
+      orElse: () => 'Version wird geladen',
+    );
+
+    return Text(
+      label,
       textAlign: TextAlign.center,
       overflow: TextOverflow.ellipsis,
-      style: TextStyle(
+      style: const TextStyle(
         color: Color(0xFF93C5FD),
         fontSize: 11,
         fontWeight: FontWeight.w800,

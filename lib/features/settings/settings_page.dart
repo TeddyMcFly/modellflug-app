@@ -9,9 +9,11 @@ import 'package:image_picker/image_picker.dart';
 
 import '../../core/widgets/app_scaffold.dart';
 import '../../shared/models/aircraft_model.dart';
+import '../../shared/providers/app_info_provider.dart';
 import '../../shared/providers/fleet_provider.dart';
 import '../../shared/services/auth_service.dart';
 import '../../shared/utils/download_helper.dart';
+import '../../shared/utils/image_thumbnail.dart';
 import '../../shared/utils/media_source.dart';
 
 const _tabAccentColor = Colors.white;
@@ -73,7 +75,7 @@ class SettingsPage extends ConsumerWidget {
             children: [
               const _SettingsTabs(),
               Container(
-                height: 1760,
+                height: 1820,
                 decoration: const BoxDecoration(
                   borderRadius: BorderRadius.only(
                     bottomLeft: Radius.circular(8),
@@ -780,6 +782,7 @@ class _PilotProfileCardState extends State<_PilotProfileCard> {
   final List<TextEditingController> _flightAreas = [];
   late final TextEditingController _notes;
   String? _photoDataUri;
+  String? _photoThumbnailDataUri;
   String? _insuranceDocumentName;
   String? _insuranceDocumentDataUri;
   PilotProfile? _lastSubmittedProfile;
@@ -799,6 +802,7 @@ class _PilotProfileCardState extends State<_PilotProfileCard> {
     _syncFlightAreaControllers(widget.profile.flightAreas);
     _notes = _profileController(widget.profile.notes);
     _photoDataUri = widget.profile.photoSource;
+    _photoThumbnailDataUri = widget.profile.photoThumbnailDataUri;
     _insuranceDocumentName = widget.profile.insuranceDocumentName;
     _insuranceDocumentDataUri = widget.profile.insuranceDocumentSource;
     settingsProfileHasUnsavedChanges.value = false;
@@ -828,6 +832,7 @@ class _PilotProfileCardState extends State<_PilotProfileCard> {
     _syncFlightAreaControllers(widget.profile.flightAreas);
     _notes.text = widget.profile.notes;
     _photoDataUri = widget.profile.photoSource;
+    _photoThumbnailDataUri = widget.profile.photoThumbnailDataUri;
     _insuranceDocumentName = widget.profile.insuranceDocumentName;
     _insuranceDocumentDataUri = widget.profile.insuranceDocumentSource;
     _updateUnsavedProfileFlag();
@@ -878,6 +883,8 @@ class _PilotProfileCardState extends State<_PilotProfileCard> {
         !listEquals(currentProfile.flightAreas, widget.profile.flightAreas) ||
         !listEquals(currentProfile.transmitters, widget.profile.transmitters) ||
         currentProfile.photoSource != widget.profile.photoSource ||
+        currentProfile.photoThumbnailDataUri !=
+            widget.profile.photoThumbnailDataUri ||
         currentProfile.insuranceDocumentName !=
             widget.profile.insuranceDocumentName ||
         currentProfile.insuranceDocumentSource !=
@@ -902,6 +909,7 @@ class _PilotProfileCardState extends State<_PilotProfileCard> {
       ],
       notes: _notes.text.trim(),
       photoDataUri: _photoDataUri,
+      photoThumbnailDataUri: _photoThumbnailDataUri,
       insuranceDocumentName: _insuranceDocumentName,
       insuranceDocumentDataUri: _insuranceDocumentDataUri,
     );
@@ -1058,8 +1066,10 @@ class _PilotProfileCardState extends State<_PilotProfileCard> {
 
     final bytes = await pickedImage.readAsBytes();
     final mimeType = _mimeTypeForName(pickedImage.name);
+    final thumbnailDataUri = createImageThumbnailDataUri(bytes);
     setState(() {
       _photoDataUri = 'data:$mimeType;base64,${base64Encode(bytes)}';
+      _photoThumbnailDataUri = thumbnailDataUri;
       _updateUnsavedProfileFlag();
     });
   }
@@ -1179,6 +1189,7 @@ class _PilotProfileCardState extends State<_PilotProfileCard> {
     if (action == _PhotoAction.remove) {
       setState(() {
         _photoDataUri = null;
+        _photoThumbnailDataUri = null;
         _updateUnsavedProfileFlag();
       });
     }
@@ -1296,7 +1307,9 @@ class _PilotPhoto extends StatelessWidget {
                             ),
                           )
                         : Image(
-                            image: mediaImageProvider(photoDataUri!),
+                            image: browserVisibleMediaImageProvider(
+                              photoDataUri!,
+                            ),
                             fit: BoxFit.cover,
                           ),
                   ),
@@ -1593,7 +1606,7 @@ class _InsuranceDocumentBox extends StatelessWidget {
                     child: ClipRRect(
                       borderRadius: BorderRadius.circular(7),
                       child: Image(
-                        image: mediaImageProvider(dataUri!),
+                        image: browserVisibleMediaImageProvider(dataUri!),
                         fit: BoxFit.contain,
                         errorBuilder: (context, error, stackTrace) => Container(
                           height: 120,
@@ -1735,6 +1748,52 @@ class _StorageNote extends StatelessWidget {
   };
 }
 
+String _lastAutomaticBackupLabel(AppSettings settings) {
+  if (!settings.automaticBackupEnabled) {
+    return 'Aus';
+  }
+  final lastBackup = _parseBackupDate(settings.lastAutomaticBackupAt);
+  if (lastBackup == null) {
+    return 'Noch keine';
+  }
+  return _formatBackupDateTime(lastBackup);
+}
+
+String _nextAutomaticBackupLabel(AppSettings settings) {
+  if (!settings.automaticBackupEnabled) {
+    return 'Aus';
+  }
+  final lastBackup = _parseBackupDate(settings.lastAutomaticBackupAt);
+  if (lastBackup == null) {
+    return 'Beim naechsten Start';
+  }
+  final nextBackup = lastBackup.toLocal().add(const Duration(days: 1));
+  if (!DateTime.now().isBefore(nextBackup)) {
+    return 'Bei naechster Aenderung';
+  }
+  return 'Ab ${_formatBackupDateTime(nextBackup)}';
+}
+
+String _automaticBackupCloudLabel(AppSettings settings) {
+  return settings.automaticBackupEnabled ? 'Taeglich bei Aenderung' : 'Aus';
+}
+
+DateTime? _parseBackupDate(String? value) {
+  if (value == null || value.trim().isEmpty) {
+    return null;
+  }
+  return DateTime.tryParse(value);
+}
+
+String _formatBackupDateTime(DateTime value) {
+  final local = value.toLocal();
+  return '${_twoDigits(local.day)}.${_twoDigits(local.month)}.${local.year} ${_twoDigits(local.hour)}:${_twoDigits(local.minute)}';
+}
+
+String _twoDigits(int value) {
+  return value.toString().padLeft(2, '0');
+}
+
 class _AppSettingsCard extends StatelessWidget {
   final AppSettings settings;
   final FleetSyncStatus syncStatus;
@@ -1797,9 +1856,9 @@ class _AppSettingsCard extends StatelessWidget {
                   children: [
                     _NotificationCheckTile(
                       icon: Icons.group_rounded,
-                      title: 'Freunde am Platz',
+                      title: 'Freunde online',
                       description:
-                          'Regelmaessige Pruefung, ob Freunde am Flugplatz sind.',
+                          'Regelmaessige Pruefung, ob Freunde online sind.',
                       value: settings.notifyFriendsAtField,
                       onChanged: (value) => onSettingsChanged(
                         settings.copyWith(notifyFriendsAtField: value),
@@ -1921,15 +1980,23 @@ class _AppSettingsCard extends StatelessWidget {
                   title: 'Sicherung',
                   icon: Icons.backup_rounded,
                   children: [
-                    const _AppSettingTile(
+                    _AppSettingTile(
                       icon: Icons.history_rounded,
                       title: 'Letzte Sicherung',
-                      value: 'Heute, 06:30',
+                      value: _lastAutomaticBackupLabel(settings),
                     ),
-                    const _AppSettingTile(
+                    _AppSettingTile(
                       icon: Icons.event_repeat_rounded,
                       title: 'Naechste automatische Sicherung',
-                      value: 'Morgen, 06:30',
+                      value: _nextAutomaticBackupLabel(settings),
+                    ),
+                    _SwitchSettingTile(
+                      icon: Icons.event_available_rounded,
+                      title: 'Automatische Sicherung taeglich',
+                      value: settings.automaticBackupEnabled,
+                      onChanged: (value) => onSettingsChanged(
+                        settings.copyWith(automaticBackupEnabled: value),
+                      ),
                     ),
                     _ActionSettingTile(
                       icon: Icons.restore_rounded,
@@ -1953,10 +2020,10 @@ class _AppSettingsCard extends StatelessWidget {
                       title: 'Verbindung',
                       value: cloudConnection.value,
                     ),
-                    const _AppSettingTile(
+                    _AppSettingTile(
                       icon: Icons.backup_table_rounded,
                       title: 'Automatische Sicherung',
-                      value: 'Aktivierbar',
+                      value: _automaticBackupCloudLabel(settings),
                     ),
                     _SwitchSettingTile(
                       icon: Icons.wifi_rounded,
@@ -2050,15 +2117,12 @@ class _AppSettingsCard extends StatelessWidget {
                   title: 'App-Informationen',
                   icon: Icons.info_rounded,
                   children: [
-                    const _AppSettingTile(
-                      icon: Icons.new_releases_rounded,
-                      title: 'Version',
-                      value: '1.0.0+1',
-                    ),
-                    const _ActionSettingTile(
+                    const _AppVersionSettingTile(),
+                    _ActionSettingTile(
                       icon: Icons.auto_awesome_rounded,
                       title: 'Was ist neu',
                       value: 'Aenderungen anzeigen',
+                      onTap: () => _showWhatsNewDialog(context),
                     ),
                     _ActionSettingTile(
                       icon: Icons.contact_mail_rounded,
@@ -2507,7 +2571,7 @@ class _LocationShareSwitch extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 const Text(
-                  'Standortfreigabe fuer Freunde',
+                  'Statusfreigabe fuer Freunde',
                   style: TextStyle(
                     color: Color(0xFF334155),
                     fontSize: 12,
@@ -2517,7 +2581,7 @@ class _LocationShareSwitch extends StatelessWidget {
                 const SizedBox(height: 2),
                 Text(
                   value
-                      ? 'Freunde sehen, ob du am Platz bist.'
+                      ? 'Freunde sehen, ob du online bist.'
                       : 'Alles bleibt anonym.',
                   style: const TextStyle(
                     color: Color(0xFF64748B),
@@ -2920,6 +2984,25 @@ class _ActionSettingTile extends StatelessWidget {
   }
 }
 
+class _AppVersionSettingTile extends ConsumerWidget {
+  const _AppVersionSettingTile();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final appInfo = ref.watch(appInfoProvider);
+
+    return _AppSettingTile(
+      icon: Icons.new_releases_rounded,
+      title: 'Version',
+      value: appInfo.when(
+        data: formatAppVersion,
+        loading: () => 'wird geladen',
+        error: (_, __) => 'nicht verfuegbar',
+      ),
+    );
+  }
+}
+
 class _AppSettingTile extends StatelessWidget {
   final IconData icon;
   final String title;
@@ -3146,6 +3229,123 @@ Future<void> _showContactDialog(BuildContext context) async {
       );
     },
   );
+}
+
+Future<void> _showWhatsNewDialog(BuildContext context) async {
+  await showDialog<void>(
+    context: context,
+    builder: (context) => const _WhatsNewDialog(),
+  );
+}
+
+class _WhatsNewDialog extends ConsumerWidget {
+  const _WhatsNewDialog();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final appInfo = ref.watch(appInfoProvider);
+    final versionLabel = appInfo.maybeWhen(
+      data: formatAppVersion,
+      orElse: () => 'aktuelle Version',
+    );
+
+    return AlertDialog(
+      title: const Text('Was ist neu'),
+      content: SizedBox(
+        width: 460,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Version $versionLabel',
+              style: const TextStyle(
+                color: Color(0xFF0F172A),
+                fontSize: 14,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+            const SizedBox(height: 14),
+            const _WhatsNewEntry(
+              icon: Icons.new_releases_rounded,
+              title: 'Versionsanzeige',
+              text:
+                  'Die App-Version wird jetzt automatisch aus den App-Daten gelesen.',
+            ),
+            const _WhatsNewEntry(
+              icon: Icons.settings_rounded,
+              title: 'App-Informationen',
+              text:
+                  'Version, Kontakt und Feedback sind im Bereich App-Informationen gebuendelt.',
+            ),
+            const _WhatsNewEntry(
+              icon: Icons.flight_takeoff_rounded,
+              title: 'Grundversion',
+              text:
+                  'Dashboard, Modelle, Akkus, Webcam, Freunde und Sicherung sind vorbereitet.',
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        FilledButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Schliessen'),
+        ),
+      ],
+    );
+  }
+}
+
+class _WhatsNewEntry extends StatelessWidget {
+  final IconData icon;
+  final String title;
+  final String text;
+
+  const _WhatsNewEntry({
+    required this.icon,
+    required this.title,
+    required this.text,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, color: const Color(0xFF0A84FF), size: 19),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: const TextStyle(
+                    color: Color(0xFF334155),
+                    fontSize: 13,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  text,
+                  style: const TextStyle(
+                    color: Color(0xFF64748B),
+                    fontSize: 12,
+                    height: 1.35,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 String _mimeTypeForName(String fileName) {

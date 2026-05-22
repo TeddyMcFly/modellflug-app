@@ -387,6 +387,16 @@ AirfieldCoordinates? _knownCoordinatesForLocation(String location) {
     );
   }
 
+  if (normalized.contains('achental') ||
+      normalized.contains('unterwoessen') ||
+      normalized.contains('unterwössen')) {
+    return const AirfieldCoordinates(
+      name: 'Modellflugplatz Achental',
+      latitude: 47.73333,
+      longitude: 12.46667,
+    );
+  }
+
   if (normalized.contains('bochum') ||
       normalized.contains('suedhang') ||
       normalized.contains('südhang')) {

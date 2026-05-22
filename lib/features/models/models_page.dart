@@ -301,6 +301,8 @@ class _ModelsPageState extends ConsumerState<ModelsPage> {
         aircraft: aircraft,
         homeAirfield: pilotProfile.homeAirfield,
         flightAreas: pilotProfile.flightAreas,
+        onRunningChanged: (running) =>
+            ref.read(fleetProvider.notifier).updateFlightTimerPresence(running),
       ),
     );
 
@@ -1315,11 +1317,13 @@ class _FlightTimerDialog extends StatefulWidget {
   final AircraftModel aircraft;
   final String homeAirfield;
   final List<String> flightAreas;
+  final ValueChanged<bool> onRunningChanged;
 
   const _FlightTimerDialog({
     required this.aircraft,
     required this.homeAirfield,
     required this.flightAreas,
+    required this.onRunningChanged,
   });
 
   @override
@@ -1340,6 +1344,7 @@ class _FlightTimerDialogState extends State<_FlightTimerDialog> {
   Timer? _timer;
   bool _paused = false;
   bool _customLocation = false;
+  bool _presenceMarkedFlying = false;
 
   String get _selectedLocation {
     final home = _selectedHomeLocation?.trim() ?? widget.homeAirfield.trim();
@@ -1362,10 +1367,19 @@ class _FlightTimerDialogState extends State<_FlightTimerDialog> {
   @override
   void dispose() {
     _timer?.cancel();
+    _setFlightPresence(false);
     _elapsedNotifier.dispose();
     _customLocationController.removeListener(_syncCustomLocationPreview);
     _customLocationController.dispose();
     super.dispose();
+  }
+
+  void _setFlightPresence(bool flying) {
+    if (_presenceMarkedFlying == flying) {
+      return;
+    }
+    _presenceMarkedFlying = flying;
+    widget.onRunningChanged(flying);
   }
 
   void _syncCustomLocationPreview() {
@@ -1640,6 +1654,7 @@ class _FlightTimerDialogState extends State<_FlightTimerDialog> {
       _elapsed = Duration.zero;
       _elapsedNotifier.value = _elapsed;
     });
+    _setFlightPresence(true);
 
     _timer = Timer.periodic(const Duration(milliseconds: 33), (_) {
       if (!mounted || _paused) {
@@ -1682,6 +1697,7 @@ class _FlightTimerDialogState extends State<_FlightTimerDialog> {
       return;
     }
 
+    _setFlightPresence(false);
     Navigator.of(context).pop(
       _FlightTimerResult(
         startedAt: startedAt,
@@ -1692,6 +1708,7 @@ class _FlightTimerDialogState extends State<_FlightTimerDialog> {
   }
 
   void _discardFlight() {
+    _setFlightPresence(false);
     Navigator.of(context).pop();
   }
 }
