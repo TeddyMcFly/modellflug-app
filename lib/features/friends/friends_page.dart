@@ -1,11 +1,9 @@
-import 'dart:convert';
-import 'dart:typed_data';
-
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/widgets/app_scaffold.dart';
 import '../../shared/providers/fleet_provider.dart';
+import '../../shared/utils/media_source.dart';
 
 class FriendsPage extends ConsumerStatefulWidget {
   const FriendsPage({super.key});
@@ -401,9 +399,7 @@ class _FriendIdentity extends StatelessWidget {
         CircleAvatar(
           radius: 35,
           backgroundColor: friend.color,
-          foregroundImage: friend.settingsPhotoDataUri == null
-              ? null
-              : MemoryImage(_bytesFromDataUri(friend.settingsPhotoDataUri!)),
+          foregroundImage: maybeMediaImageProvider(friend.settingsPhotoDataUri),
           child: friend.settingsPhotoDataUri != null
               ? null
               : Text(
@@ -687,11 +683,8 @@ class _FriendChatDialogState extends State<_FriendChatDialog> {
           CircleAvatar(
             radius: 17,
             backgroundColor: widget.friend.color,
-            foregroundImage: widget.friend.settingsPhotoDataUri == null
-                ? null
-                : MemoryImage(
-                    _bytesFromDataUri(widget.friend.settingsPhotoDataUri!),
-                  ),
+            foregroundImage:
+                maybeMediaImageProvider(widget.friend.settingsPhotoDataUri),
             child: widget.friend.settingsPhotoDataUri != null
                 ? null
                 : Text(
@@ -819,11 +812,4 @@ Color _avatarColorFor(String name) {
 
   final index = name.codeUnits.fold<int>(0, (sum, code) => sum + code);
   return colors[index % colors.length];
-}
-
-Uint8List _bytesFromDataUri(String dataUri) {
-  final commaIndex = dataUri.indexOf(',');
-  final encoded =
-      commaIndex == -1 ? dataUri : dataUri.substring(commaIndex + 1);
-  return base64Decode(encoded);
 }

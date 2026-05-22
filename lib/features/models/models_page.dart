@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:math' as math;
-import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart' show ValueListenable, ValueNotifier;
 import 'package:flutter/material.dart';
@@ -13,6 +12,7 @@ import 'package:uuid/uuid.dart';
 import '../../core/widgets/app_scaffold.dart';
 import '../../shared/models/aircraft_model.dart';
 import '../../shared/providers/fleet_provider.dart';
+import '../../shared/utils/media_source.dart';
 
 const _repairFilterKey = '__repair__';
 
@@ -1182,8 +1182,8 @@ class _AircraftPhoto extends StatelessWidget {
                 alignment: _photoAlignment(aircraft),
                 filterQuality: FilterQuality.high,
               )
-            : Image.memory(
-                _bytesFromDataUri(photoDataUri),
+            : Image(
+                image: mediaImageProvider(photoDataUri),
                 fit: BoxFit.cover,
                 filterQuality: FilterQuality.high,
                 gaplessPlayback: true,
@@ -1236,8 +1236,8 @@ class _AircraftPhotoCarouselState extends State<_AircraftPhotoCarousel> {
             filterQuality: FilterQuality.high,
           )
         else
-          Image.memory(
-            _bytesFromDataUri(photos[safeIndex]),
+          Image(
+            image: mediaImageProvider(photos[safeIndex]),
             fit: BoxFit.cover,
             filterQuality: FilterQuality.high,
             gaplessPlayback: true,
@@ -1446,8 +1446,8 @@ class _FlightTimerDialogState extends State<_FlightTimerDialog> {
                                 alignment: _photoAlignment(widget.aircraft),
                                 filterQuality: FilterQuality.high,
                               )
-                            : Image.memory(
-                                _bytesFromDataUri(photoDataUri),
+                            : Image(
+                                image: mediaImageProvider(photoDataUri),
                                 fit: BoxFit.cover,
                                 filterQuality: FilterQuality.high,
                                 gaplessPlayback: true,
@@ -3129,8 +3129,8 @@ class _PhotoPickerPanel extends StatelessWidget {
                         child: SizedBox(
                           width: 142,
                           height: 112,
-                          child: Image.memory(
-                            _bytesFromDataUri(photoDataUris[index]),
+                          child: Image(
+                            image: mediaImageProvider(photoDataUris[index]),
                             fit: BoxFit.cover,
                           ),
                         ),
@@ -3294,13 +3294,6 @@ Color _statusColor(AircraftStatus status) {
     AircraftStatus.maintenance => const Color(0xFFEA580C),
     AircraftStatus.destroyed => const Color(0xFFDC2626),
   };
-}
-
-Uint8List _bytesFromDataUri(String dataUri) {
-  final commaIndex = dataUri.indexOf(',');
-  final encoded =
-      commaIndex == -1 ? dataUri : dataUri.substring(commaIndex + 1);
-  return base64Decode(encoded);
 }
 
 String _mimeTypeForName(String fileName) {

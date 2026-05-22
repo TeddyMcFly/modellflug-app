@@ -1,119 +1,69 @@
+import 'dart:async';
 import 'dart:convert';
 
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:connectivity_plus/connectivity_plus.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/aircraft_model.dart';
+import '../models/fleet_state.dart';
+import '../services/fleet_cloud_repository.dart';
+import '../services/fleet_storage_service.dart';
 
-final fleetProvider =
-    StateNotifierProvider<FleetNotifier, FleetState>((ref) => FleetNotifier());
+export '../models/fleet_state.dart';
 
-class FleetState {
-  final List<AircraftModel> aircraft;
-  final List<FlightLogEntry> flights;
-  final List<BatteryPack> batteries;
-  final PilotProfile pilotProfile;
-  final AppSettings appSettings;
-  final bool isLoaded;
+final fleetProvider = StateNotifierProvider<FleetNotifier, FleetState>((ref) {
+  return FleetNotifier(ref);
+});
 
-  const FleetState({
-    required this.aircraft,
-    required this.flights,
-    required this.batteries,
-    required this.pilotProfile,
-    required this.appSettings,
-    this.isLoaded = false,
-  });
+typedef _CloudWrite = Future<void> Function(
+  FleetCloudRepository repository,
+  User user,
+  FleetState state,
+);
 
-  int get readyCount =>
-      aircraft.where((item) => item.status == AircraftStatus.ready).length;
-
-  int get serviceDueCount => aircraft
-      .where((item) => item.nextService.isBefore(DateTime.now()))
-      .length;
-
-  int get chargedBatteryCount =>
-      batteries.where((item) => item.status == BatteryStatus.charged).length;
-
-  int get totalFlights => flights.length;
-
-  double get totalHours =>
-      flights.fold(0, (sum, item) => sum + item.durationMinutes / 60);
-
-  int get nextBatteryInventoryNumber {
-    if (batteries.isEmpty) {
-      return 1;
-    }
-    return batteries
-            .map((item) => item.inventoryNumber)
-            .where((number) => number > 0)
-            .fold<int>(0, (max, number) => number > max ? number : max) +
-        1;
-  }
-
-  FleetState copyWith({
-    List<AircraftModel>? aircraft,
-    List<FlightLogEntry>? flights,
-    List<BatteryPack>? batteries,
-    PilotProfile? pilotProfile,
-    AppSettings? appSettings,
-    bool? isLoaded,
-  }) {
-    return FleetState(
-      aircraft: aircraft ?? this.aircraft,
-      flights: flights ?? this.flights,
-      batteries: batteries ?? this.batteries,
-      pilotProfile: pilotProfile ?? this.pilotProfile,
-      appSettings: appSettings ?? this.appSettings,
-      isLoaded: isLoaded ?? this.isLoaded,
-    );
-  }
-
-  factory FleetState.fromJson(Map<String, dynamic> json) {
-    return FleetState(
-      aircraft: [
-        for (final item in json['aircraft'] as List<dynamic>)
-          AircraftModel.fromJson(item as Map<String, dynamic>),
-      ],
-      flights: [
-        for (final item in json['flights'] as List<dynamic>)
-          FlightLogEntry.fromJson(item as Map<String, dynamic>),
-      ],
-      batteries: _normalizeBatteryInventoryNumbers([
-        for (final item in json['batteries'] as List<dynamic>? ?? [])
-          BatteryPack.fromJson(item as Map<String, dynamic>),
-      ]),
-      pilotProfile: PilotProfile.fromJson(
-        json['pilotProfile'] as Map<String, dynamic>? ?? const {},
-      ),
-      appSettings: AppSettings.fromJson(
-        json['appSettings'] as Map<String, dynamic>? ?? const {},
-      ),
-      isLoaded: true,
-    );
-  }
-
-  Map<String, dynamic> toJson() {
-    return {
-      'aircraft': [for (final item in aircraft) item.toJson()],
-      'flights': [for (final item in flights) item.toJson()],
-      'batteries': [for (final item in batteries) item.toJson()],
-      'pilotProfile': pilotProfile.toJson(),
-      'appSettings': appSettings.toJson(),
-    };
-  }
+enum CloudSyncResult {
+  synced,
+  cloudUnavailable,
+  wifiRequired,
 }
 
 class FleetNotifier extends StateNotifier<FleetState> {
-  FleetNotifier() : super(_initialState) {
-    _load();
+  final Ref _ref;
+  late final Future<void> _bootstrapFuture;
+  StreamSubscription<User?>? _authSubscription;
+  StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>?
+      _cloudSubscription;
+  Future<void> _saveQueue = Future.value();
+  String? _activeUid;
+  int _pendingCloudWrites = 0;
+  int _localRevision = 0;
+  DateTime? _ignoreCloudRefreshUntil;
+  bool _hasUnsyncedLocalChanges = false;
+  bool _disposed = false;
+
+  FleetNotifier(this._ref) : super(_initialState) {
+    _bootstrapFuture = _loadBootstrapState();
+    if (Firebase.apps.isNotEmpty) {
+      _authSubscription =
+          FirebaseAuth.instance.authStateChanges().listen(_handleAuthState);
+    }
   }
 
-  static const _storageKey = 'modellflug_fleet_state';
+  static const _legacyStorageKey = 'modellflug_fleet_state';
 
   void addAircraft(AircraftModel aircraft) {
     state = state.copyWith(aircraft: [aircraft, ...state.aircraft]);
-    _save();
+    _persistLater(
+      (repository, user, snapshot) => repository.saveAircraft(
+        user: user,
+        state: snapshot,
+        aircraft: aircraft,
+      ),
+    );
   }
 
   void updateAircraft(AircraftModel aircraft) {
@@ -123,10 +73,20 @@ class FleetNotifier extends StateNotifier<FleetState> {
           if (item.id == aircraft.id) aircraft else item,
       ],
     );
-    _save();
+    _persistLater(
+      (repository, user, snapshot) => repository.saveAircraft(
+        user: user,
+        state: snapshot,
+        aircraft: aircraft,
+      ),
+    );
   }
 
   void deleteAircraft(String id) {
+    final deletedFlightIds = [
+      for (final item in state.flights)
+        if (item.aircraftId == id) item.id,
+    ];
     state = state.copyWith(
       aircraft: [
         for (final item in state.aircraft)
@@ -150,17 +110,38 @@ class FleetNotifier extends StateNotifier<FleetState> {
             item,
       ],
     );
-    _save();
+    _persistLater(
+      (repository, user, snapshot) => repository.deleteAircraft(
+        user: user,
+        state: snapshot,
+        aircraftId: id,
+        deletedFlightIds: deletedFlightIds,
+      ),
+    );
   }
 
   void updateStatus(String id, AircraftStatus status) {
+    AircraftModel? changedAircraft;
     state = state.copyWith(
       aircraft: [
         for (final item in state.aircraft)
-          if (item.id == id) item.copyWith(status: status) else item,
+          if (item.id == id)
+            changedAircraft = item.copyWith(status: status)
+          else
+            item,
       ],
     );
-    _save();
+    if (changedAircraft == null) {
+      _persistLater();
+    } else {
+      _persistLater(
+        (repository, user, snapshot) => repository.saveAircraft(
+          user: user,
+          state: snapshot,
+          aircraft: changedAircraft!,
+        ),
+      );
+    }
   }
 
   void addBattery(BatteryPack battery) {
@@ -172,7 +153,13 @@ class FleetNotifier extends StateNotifier<FleetState> {
             inventoryNumber: state.nextBatteryInventoryNumber,
           );
     state = state.copyWith(batteries: [numberedBattery, ...state.batteries]);
-    _save();
+    _persistLater(
+      (repository, user, snapshot) => repository.saveBattery(
+        user: user,
+        state: snapshot,
+        battery: numberedBattery,
+      ),
+    );
   }
 
   void updateBattery(BatteryPack battery) {
@@ -182,17 +169,37 @@ class FleetNotifier extends StateNotifier<FleetState> {
           if (item.id == battery.id) battery else item,
       ],
     );
-    _save();
+    _persistLater(
+      (repository, user, snapshot) => repository.saveBattery(
+        user: user,
+        state: snapshot,
+        battery: battery,
+      ),
+    );
   }
 
   void updateBatteryStatus(String id, BatteryStatus status) {
+    BatteryPack? changedBattery;
     state = state.copyWith(
       batteries: [
         for (final item in state.batteries)
-          if (item.id == id) item.copyWith(status: status) else item,
+          if (item.id == id)
+            changedBattery = item.copyWith(status: status)
+          else
+            item,
       ],
     );
-    _save();
+    if (changedBattery == null) {
+      _persistLater();
+    } else {
+      _persistLater(
+        (repository, user, snapshot) => repository.saveBattery(
+          user: user,
+          state: snapshot,
+          battery: changedBattery!,
+        ),
+      );
+    }
   }
 
   void deleteBattery(String id) {
@@ -202,12 +209,23 @@ class FleetNotifier extends StateNotifier<FleetState> {
           if (item.id != id) item,
       ],
     );
-    _save();
+    _persistLater(
+      (repository, user, snapshot) => repository.deleteBattery(
+        user: user,
+        state: snapshot,
+        batteryId: id,
+      ),
+    );
   }
 
   void updatePilotProfile(PilotProfile profile) {
     state = state.copyWith(pilotProfile: profile);
-    _save();
+    _persistLater(
+      (repository, user, snapshot) => repository.savePilotProfile(
+        user: user,
+        state: snapshot,
+      ),
+    );
   }
 
   void updateLocationSharing(bool enabled) {
@@ -219,19 +237,47 @@ class FleetNotifier extends StateNotifier<FleetState> {
             : LocationPresenceStatus.offline,
       ),
     );
-    _save();
+    _persistAppSettingsLater();
   }
 
   void updateChatReachability(bool enabled) {
     state = state.copyWith(
       appSettings: state.appSettings.copyWith(reachableByChat: enabled),
     );
-    _save();
+    _persistAppSettingsLater();
   }
 
   void updateAppSettings(AppSettings settings) {
     state = state.copyWith(appSettings: settings);
-    _save();
+    _persistAppSettingsLater();
+  }
+
+  Future<CloudSyncResult> syncNow() async {
+    await _bootstrapFuture;
+
+    final user =
+        Firebase.apps.isNotEmpty ? FirebaseAuth.instance.currentUser : null;
+    final repository = _ref.read(fleetCloudRepositoryProvider);
+    if (_activeUid == null ||
+        user == null ||
+        user.uid != _activeUid ||
+        repository == null) {
+      state = state.copyWith(syncStatus: FleetSyncStatus.localOnly);
+      await _saveLocalState(state);
+      return CloudSyncResult.cloudUnavailable;
+    }
+
+    if (!await _canUseCloudSyncNetwork(state)) {
+      state = state.copyWith(syncStatus: FleetSyncStatus.cloudPaused);
+      await _saveLocalState(state);
+      return CloudSyncResult.wifiRequired;
+    }
+
+    state = state.copyWith(syncStatus: FleetSyncStatus.syncing);
+    final synced = await _saveCloudState(state, null);
+    return synced && state.syncStatus == FleetSyncStatus.cloudActive
+        ? CloudSyncResult.synced
+        : CloudSyncResult.cloudUnavailable;
   }
 
   String exportJson() {
@@ -241,7 +287,13 @@ class FleetNotifier extends StateNotifier<FleetState> {
   Future<void> importJson(String rawJson) async {
     final decoded = jsonDecode(rawJson) as Map<String, dynamic>;
     state = FleetState.fromJson(decoded);
-    await _save();
+    await _persist(
+      (repository, user, snapshot) => repository.saveState(
+        user: user,
+        state: snapshot,
+        replaceCollections: true,
+      ),
+    );
   }
 
   void addFlight(FlightLogEntry entry) {
@@ -260,7 +312,18 @@ class FleetNotifier extends StateNotifier<FleetState> {
       aircraft: updatedAircraft,
       flights: [entry, ...state.flights],
     );
-    _save();
+    final changedAircraft = [
+      for (final aircraft in updatedAircraft)
+        if (aircraft.id == entry.aircraftId) aircraft,
+    ];
+    _persistLater(
+      (repository, user, snapshot) => repository.saveFlight(
+        user: user,
+        state: snapshot,
+        flight: entry,
+        changedAircraft: changedAircraft,
+      ),
+    );
   }
 
   void updateFlight(FlightLogEntry entry) {
@@ -270,7 +333,10 @@ class FleetNotifier extends StateNotifier<FleetState> {
         );
 
     var updatedAircraft = state.aircraft;
+    final changedAircraftIds = <String>{};
     if (previous != null) {
+      changedAircraftIds.add(previous.aircraftId);
+      changedAircraftIds.add(entry.aircraftId);
       updatedAircraft = [
         for (final item in state.aircraft)
           if (item.id == previous.aircraftId)
@@ -300,15 +366,150 @@ class FleetNotifier extends StateNotifier<FleetState> {
           if (item.id == entry.id) entry else item,
       ],
     );
-    _save();
+    final changedAircraft = [
+      for (final aircraft in updatedAircraft)
+        if (changedAircraftIds.contains(aircraft.id)) aircraft,
+    ];
+    _persistLater(
+      (repository, user, snapshot) => repository.saveFlight(
+        user: user,
+        state: snapshot,
+        flight: entry,
+        changedAircraft: changedAircraft,
+      ),
+    );
   }
 
-  Future<void> _load() async {
-    final preferences = await SharedPreferences.getInstance();
-    final rawState = preferences.getString(_storageKey);
-    if (rawState == null) {
-      state = state.copyWith(isLoaded: true);
+  void _persistAppSettingsLater() {
+    _persistLater(
+      (repository, user, snapshot) => repository.saveAppSettings(
+        user: user,
+        state: snapshot,
+      ),
+    );
+  }
+
+  Future<void> _loadBootstrapState() async {
+    final loadedState = await _readLocalState(_legacyStorageKey);
+    if (_disposed) {
       return;
+    }
+    state = loadedState ?? state.copyWith(isLoaded: true);
+  }
+
+  Future<void> _handleAuthState(User? user) async {
+    await _bootstrapFuture;
+    if (_disposed) {
+      return;
+    }
+
+    if (user == null) {
+      _activeUid = null;
+      _hasUnsyncedLocalChanges = false;
+      await _cloudSubscription?.cancel();
+      _cloudSubscription = null;
+      state = _initialState.copyWith(
+        isLoaded: true,
+        syncStatus: FleetSyncStatus.localOnly,
+      );
+      return;
+    }
+
+    if (_activeUid == user.uid) {
+      return;
+    }
+
+    await _connectAccount(user);
+  }
+
+  Future<void> _connectAccount(User user) async {
+    _activeUid = user.uid;
+    await _cloudSubscription?.cancel();
+    _cloudSubscription = null;
+
+    final accountLocalState =
+        await _readLocalState(_storageKeyForUid(user.uid));
+    final legacyLocalState = await _readLocalState(_legacyStorageKey);
+    final localState = accountLocalState ??
+        legacyLocalState ??
+        _initialState.copyWith(isLoaded: true);
+    if (!_disposed && _activeUid == user.uid) {
+      state = localState.copyWith(
+        isLoaded: true,
+        syncStatus: FleetSyncStatus.syncing,
+      );
+    }
+
+    final repository = _ref.read(fleetCloudRepositoryProvider);
+    if (repository == null) {
+      state = state.copyWith(syncStatus: FleetSyncStatus.localOnly);
+      return;
+    }
+
+    try {
+      final cloudState = await repository.loadState(user.uid);
+      if (_disposed || _activeUid != user.uid) {
+        return;
+      }
+
+      if (cloudState == null) {
+        await _saveCloudState(state, null);
+        await _saveLocalState(state);
+      } else {
+        _hasUnsyncedLocalChanges = false;
+        state = cloudState.copyWith(
+          isLoaded: true,
+          syncStatus: FleetSyncStatus.cloudActive,
+        );
+        await _saveLocalState(state);
+      }
+
+      _cloudSubscription = repository.watchFleetMeta(user.uid).listen(
+        (snapshot) {
+          if (snapshot.metadata.hasPendingWrites) {
+            return;
+          }
+          unawaited(_refreshFromCloud(user.uid));
+        },
+      );
+    } catch (_) {
+      state = state.copyWith(syncStatus: FleetSyncStatus.cloudPaused);
+      await _saveLocalState(state);
+    }
+  }
+
+  Future<void> _refreshFromCloud(String uid) async {
+    final repository = _ref.read(fleetCloudRepositoryProvider);
+    if (repository == null || _activeUid != uid) {
+      return;
+    }
+    if (_shouldIgnoreCloudRefresh) {
+      return;
+    }
+
+    try {
+      final cloudState = await repository.loadState(uid);
+      if (cloudState == null ||
+          _disposed ||
+          _activeUid != uid ||
+          _shouldIgnoreCloudRefresh) {
+        return;
+      }
+      state = cloudState.copyWith(
+        isLoaded: true,
+        syncStatus: FleetSyncStatus.cloudActive,
+      );
+      await _saveLocalState(state);
+    } catch (_) {
+      state = state.copyWith(syncStatus: FleetSyncStatus.cloudPaused);
+    }
+  }
+
+  Future<FleetState?> _readLocalState(String storageKey) async {
+    final preferences = await SharedPreferences.getInstance();
+    final rawState = preferences.getString(storageKey);
+    if (rawState == null) {
+      return null;
     }
 
     try {
@@ -324,55 +525,170 @@ class FleetNotifier extends StateNotifier<FleetState> {
           ),
         );
       }
-      state = loadedState;
       final missingDemoFlights = [
         for (final flight in _initialState.flights)
-          if (!state.flights.any((item) => item.id == flight.id)) flight,
+          if (!loadedState.flights.any((item) => item.id == flight.id)) flight,
       ];
       if (missingDemoFlights.isNotEmpty || migratedSurfaceSettings) {
-        state =
-            state.copyWith(flights: [...missingDemoFlights, ...state.flights]);
-        _save();
+        loadedState = loadedState.copyWith(
+          flights: [...missingDemoFlights, ...loadedState.flights],
+        );
+        await preferences.setString(
+            storageKey, jsonEncode(loadedState.toJson()));
       }
+      return loadedState;
     } on FormatException {
-      await preferences.remove(_storageKey);
-      state = state.copyWith(isLoaded: true);
+      await preferences.remove(storageKey);
+      return null;
     } on TypeError {
-      await preferences.remove(_storageKey);
-      state = state.copyWith(isLoaded: true);
+      await preferences.remove(storageKey);
+      return null;
     }
   }
 
-  Future<void> _save() async {
+  void _persistLater([_CloudWrite? cloudWrite]) {
+    unawaited(_persist(cloudWrite));
+  }
+
+  Future<void> _persist([_CloudWrite? cloudWrite]) {
+    _localRevision++;
+    final revision = _localRevision;
+    final snapshot = state;
+    _hasUnsyncedLocalChanges = true;
+    _ignoreCloudRefreshUntil = DateTime.now().add(const Duration(seconds: 12));
+    _saveQueue = _saveQueue.catchError((_) {}).then((_) async {
+      await _saveLocalState(snapshot);
+      await _saveCloudState(snapshot, cloudWrite, revision: revision);
+    });
+    return _saveQueue;
+  }
+
+  Future<void> _saveLocalState(FleetState snapshot) async {
     final preferences = await SharedPreferences.getInstance();
-    await preferences.setString(_storageKey, jsonEncode(state.toJson()));
+    await preferences.setString(
+      _storageKeyForUid(_activeUid),
+      jsonEncode(snapshot.toJson()),
+    );
+  }
+
+  Future<bool> _saveCloudState(
+    FleetState snapshot,
+    _CloudWrite? _, {
+    int? revision,
+  }) async {
+    if (Firebase.apps.isEmpty || _activeUid == null) {
+      return false;
+    }
+
+    final user = FirebaseAuth.instance.currentUser;
+    final repository = _ref.read(fleetCloudRepositoryProvider);
+    if (user == null || user.uid != _activeUid || repository == null) {
+      return false;
+    }
+
+    if (!await _canUseCloudSyncNetwork(snapshot)) {
+      if (!_disposed && user.uid == _activeUid) {
+        state = snapshot.copyWith(syncStatus: FleetSyncStatus.cloudPaused);
+        await _saveLocalState(state);
+      }
+      return false;
+    }
+
+    _pendingCloudWrites++;
+    _ignoreCloudRefreshUntil = DateTime.now().add(const Duration(seconds: 12));
+    try {
+      final preparedSnapshot = await _prepareFilesForCloud(user, snapshot);
+      await repository.saveState(
+        user: user,
+        state: preparedSnapshot,
+        replaceCollections: true,
+      );
+      if (!_disposed && user.uid == _activeUid) {
+        final isLatestLocalWrite =
+            revision == null || revision == _localRevision;
+        if (isLatestLocalWrite) {
+          _hasUnsyncedLocalChanges = false;
+          state = preparedSnapshot.copyWith(
+            syncStatus: FleetSyncStatus.cloudActive,
+          );
+          await _saveLocalState(state);
+        }
+      }
+      return true;
+    } catch (_) {
+      if (!_disposed && user.uid == _activeUid) {
+        final isLatestLocalWrite =
+            revision == null || revision == _localRevision;
+        state = isLatestLocalWrite
+            ? snapshot.copyWith(syncStatus: FleetSyncStatus.cloudPaused)
+            : state.copyWith(syncStatus: FleetSyncStatus.cloudPaused);
+        await _saveLocalState(state);
+      }
+      return false;
+    } finally {
+      if (_pendingCloudWrites > 0) {
+        _pendingCloudWrites--;
+      }
+      if (_pendingCloudWrites == 0) {
+        _ignoreCloudRefreshUntil =
+            DateTime.now().add(const Duration(seconds: 3));
+      }
+    }
+  }
+
+  Future<bool> _canUseCloudSyncNetwork(FleetState snapshot) async {
+    if (!snapshot.appSettings.wifiOnlySync) {
+      return true;
+    }
+
+    try {
+      final connections = await Connectivity().checkConnectivity();
+      return _hasWifiSyncConnection(connections);
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<FleetState> _prepareFilesForCloud(
+    User user,
+    FleetState snapshot,
+  ) async {
+    final storageService = _ref.read(fleetStorageServiceProvider);
+    if (storageService == null) {
+      return snapshot;
+    }
+    return storageService.moveEmbeddedFilesToStorage(
+      user: user,
+      state: snapshot,
+    );
+  }
+
+  String _storageKeyForUid(String? uid) {
+    if (uid == null || uid.isEmpty) {
+      return _legacyStorageKey;
+    }
+    return '${_legacyStorageKey}_$uid';
+  }
+
+  bool get _shouldIgnoreCloudRefresh {
+    final ignoreUntil = _ignoreCloudRefreshUntil;
+    return _hasUnsyncedLocalChanges ||
+        _pendingCloudWrites > 0 ||
+        (ignoreUntil != null && DateTime.now().isBefore(ignoreUntil));
+  }
+
+  @override
+  void dispose() {
+    _disposed = true;
+    unawaited(_authSubscription?.cancel());
+    unawaited(_cloudSubscription?.cancel());
+    super.dispose();
   }
 }
 
-List<BatteryPack> _normalizeBatteryInventoryNumbers(
-  List<BatteryPack> batteries,
-) {
-  final usedNumbers = {
-    for (final battery in batteries)
-      if (battery.inventoryNumber > 0) battery.inventoryNumber,
-  };
-  var nextNumber = 1;
-
-  return [
-    for (final battery in batteries)
-      if (battery.inventoryNumber > 0)
-        battery
-      else
-        battery.copyWith(
-          inventoryNumber: () {
-            while (usedNumbers.contains(nextNumber)) {
-              nextNumber++;
-            }
-            usedNumbers.add(nextNumber);
-            return nextNumber++;
-          }(),
-        ),
-  ];
+bool _hasWifiSyncConnection(List<ConnectivityResult> connections) {
+  return connections.contains(ConnectivityResult.wifi) ||
+      connections.contains(ConnectivityResult.ethernet);
 }
 
 LocationPresenceStatus _determinePresenceStatus(List<FlightLogEntry> flights) {

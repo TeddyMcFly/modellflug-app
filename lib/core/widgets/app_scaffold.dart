@@ -1,6 +1,4 @@
 import 'dart:async';
-import 'dart:convert';
-import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -9,7 +7,9 @@ import 'package:intl/intl.dart' show DateFormat;
 
 import '../../shared/models/aircraft_model.dart';
 import '../../shared/providers/fleet_provider.dart';
+import '../../shared/services/auth_service.dart';
 import '../../shared/services/open_meteo_service.dart';
+import '../../shared/utils/media_source.dart';
 
 const _appVersion = '1.0.0+1';
 const _navigationColor = Color(0xFF06172E);
@@ -23,6 +23,7 @@ class AppScaffold extends ConsumerWidget {
   final List<Widget> children;
   final Widget? action;
   final double titleFontSize;
+  final String? headerWeatherLocation;
 
   const AppScaffold({
     super.key,
@@ -31,6 +32,7 @@ class AppScaffold extends ConsumerWidget {
     required this.children,
     this.action,
     this.titleFontSize = 21,
+    this.headerWeatherLocation,
   });
 
   @override
@@ -38,15 +40,24 @@ class AppScaffold extends ConsumerWidget {
     final routeState = GoRouterState.of(context);
     final location = routeState.matchedLocation;
     final fleet = ref.watch(fleetProvider);
+    final userEmail = ref.watch(authStateProvider).maybeWhen(
+          data: (user) => user?.email,
+          orElse: () => null,
+        );
     final pilotProfile = fleet.pilotProfile;
-    final notifications = _visibleHeaderNotifications(fleet);
+    final weatherLocation = headerWeatherLocation ?? pilotProfile.homeAirfield;
     final headerWeather = ref.watch(
       weatherForecastProvider(
         WeatherQuery(
-          location: pilotProfile.homeAirfield,
+          location: weatherLocation,
           timeZone: fleet.appSettings.timeZone,
         ),
       ),
+    );
+    final notifications = _visibleHeaderNotifications(
+      fleet,
+      headerWeather,
+      weatherLocation,
     );
 
     return Scaffold(
@@ -75,10 +86,13 @@ class AppScaffold extends ConsumerWidget {
                             subtitle: subtitle,
                             pilotProfile: pilotProfile,
                             appSettings: fleet.appSettings,
+                            weatherLocation: weatherLocation,
                             notifications: notifications,
                             headerWeather: headerWeather,
                             action: action,
                             titleFontSize: titleFontSize,
+                            userEmail: userEmail,
+                            onSignOut: () => unawaited(_signOut(context, ref)),
                           ),
                           const SizedBox(height: 12),
                           ...children,
@@ -95,6 +109,8 @@ class AppScaffold extends ConsumerWidget {
                         location: location,
                         pilotProfile: pilotProfile,
                         appSettings: fleet.appSettings,
+                        syncStatus: fleet.syncStatus,
+                        userEmail: userEmail,
                       ),
                       content,
                     ],
@@ -113,6 +129,13 @@ class AppScaffold extends ConsumerWidget {
         ),
       ),
     );
+  }
+
+  Future<void> _signOut(BuildContext context, WidgetRef ref) async {
+    await ref.read(authControllerProvider).signOut();
+    if (context.mounted) {
+      context.go('/login');
+    }
   }
 }
 
@@ -198,20 +221,26 @@ class _PageHeader extends StatelessWidget {
   final String subtitle;
   final PilotProfile pilotProfile;
   final AppSettings appSettings;
+  final String weatherLocation;
   final List<_HeaderNotification> notifications;
   final AsyncValue<OpenMeteoWeather> headerWeather;
   final Widget? action;
   final double titleFontSize;
+  final String? userEmail;
+  final VoidCallback onSignOut;
 
   const _PageHeader({
     required this.title,
     required this.subtitle,
     required this.pilotProfile,
     required this.appSettings,
+    required this.weatherLocation,
     required this.notifications,
     required this.headerWeather,
     this.action,
     required this.titleFontSize,
+    required this.userEmail,
+    required this.onSignOut,
   });
 
   @override
@@ -292,10 +321,14 @@ class _PageHeader extends StatelessWidget {
                 weather: headerWeather,
               ),
               const SizedBox(width: 12),
-              _HeaderPilotAvatar(photoDataUri: pilotProfile.photoDataUri),
+              _HeaderPilotAvatar(
+                photoDataUri: pilotProfile.photoSource,
+                email: userEmail,
+                onSignOut: onSignOut,
+              ),
               const SizedBox(width: 12),
               _HeaderWeatherBadge(
-                homeAirfield: pilotProfile.homeAirfield,
+                homeAirfield: weatherLocation,
                 appSettings: appSettings,
                 weather: headerWeather,
               ),
@@ -346,13 +379,18 @@ typedef _HeaderNotification = ({
 
 final Set<String> _dismissedNotificationIds = {};
 
-List<_HeaderNotification> _visibleHeaderNotifications(FleetState fleet) {
+List<_HeaderNotification> _visibleHeaderNotifications(
+  FleetState fleet,
+  AsyncValue<OpenMeteoWeather> headerWeather,
+  String weatherLocation,
+) {
   final notifications = [
     if (fleet.appSettings.notifyRepairs) ..._repairNotifications(fleet),
     if (fleet.appSettings.notifyBatteryLimits)
       ..._batteryLimitNotifications(fleet),
     if (fleet.appSettings.notifyGoodWeather)
-      ..._weatherOpportunityNotifications(fleet),
+      ..._weatherOpportunityNotifications(
+          fleet, headerWeather, weatherLocation),
   ];
 
   return [
@@ -375,11 +413,24 @@ List<_HeaderNotification> _repairNotifications(FleetState fleet) {
   ];
 }
 
-List<_HeaderNotification> _weatherOpportunityNotifications(FleetState fleet) {
+List<_HeaderNotification> _weatherOpportunityNotifications(
+  FleetState fleet,
+  AsyncValue<OpenMeteoWeather> headerWeather,
+  String weatherLocation,
+) {
+  final weather = headerWeather.maybeWhen<OpenMeteoWeather?>(
+    data: (weather) => weather,
+    orElse: () => null,
+  );
+  if (weather == null || !hasGoodFlyingWeather(weather)) {
+    return const [];
+  }
+
   final now = DateTime.now();
   final dayToken =
       '${now.year}${now.month.toString().padLeft(2, '0')}${now.day.toString().padLeft(2, '0')}';
   final areas = [
+    weatherLocation,
     fleet.pilotProfile.homeAirfield,
     ...fleet.pilotProfile.flightAreas,
   ].where((area) => area.trim().isNotEmpty).toSet().toList();
@@ -388,15 +439,21 @@ List<_HeaderNotification> _weatherOpportunityNotifications(FleetState fleet) {
     return const [];
   }
 
-  final area = areas.first;
+  final area =
+      weatherLocation.trim().isNotEmpty ? weatherLocation.trim() : areas.first;
+  final wind = formatWindSpeed(
+    weather.windSpeedKmh,
+    fleet.appSettings.windUnit,
+  );
+  final gusts = formatWindSpeed(weather.gustsKmh, fleet.appSettings.windUnit);
   return [
     (
       id: 'weather-good-$dayToken-${_stableTextToken(area)}',
       icon: Icons.wb_sunny_rounded,
       title: 'Gute Flugbedingungen',
       text:
-          '$area: wenig Wind, trocken und sonnig. Das sieht nach einem guten Flugfenster aus.',
-      time: 'Automatisch',
+          '$area: ${weather.condition}, Wind $wind, Boeen bis $gusts und ${weather.precipitationProbability} % Regenrisiko. Das sieht nach einem guten Flugfenster aus.',
+      time: 'Live-Wetter',
     ),
   ];
 }
@@ -817,12 +874,63 @@ class _HeaderSunsetBadge extends StatelessWidget {
 
 class _HeaderPilotAvatar extends StatelessWidget {
   final String? photoDataUri;
+  final String? email;
+  final VoidCallback onSignOut;
 
-  const _HeaderPilotAvatar({required this.photoDataUri});
+  const _HeaderPilotAvatar({
+    required this.photoDataUri,
+    required this.email,
+    required this.onSignOut,
+  });
 
   @override
   Widget build(BuildContext context) {
     final photo = photoDataUri;
+
+    return PopupMenuButton<String>(
+      tooltip: 'Konto',
+      onSelected: (value) {
+        if (value == 'signOut') {
+          onSignOut();
+        }
+      },
+      itemBuilder: (context) => [
+        PopupMenuItem(
+          enabled: false,
+          child: Text(
+            email ?? 'Konto',
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+              color: Color(0xFF334155),
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+        ),
+        const PopupMenuDivider(),
+        const PopupMenuItem(
+          value: 'signOut',
+          child: Row(
+            children: [
+              Icon(Icons.logout_rounded, size: 18),
+              SizedBox(width: 8),
+              Text('Abmelden'),
+            ],
+          ),
+        ),
+      ],
+      child: _HeaderPilotAvatarImage(photo: photo),
+    );
+  }
+}
+
+class _HeaderPilotAvatarImage extends StatelessWidget {
+  final String? photo;
+
+  const _HeaderPilotAvatarImage({required this.photo});
+
+  @override
+  Widget build(BuildContext context) {
+    final avatarPhoto = photo;
 
     return Container(
       width: 44,
@@ -832,7 +940,7 @@ class _HeaderPilotAvatar extends StatelessWidget {
         border: Border.all(color: _accentColor, width: 2),
       ),
       child: ClipOval(
-        child: photo == null || photo.isEmpty
+        child: avatarPhoto == null || avatarPhoto.isEmpty
             ? Container(
                 color: _accentColor.withValues(alpha: 0.14),
                 child: const Icon(
@@ -841,8 +949,8 @@ class _HeaderPilotAvatar extends StatelessWidget {
                   size: 26,
                 ),
               )
-            : Image.memory(
-                _bytesFromDataUri(photo),
+            : Image(
+                image: mediaImageProvider(avatarPhoto),
                 fit: BoxFit.cover,
                 gaplessPlayback: true,
                 errorBuilder: (context, error, stackTrace) => Container(
@@ -889,11 +997,11 @@ class _HeaderWeatherBadge extends StatelessWidget {
         formatDistance(data.visibilityKm, appSettings.distanceUnit);
 
     return Tooltip(
-      message: 'Wetter am $homeAirfield',
+      message: 'Wetter am $homeAirfield: ${data.assessment}',
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          const Icon(Icons.wb_cloudy_rounded, color: _accentColor, size: 22),
+          Icon(data.assessmentIcon, color: data.assessmentColor, size: 22),
           const SizedBox(width: 7),
           Column(
             mainAxisSize: MainAxisSize.min,
@@ -929,11 +1037,15 @@ class _SideNav extends StatelessWidget {
   final String location;
   final PilotProfile pilotProfile;
   final AppSettings appSettings;
+  final FleetSyncStatus syncStatus;
+  final String? userEmail;
 
   const _SideNav({
     required this.location,
     required this.pilotProfile,
     required this.appSettings,
+    required this.syncStatus,
+    required this.userEmail,
   });
 
   @override
@@ -986,7 +1098,7 @@ class _SideNav extends StatelessWidget {
                     ),
                     _NavTile(
                       icon: Icons.videocam_rounded,
-                      label: 'Webcams',
+                      label: 'Webcams/Wetter',
                       path: '/webcam',
                       location: location,
                     ),
@@ -1014,7 +1126,10 @@ class _SideNav extends StatelessWidget {
                       appSettings: appSettings,
                     ),
                     const SizedBox(height: 8),
-                    const _StatusBadge(),
+                    _StatusBadge(
+                      syncStatus: syncStatus,
+                      userEmail: userEmail,
+                    ),
                   ],
                 ),
               ),
@@ -1043,7 +1158,7 @@ class _PilotNavBadge extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          _PilotAvatar(photoDataUri: profile.photoDataUri),
+          _PilotAvatar(photoDataUri: profile.photoSource),
           const SizedBox(height: 10),
           Row(
             mainAxisAlignment: MainAxisAlignment.center,
@@ -1249,8 +1364,8 @@ class _PilotAvatar extends StatelessWidget {
                   size: 38,
                 ),
               )
-            : Image.memory(
-                _bytesFromDataUri(photo),
+            : Image(
+                image: mediaImageProvider(photo),
                 fit: BoxFit.cover,
                 gaplessPlayback: true,
                 errorBuilder: (context, error, stackTrace) => Container(
@@ -1456,7 +1571,7 @@ class _TopNav extends StatelessWidget {
             ),
             _NavChip(
               icon: Icons.videocam_rounded,
-              label: 'Webcams',
+              label: 'Webcams/Wetter',
               path: '/webcam',
               location: location,
             ),
@@ -1631,22 +1746,48 @@ bool _isSelectedLocation(String location, String path) {
 }
 
 class _StatusBadge extends StatelessWidget {
-  const _StatusBadge();
+  final FleetSyncStatus syncStatus;
+  final String? userEmail;
+
+  const _StatusBadge({
+    required this.syncStatus,
+    required this.userEmail,
+  });
 
   @override
   Widget build(BuildContext context) {
+    final status = _syncBadgeStatus(syncStatus, userEmail);
+
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
-      child: const Row(
+      child: Row(
         children: [
-          Icon(Icons.cloud_done_rounded, color: Color(0xFF4ADE80)),
-          SizedBox(width: 10),
+          Icon(status.icon, color: status.color),
+          const SizedBox(width: 10),
           Expanded(
-            child: Text(
-              'Lokaler Bestand aktiv',
-              style:
-                  TextStyle(color: Colors.white, fontWeight: FontWeight.w800),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  status.title,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                if (status.detail != null)
+                  Text(
+                    status.detail!,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: Colors.white.withValues(alpha: 0.68),
+                      fontSize: 10,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+              ],
             ),
           ),
         ],
@@ -1655,13 +1796,34 @@ class _StatusBadge extends StatelessWidget {
   }
 }
 
-final Map<String, Uint8List> _dataUriBytesCache = {};
-
-Uint8List _bytesFromDataUri(String dataUri) {
-  return _dataUriBytesCache.putIfAbsent(dataUri, () {
-    final commaIndex = dataUri.indexOf(',');
-    final encoded =
-        commaIndex == -1 ? dataUri : dataUri.substring(commaIndex + 1);
-    return base64Decode(encoded);
-  });
+({IconData icon, Color color, String title, String? detail}) _syncBadgeStatus(
+  FleetSyncStatus syncStatus,
+  String? userEmail,
+) {
+  return switch (syncStatus) {
+    FleetSyncStatus.cloudActive => (
+        icon: Icons.cloud_done_rounded,
+        color: const Color(0xFF4ADE80),
+        title: 'Cloud-Sync aktiv',
+        detail: userEmail,
+      ),
+    FleetSyncStatus.syncing => (
+        icon: Icons.cloud_sync_rounded,
+        color: const Color(0xFF7DD3FC),
+        title: 'Cloud wird verbunden',
+        detail: userEmail,
+      ),
+    FleetSyncStatus.cloudPaused => (
+        icon: Icons.cloud_off_rounded,
+        color: const Color(0xFFFBBF24),
+        title: 'Cloud-Sync pausiert',
+        detail: 'Lokal gespeichert',
+      ),
+    FleetSyncStatus.localOnly => (
+        icon: Icons.storage_rounded,
+        color: const Color(0xFFCBD5E1),
+        title: 'Lokaler Bestand aktiv',
+        detail: userEmail,
+      ),
+  };
 }

@@ -19,6 +19,30 @@ final pressureTrendProvider = FutureProvider.family
   return OpenMeteoService.instance.pressureTrend(query);
 });
 
+enum WeatherAssessmentLevel { good, solid, caution }
+
+const goodFlyingWindMaxKmh = 16.0;
+const goodFlyingGustsMaxKmh = 25.0;
+const goodFlyingRainProbabilityMax = 40;
+const goodFlyingWeatherCodeMax = 3;
+const cautionRainProbabilityMin = goodFlyingRainProbabilityMax + 1;
+const cautionWindMinKmh = 25.0;
+const cautionGustsMinKmh = 35.0;
+
+class WeatherAssessment {
+  final WeatherAssessmentLevel level;
+  final String text;
+  final Color color;
+  final IconData icon;
+
+  const WeatherAssessment({
+    required this.level,
+    required this.text,
+    required this.color,
+    required this.icon,
+  });
+}
+
 class WeatherQuery {
   final String location;
   final String timeZone;
@@ -64,6 +88,7 @@ class OpenMeteoWeather {
   final int cloudCover;
   final String sunrise;
   final String sunset;
+  final WeatherAssessmentLevel assessmentLevel;
   final String assessment;
   final Color assessmentColor;
   final IconData assessmentIcon;
@@ -82,6 +107,7 @@ class OpenMeteoWeather {
     required this.cloudCover,
     required this.sunrise,
     required this.sunset,
+    required this.assessmentLevel,
     required this.assessment,
     required this.assessmentColor,
     required this.assessmentIcon,
@@ -99,6 +125,7 @@ class DailyWeatherForecast {
   final double windSpeedKmh;
   final double gustsKmh;
   final String sunset;
+  final WeatherAssessmentLevel assessmentLevel;
   final String assessment;
   final Color assessmentColor;
   final IconData assessmentIcon;
@@ -114,6 +141,7 @@ class DailyWeatherForecast {
     required this.windSpeedKmh,
     required this.gustsKmh,
     required this.sunset,
+    required this.assessmentLevel,
     required this.assessment,
     required this.assessmentColor,
     required this.assessmentIcon,
@@ -143,6 +171,18 @@ class OpenMeteoService {
   final _weeklyCache = <WeatherQuery, _WeeklyWeatherCacheEntry>{};
   final _pressureCache = <WeatherQuery, _PressureTrendCacheEntry>{};
   final _coordinateCache = <String, AirfieldCoordinates>{};
+
+  void clearForecastCache(WeatherQuery query) {
+    _cache.remove(query);
+  }
+
+  void clearWeeklyForecastCache(WeatherQuery query) {
+    _weeklyCache.remove(query);
+  }
+
+  void clearPressureTrendCache(WeatherQuery query) {
+    _pressureCache.remove(query);
+  }
 
   Future<OpenMeteoWeather> forecast(WeatherQuery query) async {
     final cached = _cache[query];
@@ -386,7 +426,7 @@ OpenMeteoWeather _weatherFromJson(String location, Map<String, dynamic> json) {
       ? (_number(current['precipitation']) > 0 ? 70 : 10)
       : _number(rainProbabilityValues.first).round();
   final cloudCover = _number(current['cloud_cover']).round();
-  final weather = _buildAssessment(
+  final weather = buildFlyingWeatherAssessment(
     windKmh: wind,
     gustsKmh: gusts,
     rainProbability: rainProbability,
@@ -415,9 +455,10 @@ OpenMeteoWeather _weatherFromJson(String location, Map<String, dynamic> json) {
       sunsetValues.isEmpty ? null : sunsetValues.first,
       fallback: '21:17',
     ),
-    assessment: weather.$1,
-    assessmentColor: weather.$2,
-    assessmentIcon: weather.$3,
+    assessmentLevel: weather.level,
+    assessment: weather.text,
+    assessmentColor: weather.color,
+    assessmentIcon: weather.icon,
     isLive: true,
   );
 }
@@ -503,7 +544,7 @@ DailyWeatherForecast _dailyForecastAt({
   final gusts = index < gustValues.length ? _number(gustValues[index]) : 0.0;
   final rain =
       index < rainValues.length ? _number(rainValues[index]).round() : 0;
-  final weather = _buildAssessment(
+  final weather = buildFlyingWeatherAssessment(
     windKmh: wind,
     gustsKmh: gusts,
     rainProbability: rain,
@@ -522,9 +563,10 @@ DailyWeatherForecast _dailyForecastAt({
     gustsKmh: gusts,
     sunset: _formatClockTime(
         index < sunsetValues.length ? sunsetValues[index] : null),
-    assessment: weather.$1,
-    assessmentColor: weather.$2,
-    assessmentIcon: weather.$3,
+    assessmentLevel: weather.level,
+    assessment: weather.text,
+    assessmentColor: weather.color,
+    assessmentIcon: weather.icon,
     isLive: true,
   );
 }
@@ -543,6 +585,7 @@ OpenMeteoWeather fallbackWeather(String location) {
     cloudCover: 35,
     sunrise: '05:31',
     sunset: '21:17',
+    assessmentLevel: WeatherAssessmentLevel.good,
     assessment:
         'Sehr gute Bedingungen. Wenig Wind, trocken und hell genug fuer einen Flugplatzbesuch.',
     assessmentColor: const Color(0xFF166534),
@@ -588,7 +631,7 @@ List<DailyWeatherForecast> fallbackWeeklyForecast() {
   return [
     for (var index = 0; index < 7; index++)
       () {
-        final weather = _buildAssessment(
+        final weather = buildFlyingWeatherAssessment(
           windKmh: wind[index].toDouble(),
           gustsKmh: gusts[index].toDouble(),
           rainProbability: rain[index],
@@ -607,9 +650,10 @@ List<DailyWeatherForecast> fallbackWeeklyForecast() {
           windSpeedKmh: wind[index].toDouble(),
           gustsKmh: gusts[index].toDouble(),
           sunset: '21:${(17 + index).toString().padLeft(2, '0')}',
-          assessment: weather.$1,
-          assessmentColor: weather.$2,
-          assessmentIcon: weather.$3,
+          assessmentLevel: weather.level,
+          assessment: weather.text,
+          assessmentColor: weather.color,
+          assessmentIcon: weather.icon,
           isLive: false,
         );
       }(),
@@ -658,38 +702,66 @@ String _conditionForCode(int code, int cloudCover) {
   return 'wechselhaft';
 }
 
-(String, Color, IconData) _buildAssessment({
+WeatherAssessment buildFlyingWeatherAssessment({
   required double windKmh,
   required double gustsKmh,
   required int rainProbability,
   required int cloudCover,
   required int weatherCode,
 }) {
-  final dry = rainProbability <= 20 && weatherCode < 51;
-  final calm = windKmh <= 16 && gustsKmh <= 25;
-  final sunny = cloudCover <= 55 && weatherCode <= 3;
+  final activePrecipitation = weatherCode >= 51;
+  final dry =
+      rainProbability <= goodFlyingRainProbabilityMax && !activePrecipitation;
+  final calm =
+      windKmh <= goodFlyingWindMaxKmh && gustsKmh <= goodFlyingGustsMaxKmh;
+  final flyableSky = weatherCode <= goodFlyingWeatherCodeMax;
 
-  if (dry && calm && sunny) {
-    return (
-      'Sehr gute Bedingungen. Wenig Wind, trocken und freundlich - das lohnt sich fuer den Flugplatz.',
-      const Color(0xFF166534),
-      Icons.thumb_up_alt_rounded,
+  if (dry && calm && flyableSky) {
+    return const WeatherAssessment(
+      level: WeatherAssessmentLevel.good,
+      text:
+          'Sehr gute Bedingungen. Wenig Wind und trocken - das lohnt sich fuer den Flugplatz.',
+      color: Color(0xFF166534),
+      icon: Icons.thumb_up_alt_rounded,
     );
   }
 
-  if (!dry || gustsKmh > 35 || windKmh > 25 || weatherCode >= 80) {
-    return (
-      'Lieber vorsichtig planen. Regen, Wind oder starke Boeen koennen den Flugtag deutlich stoeren.',
-      const Color(0xFFB45309),
-      Icons.warning_amber_rounded,
+  if (rainProbability >= cautionRainProbabilityMin ||
+      activePrecipitation ||
+      gustsKmh > cautionGustsMinKmh ||
+      windKmh > cautionWindMinKmh) {
+    return const WeatherAssessment(
+      level: WeatherAssessmentLevel.caution,
+      text:
+          'Lieber vorsichtig planen. Regen, Wind oder starke Boeen koennen den Flugtag deutlich stoeren.',
+      color: Color(0xFFB45309),
+      icon: Icons.warning_amber_rounded,
     );
   }
 
-  return (
-    'Solide Bedingungen. Vor dem Start Windrichtung, Boeen und Platzsituation kurz pruefen.',
-    const Color(0xFF1D4ED8),
-    Icons.info_rounded,
+  return const WeatherAssessment(
+    level: WeatherAssessmentLevel.solid,
+    text:
+        'Solide Bedingungen. Vor dem Start Windrichtung, Boeen und Platzsituation kurz pruefen.',
+    color: Color(0xFF1D4ED8),
+    icon: Icons.info_rounded,
   );
+}
+
+bool hasGoodFlyingWeather(OpenMeteoWeather weather) {
+  return weather.isLive &&
+      weather.assessmentLevel == WeatherAssessmentLevel.good;
+}
+
+String weatherAssessmentLabel(WeatherAssessmentLevel level) {
+  switch (level) {
+    case WeatherAssessmentLevel.good:
+      return 'Sehr gut';
+    case WeatherAssessmentLevel.solid:
+      return 'Solide';
+    case WeatherAssessmentLevel.caution:
+      return 'Vorsicht';
+  }
 }
 
 String formatTemperature(double celsius, String unit) {

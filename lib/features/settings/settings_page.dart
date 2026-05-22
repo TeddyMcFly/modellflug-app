@@ -4,14 +4,50 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
 
 import '../../core/widgets/app_scaffold.dart';
 import '../../shared/models/aircraft_model.dart';
 import '../../shared/providers/fleet_provider.dart';
+import '../../shared/services/auth_service.dart';
 import '../../shared/utils/download_helper.dart';
+import '../../shared/utils/media_source.dart';
 
 const _tabAccentColor = Colors.white;
+final settingsProfileHasUnsavedChanges = ValueNotifier<bool>(false);
+
+Future<bool> confirmLeaveSettingsProfile(BuildContext context) async {
+  if (!settingsProfileHasUnsavedChanges.value) {
+    return true;
+  }
+
+  final leaveWithoutSaving = await showDialog<bool>(
+    context: context,
+    builder: (context) => AlertDialog(
+      title: const Text('Profil-Aenderungen nicht gespeichert'),
+      content: const Text(
+        'Du hast dein Profil geaendert, aber noch nicht gespeichert. Moechtest du die Seite ohne Speichern verlassen?',
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(false),
+          child: const Text('Auf Seite bleiben'),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.of(context).pop(true),
+          child: const Text('Ohne Speichern verlassen'),
+        ),
+      ],
+    ),
+  );
+
+  if (leaveWithoutSaving == true) {
+    settingsProfileHasUnsavedChanges.value = false;
+  }
+
+  return leaveWithoutSaving ?? false;
+}
 
 class SettingsPage extends ConsumerWidget {
   const SettingsPage({super.key});
@@ -19,6 +55,11 @@ class SettingsPage extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final fleet = ref.watch(fleetProvider);
+    final authUser = ref.watch(authStateProvider).maybeWhen(
+          data: (user) => user,
+          orElse: () => null,
+        );
+    final userEmail = authUser?.email;
 
     return AppScaffold(
       title: 'Einstellungen',
@@ -32,7 +73,7 @@ class SettingsPage extends ConsumerWidget {
             children: [
               const _SettingsTabs(),
               Container(
-                height: 1580,
+                height: 1760,
                 decoration: const BoxDecoration(
                   borderRadius: BorderRadius.only(
                     bottomLeft: Radius.circular(8),
@@ -43,17 +84,38 @@ class SettingsPage extends ConsumerWidget {
                   children: [
                     Padding(
                       padding: const EdgeInsets.all(2),
-                      child: _PilotProfileCard(
-                        profile: fleet.pilotProfile,
-                        onSave: (profile) => ref
-                            .read(fleetProvider.notifier)
-                            .updatePilotProfile(profile),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          _PilotProfileCard(
+                            profile: fleet.pilotProfile,
+                            onSave: (profile) => ref
+                                .read(fleetProvider.notifier)
+                                .updatePilotProfile(profile),
+                          ),
+                          const SizedBox(height: 12),
+                          _AccountCard(
+                            userEmail: userEmail,
+                            emailVerified: authUser?.emailVerified ?? false,
+                            syncStatus: fleet.syncStatus,
+                            onSyncNow: () => _syncNow(context, ref),
+                            onPasswordChange: () =>
+                                _sendPasswordReset(context, ref, userEmail),
+                            onVerifyEmail: () =>
+                                _sendEmailVerification(context, ref),
+                            onDeleteAccount: () =>
+                                _showDeleteAccountPreparation(context),
+                            onSignOut: () => _signOut(context, ref),
+                          ),
+                        ],
                       ),
                     ),
                     Padding(
                       padding: const EdgeInsets.all(2),
                       child: _AppSettingsCard(
                         settings: fleet.appSettings,
+                        syncStatus: fleet.syncStatus,
+                        userEmail: userEmail,
                         onCreateBackup: () => _showBackupDialog(
                           context,
                           ref,
@@ -72,6 +134,7 @@ class SettingsPage extends ConsumerWidget {
                         onSettingsChanged: (settings) => ref
                             .read(fleetProvider.notifier)
                             .updateAppSettings(settings),
+                        onSyncNow: () => _syncNow(context, ref),
                       ),
                     ),
                   ],
@@ -81,6 +144,92 @@ class SettingsPage extends ConsumerWidget {
           ),
         ),
       ],
+    );
+  }
+
+  Future<void> _signOut(BuildContext context, WidgetRef ref) async {
+    final canLeave = await confirmLeaveSettingsProfile(context);
+    if (!canLeave) {
+      return;
+    }
+
+    await ref.read(authControllerProvider).signOut();
+    if (context.mounted) {
+      context.go('/login');
+    }
+  }
+
+  Future<void> _sendPasswordReset(
+    BuildContext context,
+    WidgetRef ref,
+    String? userEmail,
+  ) async {
+    final messenger = ScaffoldMessenger.of(context);
+    final email = userEmail?.trim();
+    if (email == null || email.isEmpty) {
+      messenger.showSnackBar(
+        const SnackBar(content: Text('Fuer dieses Konto fehlt die E-Mail.')),
+      );
+      return;
+    }
+
+    try {
+      await ref.read(authControllerProvider).sendPasswordResetEmail(email);
+      if (context.mounted) {
+        messenger.showSnackBar(
+          SnackBar(
+            content: Text('Passwort-Link wurde an $email gesendet.'),
+          ),
+        );
+      }
+    } on Object catch (error) {
+      if (context.mounted) {
+        messenger.showSnackBar(
+          SnackBar(content: Text(authErrorMessage(error))),
+        );
+      }
+    }
+  }
+
+  Future<void> _sendEmailVerification(
+    BuildContext context,
+    WidgetRef ref,
+  ) async {
+    final messenger = ScaffoldMessenger.of(context);
+
+    try {
+      await ref.read(authControllerProvider).sendEmailVerification();
+      if (context.mounted) {
+        messenger.showSnackBar(
+          const SnackBar(
+            content: Text('Bestaetigungs-E-Mail wurde versendet.'),
+          ),
+        );
+      }
+    } on Object catch (error) {
+      if (context.mounted) {
+        messenger.showSnackBar(
+          SnackBar(content: Text(authErrorMessage(error))),
+        );
+      }
+    }
+  }
+
+  Future<void> _showDeleteAccountPreparation(BuildContext context) async {
+    await showDialog<void>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Konto loeschen vorbereiten'),
+        content: const Text(
+          'Diese Funktion ist vorbereitet, loescht aber noch nichts. Fuer echtes Loeschen muessen spaeter Konto, Cloud-Daten und gespeicherte Dateien gemeinsam entfernt werden.',
+        ),
+        actions: [
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Verstanden'),
+          ),
+        ],
+      ),
     );
   }
 
@@ -241,6 +390,30 @@ class SettingsPage extends ConsumerWidget {
     fileNameController.dispose();
   }
 
+  Future<void> _syncNow(BuildContext context, WidgetRef ref) async {
+    final messenger = ScaffoldMessenger.of(context);
+    final syncResult = await ref.read(fleetProvider.notifier).syncNow();
+
+    if (!context.mounted) {
+      return;
+    }
+
+    messenger.showSnackBar(
+      SnackBar(
+        content: Text(
+          switch (syncResult) {
+            CloudSyncResult.synced =>
+              'Daten wurden mit der Cloud synchronisiert.',
+            CloudSyncResult.wifiRequired =>
+              'Synchronisation wartet auf WLAN. Deine Daten bleiben lokal gespeichert.',
+            CloudSyncResult.cloudUnavailable =>
+              'Cloud-Synchronisation konnte nicht abgeschlossen werden. Bitte Internet und Anmeldung pruefen.',
+          },
+        ),
+      ),
+    );
+  }
+
   Future<void> _importData(
     BuildContext context,
     WidgetRef ref, {
@@ -353,6 +526,234 @@ class _SettingsTab extends StatelessWidget {
   }
 }
 
+class _AccountCard extends StatelessWidget {
+  final String? userEmail;
+  final bool emailVerified;
+  final FleetSyncStatus syncStatus;
+  final Future<void> Function() onSyncNow;
+  final Future<void> Function() onPasswordChange;
+  final Future<void> Function() onVerifyEmail;
+  final Future<void> Function() onDeleteAccount;
+  final Future<void> Function() onSignOut;
+
+  const _AccountCard({
+    required this.userEmail,
+    required this.emailVerified,
+    required this.syncStatus,
+    required this.onSyncNow,
+    required this.onPasswordChange,
+    required this.onVerifyEmail,
+    required this.onDeleteAccount,
+    required this.onSignOut,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final account = userEmail?.trim();
+    final hasAccount = account != null && account.isNotEmpty;
+    final cloudStatus = _accountCloudStatus(syncStatus, hasAccount);
+
+    return Card(
+      margin: EdgeInsets.zero,
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Row(
+              children: [
+                Icon(Icons.account_circle_rounded, color: Color(0xFF0A84FF)),
+                SizedBox(width: 10),
+                Text(
+                  'Konto',
+                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.w900),
+                ),
+              ],
+            ),
+            const SizedBox(height: 14),
+            LayoutBuilder(
+              builder: (context, constraints) {
+                final columns = constraints.maxWidth >= 720 ? 2 : 1;
+                final width = columns == 1
+                    ? double.infinity
+                    : (constraints.maxWidth - 10) / 2;
+
+                return Wrap(
+                  spacing: 10,
+                  runSpacing: 10,
+                  children: [
+                    SizedBox(
+                      width: width,
+                      child: _AccountInfoTile(
+                        icon: Icons.alternate_email_rounded,
+                        title: 'Angemeldet als',
+                        value: hasAccount ? account : 'Kein Konto aktiv',
+                        detail: emailVerified
+                            ? 'E-Mail ist bestaetigt.'
+                            : 'E-Mail ist noch nicht bestaetigt.',
+                      ),
+                    ),
+                    SizedBox(
+                      width: width,
+                      child: _AccountInfoTile(
+                        icon: cloudStatus.icon,
+                        title: 'Cloud-Sync',
+                        value: cloudStatus.title,
+                        detail: cloudStatus.detail,
+                      ),
+                    ),
+                  ],
+                );
+              },
+            ),
+            const SizedBox(height: 14),
+            Wrap(
+              spacing: 10,
+              runSpacing: 10,
+              children: [
+                FilledButton.icon(
+                  onPressed: cloudStatus.canSync ? onSyncNow : null,
+                  icon: const Icon(Icons.sync_rounded),
+                  label: const Text('Jetzt synchronisieren'),
+                ),
+                OutlinedButton.icon(
+                  onPressed: hasAccount ? onPasswordChange : null,
+                  icon: const Icon(Icons.password_rounded),
+                  label: const Text('Passwort aendern'),
+                ),
+                OutlinedButton.icon(
+                  onPressed:
+                      hasAccount && !emailVerified ? onVerifyEmail : null,
+                  icon: const Icon(Icons.mark_email_read_rounded),
+                  label: const Text('E-Mail bestaetigen'),
+                ),
+                OutlinedButton.icon(
+                  onPressed: hasAccount ? onSignOut : null,
+                  icon: const Icon(Icons.logout_rounded),
+                  label: const Text('Abmelden'),
+                ),
+                OutlinedButton.icon(
+                  onPressed: hasAccount ? onDeleteAccount : null,
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: const Color(0xFFB91C1C),
+                  ),
+                  icon: const Icon(Icons.delete_forever_rounded),
+                  label: const Text('Konto loeschen'),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _AccountInfoTile extends StatelessWidget {
+  final IconData icon;
+  final String title;
+  final String value;
+  final String? detail;
+
+  const _AccountInfoTile({
+    required this.icon,
+    required this.title,
+    required this.value,
+    this.detail,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF8FAFC),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: const Color(0xFFE2E8F0)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, color: const Color(0xFF0A84FF), size: 20),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: const TextStyle(
+                    color: Color(0xFF64748B),
+                    fontSize: 11,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  value,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: Color(0xFF06172E),
+                    fontSize: 13,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+                if (detail != null) ...[
+                  const SizedBox(height: 3),
+                  Text(
+                    detail!,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: Color(0xFF64748B),
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+({IconData icon, String title, String detail, bool canSync})
+    _accountCloudStatus(
+  FleetSyncStatus syncStatus,
+  bool hasAccount,
+) {
+  return switch (syncStatus) {
+    FleetSyncStatus.cloudActive => (
+        icon: Icons.cloud_done_rounded,
+        title: 'Cloud aktiv',
+        detail: 'Firebase ist verbunden.',
+        canSync: true,
+      ),
+    FleetSyncStatus.syncing => (
+        icon: Icons.cloud_sync_rounded,
+        title: 'Synchronisiert',
+        detail: 'Aenderungen werden uebertragen.',
+        canSync: false,
+      ),
+    FleetSyncStatus.cloudPaused => (
+        icon: Icons.cloud_off_rounded,
+        title: 'Cloud pausiert',
+        detail: 'Lokale Daten bleiben erhalten.',
+        canSync: true,
+      ),
+    FleetSyncStatus.localOnly => (
+        icon: Icons.storage_rounded,
+        title: 'Nur lokal',
+        detail: hasAccount ? 'Cloud-Sync wartet.' : 'Ohne Konto angemeldet.',
+        canSync: false,
+      ),
+  };
+}
+
 class _PilotProfileCard extends StatefulWidget {
   final PilotProfile profile;
   final ValueChanged<PilotProfile> onSave;
@@ -381,23 +782,26 @@ class _PilotProfileCardState extends State<_PilotProfileCard> {
   String? _photoDataUri;
   String? _insuranceDocumentName;
   String? _insuranceDocumentDataUri;
+  PilotProfile? _lastSubmittedProfile;
+  DateTime? _protectSubmittedProfileUntil;
   bool _editing = false;
 
   @override
   void initState() {
     super.initState();
-    _name = TextEditingController(text: widget.profile.name);
-    _homeAirfield = TextEditingController(text: widget.profile.homeAirfield);
-    _club = TextEditingController(text: widget.profile.club);
-    _licenseNumber = TextEditingController(text: widget.profile.licenseNumber);
-    _phone = TextEditingController(text: widget.profile.phone);
-    _email = TextEditingController(text: widget.profile.email);
+    _name = _profileController(widget.profile.name);
+    _homeAirfield = _profileController(widget.profile.homeAirfield);
+    _club = _profileController(widget.profile.club);
+    _licenseNumber = _profileController(widget.profile.licenseNumber);
+    _phone = _profileController(widget.profile.phone);
+    _email = _profileController(widget.profile.email);
     _syncTransmitterControllers(widget.profile.transmitters);
     _syncFlightAreaControllers(widget.profile.flightAreas);
-    _notes = TextEditingController(text: widget.profile.notes);
-    _photoDataUri = widget.profile.photoDataUri;
+    _notes = _profileController(widget.profile.notes);
+    _photoDataUri = widget.profile.photoSource;
     _insuranceDocumentName = widget.profile.insuranceDocumentName;
-    _insuranceDocumentDataUri = widget.profile.insuranceDocumentDataUri;
+    _insuranceDocumentDataUri = widget.profile.insuranceDocumentSource;
+    settingsProfileHasUnsavedChanges.value = false;
   }
 
   @override
@@ -406,6 +810,14 @@ class _PilotProfileCardState extends State<_PilotProfileCard> {
     if (oldWidget.profile == widget.profile) {
       return;
     }
+    if (_editing) {
+      return;
+    }
+    if (_shouldKeepSubmittedProfile(widget.profile)) {
+      return;
+    }
+    _lastSubmittedProfile = null;
+    _protectSubmittedProfileUntil = null;
     _name.text = widget.profile.name;
     _homeAirfield.text = widget.profile.homeAirfield;
     _club.text = widget.profile.club;
@@ -415,9 +827,10 @@ class _PilotProfileCardState extends State<_PilotProfileCard> {
     _syncTransmitterControllers(widget.profile.transmitters);
     _syncFlightAreaControllers(widget.profile.flightAreas);
     _notes.text = widget.profile.notes;
-    _photoDataUri = widget.profile.photoDataUri;
+    _photoDataUri = widget.profile.photoSource;
     _insuranceDocumentName = widget.profile.insuranceDocumentName;
-    _insuranceDocumentDataUri = widget.profile.insuranceDocumentDataUri;
+    _insuranceDocumentDataUri = widget.profile.insuranceDocumentSource;
+    _updateUnsavedProfileFlag();
   }
 
   @override
@@ -435,7 +848,63 @@ class _PilotProfileCardState extends State<_PilotProfileCard> {
       controller.dispose();
     }
     _notes.dispose();
+    settingsProfileHasUnsavedChanges.value = false;
     super.dispose();
+  }
+
+  TextEditingController _profileController(String text) {
+    final controller = TextEditingController(text: text);
+    controller.addListener(_updateUnsavedProfileFlag);
+    return controller;
+  }
+
+  void _updateUnsavedProfileFlag() {
+    settingsProfileHasUnsavedChanges.value = _hasUnsavedProfileChanges;
+  }
+
+  bool get _hasUnsavedProfileChanges {
+    if (!_editing) {
+      return false;
+    }
+
+    final currentProfile = _currentProfileFromFields();
+    return currentProfile.name != widget.profile.name ||
+        currentProfile.homeAirfield != widget.profile.homeAirfield ||
+        currentProfile.club != widget.profile.club ||
+        currentProfile.licenseNumber != widget.profile.licenseNumber ||
+        currentProfile.phone != widget.profile.phone ||
+        currentProfile.email != widget.profile.email ||
+        currentProfile.notes != widget.profile.notes ||
+        !listEquals(currentProfile.flightAreas, widget.profile.flightAreas) ||
+        !listEquals(currentProfile.transmitters, widget.profile.transmitters) ||
+        currentProfile.photoSource != widget.profile.photoSource ||
+        currentProfile.insuranceDocumentName !=
+            widget.profile.insuranceDocumentName ||
+        currentProfile.insuranceDocumentSource !=
+            widget.profile.insuranceDocumentSource;
+  }
+
+  PilotProfile _currentProfileFromFields() {
+    return PilotProfile(
+      name: _name.text.trim(),
+      homeAirfield: _homeAirfield.text.trim(),
+      club: _club.text.trim(),
+      licenseNumber: _licenseNumber.text.trim(),
+      phone: _phone.text.trim(),
+      email: _email.text.trim(),
+      flightAreas: [
+        for (final controller in _flightAreas)
+          if (controller.text.trim().isNotEmpty) controller.text.trim(),
+      ],
+      transmitters: [
+        for (final controller in _transmitters)
+          if (controller.text.trim().isNotEmpty) controller.text.trim(),
+      ],
+      notes: _notes.text.trim(),
+      photoDataUri: _photoDataUri,
+      insuranceDocumentName: _insuranceDocumentName,
+      insuranceDocumentDataUri: _insuranceDocumentDataUri,
+    );
   }
 
   @override
@@ -539,6 +1008,7 @@ class _PilotProfileCardState extends State<_PilotProfileCard> {
                       : () => setState(() {
                             _insuranceDocumentName = null;
                             _insuranceDocumentDataUri = null;
+                            _updateUnsavedProfileFlag();
                           }),
                 ),
               ),
@@ -555,7 +1025,7 @@ class _PilotProfileCardState extends State<_PilotProfileCard> {
                     )
                   else
                     FilledButton.icon(
-                      onPressed: () => setState(() => _editing = true),
+                      onPressed: _startEditing,
                       icon: const Icon(Icons.edit_rounded),
                       label: const Text('Profil bearbeiten'),
                     ),
@@ -568,6 +1038,11 @@ class _PilotProfileCardState extends State<_PilotProfileCard> {
         ),
       ),
     );
+  }
+
+  void _startEditing() {
+    setState(() => _editing = true);
+    _updateUnsavedProfileFlag();
   }
 
   Future<void> _pickPhoto() async {
@@ -585,6 +1060,7 @@ class _PilotProfileCardState extends State<_PilotProfileCard> {
     final mimeType = _mimeTypeForName(pickedImage.name);
     setState(() {
       _photoDataUri = 'data:$mimeType;base64,${base64Encode(bytes)}';
+      _updateUnsavedProfileFlag();
     });
   }
 
@@ -609,6 +1085,7 @@ class _PilotProfileCardState extends State<_PilotProfileCard> {
       _insuranceDocumentName = file.name;
       _insuranceDocumentDataUri =
           'data:${_mimeTypeForName(file.name)};base64,${base64Encode(bytes)}';
+      _updateUnsavedProfileFlag();
     });
   }
 
@@ -620,13 +1097,14 @@ class _PilotProfileCardState extends State<_PilotProfileCard> {
       ..clear()
       ..addAll(
         (transmitters.isEmpty ? [''] : transmitters).map(
-          (transmitter) => TextEditingController(text: transmitter),
+          _profileController,
         ),
       );
   }
 
   void _addTransmitterField() {
-    setState(() => _transmitters.add(TextEditingController()));
+    setState(() => _transmitters.add(_profileController('')));
+    _updateUnsavedProfileFlag();
   }
 
   void _removeTransmitterField(int index) {
@@ -636,6 +1114,7 @@ class _PilotProfileCardState extends State<_PilotProfileCard> {
     final controller = _transmitters.removeAt(index);
     controller.dispose();
     setState(() {});
+    _updateUnsavedProfileFlag();
   }
 
   void _syncFlightAreaControllers(List<String> flightAreas) {
@@ -646,13 +1125,14 @@ class _PilotProfileCardState extends State<_PilotProfileCard> {
       ..clear()
       ..addAll(
         (flightAreas.isEmpty ? [''] : flightAreas).map(
-          (flightArea) => TextEditingController(text: flightArea),
+          _profileController,
         ),
       );
   }
 
   void _addFlightAreaField() {
-    setState(() => _flightAreas.add(TextEditingController()));
+    setState(() => _flightAreas.add(_profileController('')));
+    _updateUnsavedProfileFlag();
   }
 
   void _removeFlightAreaField(int index) {
@@ -662,6 +1142,7 @@ class _PilotProfileCardState extends State<_PilotProfileCard> {
     final controller = _flightAreas.removeAt(index);
     controller.dispose();
     setState(() {});
+    _updateUnsavedProfileFlag();
   }
 
   Future<void> _showPhotoOptions() async {
@@ -696,7 +1177,10 @@ class _PilotProfileCardState extends State<_PilotProfileCard> {
       await _pickPhoto();
     }
     if (action == _PhotoAction.remove) {
-      setState(() => _photoDataUri = null);
+      setState(() {
+        _photoDataUri = null;
+        _updateUnsavedProfileFlag();
+      });
     }
   }
 
@@ -705,33 +1189,71 @@ class _PilotProfileCardState extends State<_PilotProfileCard> {
       return;
     }
 
-    widget.onSave(
-      PilotProfile(
-        name: _name.text.trim(),
-        homeAirfield: _homeAirfield.text.trim(),
-        club: _club.text.trim(),
-        licenseNumber: _licenseNumber.text.trim(),
-        phone: _phone.text.trim(),
-        email: _email.text.trim(),
-        flightAreas: [
-          for (final controller in _flightAreas)
-            if (controller.text.trim().isNotEmpty) controller.text.trim(),
-        ],
-        transmitters: [
-          for (final controller in _transmitters)
-            if (controller.text.trim().isNotEmpty) controller.text.trim(),
-        ],
-        notes: _notes.text.trim(),
-        photoDataUri: _photoDataUri,
-        insuranceDocumentName: _insuranceDocumentName,
-        insuranceDocumentDataUri: _insuranceDocumentDataUri,
-      ),
-    );
+    final submittedProfile = _currentProfileFromFields();
+
+    _lastSubmittedProfile = submittedProfile;
+    _protectSubmittedProfileUntil =
+        DateTime.now().add(const Duration(seconds: 20));
+    widget.onSave(submittedProfile);
+    settingsProfileHasUnsavedChanges.value = false;
 
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(content: Text('Pilotprofil gespeichert.')),
     );
     setState(() => _editing = false);
+  }
+
+  bool _shouldKeepSubmittedProfile(PilotProfile incomingProfile) {
+    final submittedProfile = _lastSubmittedProfile;
+    final protectUntil = _protectSubmittedProfileUntil;
+    if (submittedProfile == null ||
+        protectUntil == null ||
+        DateTime.now().isAfter(protectUntil)) {
+      return false;
+    }
+
+    final incomingHasSubmittedText =
+        incomingProfile.name == submittedProfile.name &&
+            incomingProfile.homeAirfield == submittedProfile.homeAirfield &&
+            incomingProfile.club == submittedProfile.club &&
+            incomingProfile.licenseNumber == submittedProfile.licenseNumber &&
+            incomingProfile.phone == submittedProfile.phone &&
+            incomingProfile.email == submittedProfile.email &&
+            incomingProfile.notes == submittedProfile.notes &&
+            listEquals(
+              incomingProfile.flightAreas,
+              submittedProfile.flightAreas,
+            ) &&
+            listEquals(
+              incomingProfile.transmitters,
+              submittedProfile.transmitters,
+            );
+
+    final incomingPhoto = incomingProfile.photoSource;
+    final submittedPhoto = submittedProfile.photoSource;
+    final incomingLostSubmittedPhoto = submittedPhoto != null &&
+        submittedPhoto.isNotEmpty &&
+        (incomingPhoto == null || incomingPhoto.isEmpty);
+    final incomingRestoredRemovedPhoto =
+        (submittedPhoto == null || submittedPhoto.isEmpty) &&
+            incomingPhoto != null &&
+            incomingPhoto.isNotEmpty;
+
+    final incomingDocument = incomingProfile.insuranceDocumentSource;
+    final submittedDocument = submittedProfile.insuranceDocumentSource;
+    final incomingLostSubmittedDocument = submittedDocument != null &&
+        submittedDocument.isNotEmpty &&
+        (incomingDocument == null || incomingDocument.isEmpty);
+    final incomingRestoredRemovedDocument =
+        (submittedDocument == null || submittedDocument.isEmpty) &&
+            incomingDocument != null &&
+            incomingDocument.isNotEmpty;
+
+    return !incomingHasSubmittedText ||
+        incomingLostSubmittedPhoto ||
+        incomingRestoredRemovedPhoto ||
+        incomingLostSubmittedDocument ||
+        incomingRestoredRemovedDocument;
   }
 }
 
@@ -773,8 +1295,8 @@ class _PilotPhoto extends StatelessWidget {
                               size: 82,
                             ),
                           )
-                        : Image.memory(
-                            _bytesFromDataUri(photoDataUri!),
+                        : Image(
+                            image: mediaImageProvider(photoDataUri!),
                             fit: BoxFit.cover,
                           ),
                   ),
@@ -991,7 +1513,7 @@ class _InsuranceDocumentBox extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final hasDocument = fileName != null && fileName!.isNotEmpty;
-    final isImage = dataUri != null && dataUri!.startsWith('data:image/');
+    final isImage = dataUri != null && isImageMediaSource(dataUri!);
 
     return InkWell(
       borderRadius: BorderRadius.circular(8),
@@ -1070,8 +1592,8 @@ class _InsuranceDocumentBox extends StatelessWidget {
                     ),
                     child: ClipRRect(
                       borderRadius: BorderRadius.circular(7),
-                      child: Image.memory(
-                        _bytesFromDataUri(dataUri!),
+                      child: Image(
+                        image: mediaImageProvider(dataUri!),
                         fit: BoxFit.contain,
                         errorBuilder: (context, error, stackTrace) => Container(
                           height: 120,
@@ -1169,7 +1691,7 @@ class _StorageNote extends StatelessWidget {
           SizedBox(width: 10),
           Expanded(
             child: Text(
-              'Profil, Foto und Nachweis werden lokal im App-Zustand gespeichert.',
+              'Profil, Foto und Nachweis werden lokal gespeichert und bei aktivem Konto mit Firebase synchronisiert.',
               style: TextStyle(
                 color: Color(0xFF334155),
                 fontWeight: FontWeight.w800,
@@ -1182,25 +1704,64 @@ class _StorageNote extends StatelessWidget {
   }
 }
 
+({IconData icon, String value, bool canSync}) _cloudConnectionInfo(
+  FleetSyncStatus syncStatus,
+  String? userEmail,
+) {
+  final account = userEmail?.trim();
+  final hasAccount = account != null && account.isNotEmpty;
+
+  return switch (syncStatus) {
+    FleetSyncStatus.cloudActive => (
+        icon: Icons.cloud_done_rounded,
+        value: hasAccount ? 'Cloud aktiv\n$account' : 'Cloud aktiv',
+        canSync: true,
+      ),
+    FleetSyncStatus.syncing => (
+        icon: Icons.cloud_sync_rounded,
+        value: hasAccount ? 'Verbindung laeuft\n$account' : 'Verbindung laeuft',
+        canSync: false,
+      ),
+    FleetSyncStatus.cloudPaused => (
+        icon: Icons.cloud_off_rounded,
+        value: hasAccount ? 'Cloud pausiert\n$account' : 'Cloud pausiert',
+        canSync: true,
+      ),
+    FleetSyncStatus.localOnly => (
+        icon: Icons.storage_rounded,
+        value: hasAccount ? 'Nur lokal\n$account' : 'Nur lokal',
+        canSync: false,
+      ),
+  };
+}
+
 class _AppSettingsCard extends StatelessWidget {
   final AppSettings settings;
+  final FleetSyncStatus syncStatus;
+  final String? userEmail;
   final Future<void> Function() onCreateBackup;
   final Future<void> Function() onRestoreBackup;
   final ValueChanged<bool> onLocationSharingChanged;
   final ValueChanged<bool> onChatReachabilityChanged;
   final ValueChanged<AppSettings> onSettingsChanged;
+  final Future<void> Function() onSyncNow;
 
   const _AppSettingsCard({
     required this.settings,
+    required this.syncStatus,
+    required this.userEmail,
     required this.onCreateBackup,
     required this.onRestoreBackup,
     required this.onLocationSharingChanged,
     required this.onChatReachabilityChanged,
     required this.onSettingsChanged,
+    required this.onSyncNow,
   });
 
   @override
   Widget build(BuildContext context) {
+    final cloudConnection = _cloudConnectionInfo(syncStatus, userEmail);
+
     return Card(
       margin: EdgeInsets.zero,
       child: Padding(
@@ -1387,10 +1948,10 @@ class _AppSettingsCard extends StatelessWidget {
                   title: 'Synchronisation und Cloud',
                   icon: Icons.cloud_sync_rounded,
                   children: [
-                    const _AppSettingTile(
-                      icon: Icons.wifi_tethering_rounded,
+                    _AppSettingTile(
+                      icon: cloudConnection.icon,
                       title: 'Verbindung',
-                      value: 'Vorbereitet',
+                      value: cloudConnection.value,
                     ),
                     const _AppSettingTile(
                       icon: Icons.backup_table_rounded,
@@ -1405,9 +1966,10 @@ class _AppSettingsCard extends StatelessWidget {
                         settings.copyWith(wifiOnlySync: value),
                       ),
                     ),
-                    const _ButtonSettingTile(
+                    _ButtonSettingTile(
                       icon: Icons.sync_rounded,
                       label: 'Jetzt synchronisieren',
+                      onPressed: cloudConnection.canSync ? onSyncNow : null,
                     ),
                   ],
                 ),
@@ -1665,8 +2227,10 @@ class _WebcamSourcesEditorState extends State<_WebcamSourcesEditor> {
   @override
   void didUpdateWidget(covariant _WebcamSourcesEditor oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.webcams.join('|') != widget.webcams.join('|') ||
-        oldWidget.webcamUrls.join('|') != widget.webcamUrls.join('|')) {
+    final incomingNames = _sourceWebcamNames(widget.webcams);
+    final incomingUrls = _sourceWebcamUrls(incomingNames, widget.webcamUrls);
+    if (!listEquals(incomingNames, _currentWebcamNames()) ||
+        !listEquals(incomingUrls, _currentWebcamUrls())) {
       for (final controller in _controllers) {
         controller.dispose();
       }
@@ -1690,7 +2254,7 @@ class _WebcamSourcesEditorState extends State<_WebcamSourcesEditor> {
   }
 
   List<TextEditingController> _buildControllers(List<String> values) {
-    final source = values.isEmpty ? defaultWebcams : values;
+    final source = _sourceWebcamNames(values);
     return [for (final value in source) TextEditingController(text: value)];
   }
 
@@ -1698,10 +2262,11 @@ class _WebcamSourcesEditorState extends State<_WebcamSourcesEditor> {
     List<String> webcams,
     List<String> urls,
   ) {
-    final source = webcams.isEmpty ? defaultWebcams : webcams;
+    final source = _sourceWebcamNames(webcams);
+    final sourceUrls = _sourceWebcamUrls(source, urls);
     return [
       for (var index = 0; index < source.length; index++)
-        TextEditingController(text: index < urls.length ? urls[index] : ''),
+        TextEditingController(text: sourceUrls[index]),
     ];
   }
 
@@ -1719,6 +2284,44 @@ class _WebcamSourcesEditorState extends State<_WebcamSourcesEditor> {
           : '');
     }
     widget.onChanged(names.isEmpty ? ['Webcam'] : names, urls);
+  }
+
+  List<String> _sourceWebcamNames(List<String> values) {
+    final names = [
+      for (final value in values)
+        if (value.trim().isNotEmpty) value.trim(),
+    ];
+    return names.isEmpty ? defaultWebcams : names;
+  }
+
+  List<String> _sourceWebcamUrls(List<String> names, List<String> urls) {
+    return [
+      for (var index = 0; index < names.length; index++)
+        index < urls.length ? urls[index].trim() : '',
+    ];
+  }
+
+  List<String> _currentWebcamNames() {
+    final names = [
+      for (final controller in _controllers)
+        if (controller.text.trim().isNotEmpty) controller.text.trim(),
+    ];
+    return names.isEmpty ? ['Webcam'] : names;
+  }
+
+  List<String> _currentWebcamUrls() {
+    final urls = <String>[];
+    var hasName = false;
+    for (var index = 0; index < _controllers.length; index++) {
+      if (_controllers[index].text.trim().isEmpty) {
+        continue;
+      }
+      hasName = true;
+      urls.add(index < _urlControllers.length
+          ? _urlControllers[index].text.trim()
+          : '');
+    }
+    return hasName ? urls : [''];
   }
 
   Future<void> _editUrl(int index) async {
@@ -2543,13 +3146,6 @@ Future<void> _showContactDialog(BuildContext context) async {
       );
     },
   );
-}
-
-Uint8List _bytesFromDataUri(String dataUri) {
-  final commaIndex = dataUri.indexOf(',');
-  final encoded =
-      commaIndex == -1 ? dataUri : dataUri.substring(commaIndex + 1);
-  return base64Decode(encoded);
 }
 
 String _mimeTypeForName(String fileName) {

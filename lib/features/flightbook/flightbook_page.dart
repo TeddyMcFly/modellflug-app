@@ -1,6 +1,3 @@
-import 'dart:convert';
-import 'dart:typed_data';
-
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
@@ -9,6 +6,7 @@ import 'package:uuid/uuid.dart';
 import '../../core/widgets/app_scaffold.dart';
 import '../../shared/models/aircraft_model.dart';
 import '../../shared/providers/fleet_provider.dart';
+import '../../shared/utils/media_source.dart';
 
 class FlightbookPage extends ConsumerWidget {
   const FlightbookPage({super.key});
@@ -389,11 +387,9 @@ class _AircraftModelCell extends StatelessWidget {
                       size: 32,
                     ),
                   )
-                : Image.memory(
-                    _bytesFromDataUri(photo),
+                : Image(
+                    image: mediaImageProvider(photo),
                     fit: BoxFit.cover,
-                    cacheWidth: 60,
-                    cacheHeight: 60,
                     filterQuality: FilterQuality.none,
                     errorBuilder: (context, error, stackTrace) => Container(
                       color: const Color(0xFFE2E8F0),
@@ -733,13 +729,6 @@ IconData _categoryIcon(String category) {
     return Icons.paragliding_rounded;
   }
   return Icons.airplanemode_active_rounded;
-}
-
-Uint8List _bytesFromDataUri(String dataUri) {
-  final commaIndex = dataUri.indexOf(',');
-  final encoded =
-      commaIndex == -1 ? dataUri : dataUri.substring(commaIndex + 1);
-  return base64Decode(encoded);
 }
 
 double _totalFlightHours(List<FlightLogEntry> flights) {

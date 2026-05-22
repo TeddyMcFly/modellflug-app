@@ -1,6 +1,3 @@
-import 'dart:convert';
-import 'dart:typed_data';
-
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -10,6 +7,7 @@ import '../../core/widgets/app_scaffold.dart';
 import '../../shared/models/aircraft_model.dart';
 import '../../shared/providers/fleet_provider.dart';
 import '../../shared/services/open_meteo_service.dart';
+import '../../shared/utils/media_source.dart';
 import '../webcam/webcam_page.dart';
 
 const _dashboardHeadingStyle = TextStyle(
@@ -260,8 +258,8 @@ class _AircraftPhotoTile extends StatelessWidget {
                             size: 32,
                           ),
                         )
-                      : Image.memory(
-                          _bytesFromDataUri(photo),
+                      : Image(
+                          image: mediaImageProvider(photo),
                           fit: BoxFit.cover,
                           errorBuilder: (context, error, stackTrace) =>
                               Container(
@@ -349,8 +347,8 @@ class _LastFlightCard extends StatelessWidget {
                                   size: 44,
                                 ),
                               )
-                            : Image.memory(
-                                _bytesFromDataUri(photo),
+                            : Image(
+                                image: mediaImageProvider(photo),
                                 fit: BoxFit.cover,
                                 errorBuilder: (context, error, stackTrace) =>
                                     Container(
@@ -838,8 +836,8 @@ class _RepairInfoRow extends StatelessWidget {
                       color: Color(0xFF0A84FF),
                     ),
                   )
-                : Image.memory(
-                    _bytesFromDataUri(photo),
+                : Image(
+                    image: mediaImageProvider(photo),
                     fit: BoxFit.cover,
                     gaplessPlayback: true,
                   ),
@@ -1380,8 +1378,8 @@ class _DashboardAircraftCell extends StatelessWidget {
                         size: 18,
                       ),
                     )
-                  : Image.memory(
-                      _bytesFromDataUri(photo),
+                  : Image(
+                      image: mediaImageProvider(photo),
                       fit: BoxFit.cover,
                       errorBuilder: (context, error, stackTrace) => Container(
                         color: const Color(0xFFE2E8F0),
@@ -1447,11 +1445,4 @@ Color _statusColor(AircraftStatus status) {
     AircraftStatus.maintenance => const Color(0xFFEA580C),
     AircraftStatus.destroyed => const Color(0xFFDC2626),
   };
-}
-
-Uint8List _bytesFromDataUri(String dataUri) {
-  final commaIndex = dataUri.indexOf(',');
-  final encoded =
-      commaIndex == -1 ? dataUri : dataUri.substring(commaIndex + 1);
-  return base64Decode(encoded);
 }

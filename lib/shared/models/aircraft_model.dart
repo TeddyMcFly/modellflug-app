@@ -4,6 +4,8 @@ enum AircraftStatus {
   destroyed,
 }
 
+const _unset = Object();
+
 const aircraftCategoryOptions = [
   'Drohne',
   'Hubschrauber',
@@ -125,6 +127,8 @@ class AircraftModel {
   final String repairNotes;
   final String? photoDataUri;
   final List<String> photoDataUris;
+  final List<String> photoStoragePaths;
+  final List<String> photoDownloadUrls;
 
   const AircraftModel({
     required this.id,
@@ -157,9 +161,14 @@ class AircraftModel {
     this.repairNotes = '',
     this.photoDataUri,
     this.photoDataUris = const [],
+    this.photoStoragePaths = const [],
+    this.photoDownloadUrls = const [],
   });
 
   List<String> get photos {
+    if (photoDownloadUrls.isNotEmpty) {
+      return photoDownloadUrls;
+    }
     if (photoDataUris.isNotEmpty) {
       return photoDataUris;
     }
@@ -205,8 +214,10 @@ class AircraftModel {
     DateTime? nextService,
     String? notes,
     String? repairNotes,
-    String? photoDataUri,
+    Object? photoDataUri = _unset,
     List<String>? photoDataUris,
+    List<String>? photoStoragePaths,
+    List<String>? photoDownloadUrls,
   }) {
     return AircraftModel(
       id: id ?? this.id,
@@ -239,8 +250,12 @@ class AircraftModel {
       nextService: nextService ?? this.nextService,
       notes: notes ?? this.notes,
       repairNotes: repairNotes ?? this.repairNotes,
-      photoDataUri: photoDataUri ?? this.photoDataUri,
+      photoDataUri: identical(photoDataUri, _unset)
+          ? this.photoDataUri
+          : photoDataUri as String?,
       photoDataUris: photoDataUris ?? this.photoDataUris,
+      photoStoragePaths: photoStoragePaths ?? this.photoStoragePaths,
+      photoDownloadUrls: photoDownloadUrls ?? this.photoDownloadUrls,
     );
   }
 
@@ -286,6 +301,14 @@ class AircraftModel {
         for (final item in json['photoDataUris'] as List<dynamic>? ?? [])
           item as String,
       ],
+      photoStoragePaths: [
+        for (final item in json['photoStoragePaths'] as List<dynamic>? ?? [])
+          item as String,
+      ],
+      photoDownloadUrls: [
+        for (final item in json['photoDownloadUrls'] as List<dynamic>? ?? [])
+          item as String,
+      ],
     );
   }
 
@@ -321,6 +344,8 @@ class AircraftModel {
       'repairNotes': repairNotes,
       'photoDataUri': photoDataUri,
       'photoDataUris': photoDataUris,
+      'photoStoragePaths': photoStoragePaths,
+      'photoDownloadUrls': photoDownloadUrls,
     };
   }
 }
@@ -417,8 +442,12 @@ class PilotProfile {
   final List<String> transmitters;
   final String notes;
   final String? photoDataUri;
+  final String? photoStoragePath;
+  final String? photoDownloadUrl;
   final String? insuranceDocumentName;
   final String? insuranceDocumentDataUri;
+  final String? insuranceDocumentStoragePath;
+  final String? insuranceDocumentDownloadUrl;
 
   const PilotProfile({
     required this.name,
@@ -431,9 +460,18 @@ class PilotProfile {
     this.transmitters = const [],
     required this.notes,
     this.photoDataUri,
+    this.photoStoragePath,
+    this.photoDownloadUrl,
     this.insuranceDocumentName,
     this.insuranceDocumentDataUri,
+    this.insuranceDocumentStoragePath,
+    this.insuranceDocumentDownloadUrl,
   });
+
+  String? get photoSource => photoDownloadUrl ?? photoDataUri;
+
+  String? get insuranceDocumentSource =>
+      insuranceDocumentDownloadUrl ?? insuranceDocumentDataUri;
 
   PilotProfile copyWith({
     String? name,
@@ -445,9 +483,13 @@ class PilotProfile {
     String? email,
     List<String>? transmitters,
     String? notes,
-    String? photoDataUri,
-    String? insuranceDocumentName,
-    String? insuranceDocumentDataUri,
+    Object? photoDataUri = _unset,
+    Object? photoStoragePath = _unset,
+    Object? photoDownloadUrl = _unset,
+    Object? insuranceDocumentName = _unset,
+    Object? insuranceDocumentDataUri = _unset,
+    Object? insuranceDocumentStoragePath = _unset,
+    Object? insuranceDocumentDownloadUrl = _unset,
   }) {
     return PilotProfile(
       name: name ?? this.name,
@@ -459,11 +501,29 @@ class PilotProfile {
       email: email ?? this.email,
       transmitters: transmitters ?? this.transmitters,
       notes: notes ?? this.notes,
-      photoDataUri: photoDataUri ?? this.photoDataUri,
-      insuranceDocumentName:
-          insuranceDocumentName ?? this.insuranceDocumentName,
-      insuranceDocumentDataUri:
-          insuranceDocumentDataUri ?? this.insuranceDocumentDataUri,
+      photoDataUri: identical(photoDataUri, _unset)
+          ? this.photoDataUri
+          : photoDataUri as String?,
+      photoStoragePath: identical(photoStoragePath, _unset)
+          ? this.photoStoragePath
+          : photoStoragePath as String?,
+      photoDownloadUrl: identical(photoDownloadUrl, _unset)
+          ? this.photoDownloadUrl
+          : photoDownloadUrl as String?,
+      insuranceDocumentName: identical(insuranceDocumentName, _unset)
+          ? this.insuranceDocumentName
+          : insuranceDocumentName as String?,
+      insuranceDocumentDataUri: identical(insuranceDocumentDataUri, _unset)
+          ? this.insuranceDocumentDataUri
+          : insuranceDocumentDataUri as String?,
+      insuranceDocumentStoragePath:
+          identical(insuranceDocumentStoragePath, _unset)
+              ? this.insuranceDocumentStoragePath
+              : insuranceDocumentStoragePath as String?,
+      insuranceDocumentDownloadUrl:
+          identical(insuranceDocumentDownloadUrl, _unset)
+              ? this.insuranceDocumentDownloadUrl
+              : insuranceDocumentDownloadUrl as String?,
     );
   }
 
@@ -486,8 +546,14 @@ class PilotProfile {
       notes: json['notes'] as String? ??
           'Modellpilot mit Fokus auf Segelflugzeuge und Kunstflug.',
       photoDataUri: json['photoDataUri'] as String?,
+      photoStoragePath: json['photoStoragePath'] as String?,
+      photoDownloadUrl: json['photoDownloadUrl'] as String?,
       insuranceDocumentName: json['insuranceDocumentName'] as String?,
       insuranceDocumentDataUri: json['insuranceDocumentDataUri'] as String?,
+      insuranceDocumentStoragePath:
+          json['insuranceDocumentStoragePath'] as String?,
+      insuranceDocumentDownloadUrl:
+          json['insuranceDocumentDownloadUrl'] as String?,
     );
   }
 
@@ -503,8 +569,12 @@ class PilotProfile {
       'transmitters': transmitters,
       'notes': notes,
       'photoDataUri': photoDataUri,
+      'photoStoragePath': photoStoragePath,
+      'photoDownloadUrl': photoDownloadUrl,
       'insuranceDocumentName': insuranceDocumentName,
       'insuranceDocumentDataUri': insuranceDocumentDataUri,
+      'insuranceDocumentStoragePath': insuranceDocumentStoragePath,
+      'insuranceDocumentDownloadUrl': insuranceDocumentDownloadUrl,
     };
   }
 }

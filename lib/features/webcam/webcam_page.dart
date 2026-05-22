@@ -1,12 +1,18 @@
+import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:video_player/video_player.dart';
 
 import '../../core/widgets/app_scaffold.dart';
 import '../../shared/models/aircraft_model.dart';
 import '../../shared/providers/fleet_provider.dart';
 import '../../shared/services/open_meteo_service.dart';
+import 'webcam_embed_view.dart';
+
+const _lmfcWebcamImageUrl =
+    'https://www.lmfc.de/fileadmin/Modellflug/cam/bilder/webcam.jpg';
 
 class WebcamPage extends ConsumerStatefulWidget {
   const WebcamPage({super.key});
@@ -20,6 +26,8 @@ class WebcamPage extends ConsumerStatefulWidget {
 class _WebcamPageState extends ConsumerState<WebcamPage> {
   late String _selectedWebcam = defaultWebcams.first;
   late String _selectedForecastLocation = 'Flugplatz';
+  Timer? _weatherRefreshTimer;
+  int _cameraRefreshSerial = 0;
 
   List<String> _forecastLocations(FleetState fleet) {
     final locations = <String>[
@@ -29,6 +37,15 @@ class _WebcamPageState extends ConsumerState<WebcamPage> {
     ];
     final unique = locations.toSet().toList();
     return unique.isEmpty ? ['Flugplatz'] : unique;
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _weatherRefreshTimer = Timer.periodic(
+      const Duration(minutes: 20),
+      (_) => _refreshWeather(),
+    );
   }
 
   @override
@@ -45,9 +62,45 @@ class _WebcamPageState extends ConsumerState<WebcamPage> {
   }
 
   @override
+  void dispose() {
+    _weatherRefreshTimer?.cancel();
+    super.dispose();
+  }
+
+  void _refreshWeather() {
+    if (!mounted) {
+      return;
+    }
+
+    setState(() => _cameraRefreshSerial++);
+
+    final settings = ref.read(fleetProvider).appSettings;
+    final webcamQuery = WeatherQuery(
+      location: _selectedWebcam,
+      timeZone: settings.timeZone,
+    );
+    final forecastQuery = WeatherQuery(
+      location: _selectedForecastLocation,
+      timeZone: settings.timeZone,
+    );
+    final weatherService = OpenMeteoService.instance;
+
+    weatherService.clearForecastCache(webcamQuery);
+    weatherService.clearPressureTrendCache(webcamQuery);
+    weatherService.clearForecastCache(forecastQuery);
+    weatherService.clearWeeklyForecastCache(forecastQuery);
+
+    ref.invalidate(weatherForecastProvider(webcamQuery));
+    ref.invalidate(pressureTrendProvider(webcamQuery));
+    ref.invalidate(weatherForecastProvider(forecastQuery));
+    ref.invalidate(weeklyWeatherForecastProvider(forecastQuery));
+  }
+
+  @override
   Widget build(BuildContext context) {
     final fleet = ref.watch(fleetProvider);
-    final webcams = fleet.appSettings.webcams;
+    final settings = fleet.appSettings;
+    final webcams = settings.webcams;
     final availableWebcams = webcams.isEmpty ? defaultWebcams : webcams;
     final forecastLocations = _forecastLocations(fleet);
     if (!availableWebcams.contains(_selectedWebcam)) {
@@ -61,8 +114,9 @@ class _WebcamPageState extends ConsumerState<WebcamPage> {
       title: 'Webcams',
       subtitle:
           'Platzkameras, Wetterhinweise und Sichtbedingungen fuer den Flugtag.',
+      headerWeatherLocation: _selectedForecastLocation,
       action: FilledButton.icon(
-        onPressed: () {},
+        onPressed: _refreshWeather,
         icon: const Icon(Icons.refresh_rounded),
         label: const Text('Aktualisieren'),
       ),
@@ -80,7 +134,11 @@ class _WebcamPageState extends ConsumerState<WebcamPage> {
               },
             ),
             const SizedBox(height: 12),
-            _CameraPreview(title: _selectedWebcam),
+            _CameraPreview(
+              title: _selectedWebcam,
+              sourceUrl: _webcamUrlFor(settings, _selectedWebcam),
+              refreshSerial: _cameraRefreshSerial,
+            ),
             const SizedBox(height: 12),
             _AirfieldWeatherCard(webcam: _selectedWebcam),
             const SizedBox(height: 12),
@@ -115,63 +173,261 @@ class _WebcamChooser extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Align(
-      alignment: Alignment.centerLeft,
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 300),
-        child: DropdownButtonFormField<String>(
-          initialValue:
-              webcams.contains(selectedWebcam) ? selectedWebcam : webcams.first,
-          isExpanded: true,
-          style: const TextStyle(
-            color: Color(0xFF334155),
-            fontSize: 12,
-            fontWeight: FontWeight.w600,
-          ),
-          decoration: const InputDecoration(
-            labelText: 'Webcam',
-            labelStyle: TextStyle(fontSize: 11, fontWeight: FontWeight.w600),
-            isDense: true,
-            contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 7),
-            prefixIcon: Icon(Icons.videocam_rounded, size: 18),
-            prefixIconConstraints: BoxConstraints(minWidth: 34),
-          ),
-          items: [
-            for (final webcam in webcams)
-              DropdownMenuItem(
-                value: webcam,
-                child: Text(
-                  webcam,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.videocam_rounded, color: Color(0xFF0A84FF), size: 18),
+            SizedBox(width: 6),
+            Text(
+              'Webcam',
+              style: TextStyle(
+                color: Color(0xFF334155),
+                fontSize: 12,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        LayoutBuilder(
+          builder: (context, constraints) {
+            final buttonWidth =
+                constraints.maxWidth < 220 ? constraints.maxWidth : 220.0;
+            return Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                for (var index = 0; index < webcams.length; index++)
+                  SizedBox(
+                    width: buttonWidth,
+                    child: _WebcamChoiceButton(
+                      number: index + 1,
+                      name: webcams[index],
+                      selected: webcams[index] == selectedWebcam,
+                      onTap: () => onChanged(webcams[index]),
+                    ),
+                  ),
+              ],
+            );
+          },
+        ),
+      ],
+    );
+  }
+}
+
+class _WebcamChoiceButton extends StatelessWidget {
+  final int number;
+  final String name;
+  final bool selected;
+  final VoidCallback onTap;
+
+  const _WebcamChoiceButton({
+    required this.number,
+    required this.name,
+    required this.selected,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final borderColor =
+        selected ? const Color(0xFF0A84FF) : const Color(0xFFE2E8F0);
+    final backgroundColor =
+        selected ? const Color(0xFFEAF3FF) : const Color(0xFFFFFFFF);
+    final foregroundColor =
+        selected ? const Color(0xFF06172E) : const Color(0xFF475569);
+
+    return Semantics(
+      button: true,
+      selected: selected,
+      label: 'Webcam $number, $name',
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(8),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 160),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            decoration: BoxDecoration(
+              color: backgroundColor,
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: borderColor),
+            ),
+            child: Row(
+              children: [
+                Icon(
+                  selected
+                      ? Icons.check_circle_rounded
+                      : Icons.radio_button_unchecked_rounded,
+                  color: selected
+                      ? const Color(0xFF0A84FF)
+                      : const Color(0xFF94A3B8),
+                  size: 18,
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        'Webcam $number',
+                        style: TextStyle(
+                          color: foregroundColor,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        name,
+                        overflow: TextOverflow.ellipsis,
+                        softWrap: false,
+                        style: const TextStyle(
+                          color: Color(0xFF64748B),
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ],
                   ),
                 ),
-              ),
-          ],
-          onChanged: onChanged,
+              ],
+            ),
+          ),
         ),
       ),
     );
   }
 }
 
+String? _webcamUrlFor(AppSettings settings, String webcam) {
+  final webcamNames =
+      settings.webcams.isEmpty ? defaultWebcams : settings.webcams;
+  final index = webcamNames.indexOf(webcam);
+  if (index == -1 || index >= settings.webcamUrls.length) {
+    return null;
+  }
+
+  final url = settings.webcamUrls[index].trim();
+  return url.isEmpty ? null : url;
+}
+
+String? _normalizedWebcamUrl(String? value) {
+  final url = value?.trim() ?? '';
+  if (url.isEmpty) {
+    return null;
+  }
+
+  final lower = url.toLowerCase();
+  if (lower.startsWith('http://') || lower.startsWith('https://')) {
+    return url;
+  }
+
+  return 'https://$url';
+}
+
+String _displayWebcamUrl(String url) {
+  final uri = Uri.tryParse(url);
+  if (uri == null || !uri.hasScheme) {
+    return url;
+  }
+
+  final host = uri.host.toLowerCase();
+  final path = uri.path.toLowerCase().replaceFirst(RegExp(r'/$'), '');
+  final isLmfcWebcamPage = (host == 'lmfc.de' || host == 'www.lmfc.de') &&
+      (path.isEmpty || path == '/webcam');
+
+  if (isLmfcWebcamPage) {
+    return _lmfcWebcamImageUrl;
+  }
+
+  return url;
+}
+
+bool _isDirectImageFeed(String url) {
+  final lower = url.toLowerCase();
+  return lower.contains('.jpg') ||
+      lower.contains('.jpeg') ||
+      lower.contains('.png') ||
+      lower.contains('.webp') ||
+      lower.contains('.gif') ||
+      lower.contains('.mjpg') ||
+      lower.contains('.mjpeg') ||
+      lower.contains('snapshot') ||
+      lower.contains('image');
+}
+
+bool _isDirectVideoFeed(String url) {
+  final lower = url.toLowerCase();
+  return lower.contains('.m3u8') ||
+      lower.contains('.mp4') ||
+      lower.contains('.webm') ||
+      lower.contains('.mov');
+}
+
+String _urlWithRefreshToken(String url, int refreshSerial) {
+  if (refreshSerial == 0) {
+    return url;
+  }
+
+  final uri = Uri.tryParse(url);
+  if (uri == null || !uri.hasScheme) {
+    return url;
+  }
+
+  final query = Map<String, String>.from(uri.queryParameters);
+  query['_modellflug_refresh'] = '$refreshSerial';
+  return uri.replace(queryParameters: query).toString();
+}
+
 class _CameraPreview extends StatelessWidget {
   final String title;
+  final String? sourceUrl;
+  final int refreshSerial;
 
-  const _CameraPreview({required this.title});
+  const _CameraPreview({
+    required this.title,
+    required this.sourceUrl,
+    required this.refreshSerial,
+  });
 
   @override
   Widget build(BuildContext context) {
+    final settingsUrl = _normalizedWebcamUrl(sourceUrl);
+    final displayUrl =
+        settingsUrl == null ? null : _displayWebcamUrl(settingsUrl);
+    final hasUrl = displayUrl != null;
+    final isDirectImage = displayUrl != null && _isDirectImageFeed(displayUrl);
+    final previewAspectRatio = isDirectImage ? 4 / 3 : 8 / 5;
+    final statusText =
+        hasUrl ? 'Quelle aus Einstellungen' : 'Keine Webadresse hinterlegt';
+
     return Card(
       clipBehavior: Clip.antiAlias,
       child: AspectRatio(
-        aspectRatio: 8 / 5,
+        aspectRatio: previewAspectRatio,
         child: Stack(
           fit: StackFit.expand,
           children: [
-            Image.asset(WebcamPage.livePlaceholderAsset, fit: BoxFit.cover),
+            if (displayUrl == null)
+              const _CameraFeedStatus(
+                icon: Icons.link_off_rounded,
+                message: 'Keine Webadresse hinterlegt',
+              )
+            else if (_isDirectVideoFeed(displayUrl))
+              _VideoCameraFeed(url: displayUrl)
+            else if (_isDirectImageFeed(displayUrl))
+              _NetworkCameraImage(
+                url: _urlWithRefreshToken(displayUrl, refreshSerial),
+              )
+            else
+              WebcamEmbedView(url: displayUrl),
             Container(
               decoration: BoxDecoration(
                 gradient: LinearGradient(
@@ -189,30 +445,258 @@ class _CameraPreview extends StatelessWidget {
               top: 18,
               child: _LiveBadge(),
             ),
-            Positioned(
-              left: 22,
-              bottom: 22,
-              right: 22,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    title,
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 24,
-                      fontWeight: FontWeight.w900,
+            if (isDirectImage)
+              Positioned(
+                left: 18,
+                top: 68,
+                child: _CameraTitleBadge(
+                  title: title,
+                  statusText: statusText,
+                ),
+              )
+            else
+              Positioned(
+                left: 22,
+                bottom: 22,
+                right: 22,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 24,
+                        fontWeight: FontWeight.w900,
+                      ),
                     ),
-                  ),
-                  const SizedBox(height: 4),
-                  const Text(
-                    'Letztes Bild vor 18 Sekunden',
-                    style: TextStyle(
-                      color: Color(0xFFE2E8F0),
-                      fontWeight: FontWeight.w700,
+                    const SizedBox(height: 4),
+                    Text(
+                      statusText,
+                      style: const TextStyle(
+                        color: Color(0xFFE2E8F0),
+                        fontWeight: FontWeight.w700,
+                      ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _CameraTitleBadge extends StatelessWidget {
+  final String title;
+  final String statusText;
+
+  const _CameraTitleBadge({
+    required this.title,
+    required this.statusText,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: Colors.black.withValues(alpha: 0.48),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              title,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 14,
+                fontWeight: FontWeight.w900,
+              ),
+            ),
+            const SizedBox(height: 2),
+            Text(
+              statusText,
+              style: const TextStyle(
+                color: Color(0xFFE2E8F0),
+                fontSize: 11,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _NetworkCameraImage extends StatelessWidget {
+  final String url;
+
+  const _NetworkCameraImage({required this.url});
+
+  @override
+  Widget build(BuildContext context) {
+    return ColoredBox(
+      color: const Color(0xFF0F172A),
+      child: Image(
+        image: NetworkImage(
+          url,
+          webHtmlElementStrategy: WebHtmlElementStrategy.prefer,
+        ),
+        fit: BoxFit.contain,
+        loadingBuilder: (context, child, progress) {
+          if (progress == null) {
+            return child;
+          }
+          return const _CameraFeedStatus(
+            icon: Icons.sync_rounded,
+            message: 'Webcam wird geladen',
+          );
+        },
+        errorBuilder: (context, error, stackTrace) {
+          return const _CameraFeedStatus(
+            icon: Icons.broken_image_rounded,
+            message: 'Webcam-Bild konnte nicht geladen werden',
+          );
+        },
+      ),
+    );
+  }
+}
+
+class _VideoCameraFeed extends StatefulWidget {
+  final String url;
+
+  const _VideoCameraFeed({required this.url});
+
+  @override
+  State<_VideoCameraFeed> createState() => _VideoCameraFeedState();
+}
+
+class _VideoCameraFeedState extends State<_VideoCameraFeed> {
+  VideoPlayerController? _controller;
+  Object? _error;
+  int _loadGeneration = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadVideo();
+  }
+
+  @override
+  void didUpdateWidget(covariant _VideoCameraFeed oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.url != widget.url) {
+      _loadVideo();
+    }
+  }
+
+  @override
+  void dispose() {
+    _loadGeneration++;
+    _controller?.dispose();
+    super.dispose();
+  }
+
+  Future<void> _loadVideo() async {
+    final loadGeneration = ++_loadGeneration;
+    final previousController = _controller;
+    _controller = null;
+    setState(() => _error = null);
+    await previousController?.dispose();
+
+    final uri = Uri.tryParse(widget.url);
+    if (uri == null || !uri.hasScheme) {
+      if (!mounted || loadGeneration != _loadGeneration) {
+        return;
+      }
+      setState(() => _error = const FormatException('Invalid webcam URL'));
+      return;
+    }
+
+    late final VideoPlayerController nextController;
+    try {
+      nextController = VideoPlayerController.networkUrl(uri);
+      await nextController.initialize();
+      await nextController.setLooping(true);
+      await nextController.setVolume(0);
+      await nextController.play();
+      if (!mounted || loadGeneration != _loadGeneration) {
+        await nextController.dispose();
+        return;
+      }
+      setState(() => _controller = nextController);
+    } on Object catch (error) {
+      try {
+        await nextController.dispose();
+      } catch (_) {
+        // If creating the controller failed, there is nothing useful to clean up.
+      }
+      if (!mounted || loadGeneration != _loadGeneration) {
+        return;
+      }
+      setState(() => _error = error);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final controller = _controller;
+    if (_error != null) {
+      return const _CameraFeedStatus(
+        icon: Icons.videocam_off_rounded,
+        message: 'Webcam-Video konnte nicht geladen werden',
+      );
+    }
+    if (controller == null || !controller.value.isInitialized) {
+      return const _CameraFeedStatus(
+        icon: Icons.sync_rounded,
+        message: 'Webcam-Video wird geladen',
+      );
+    }
+
+    return FittedBox(
+      fit: BoxFit.cover,
+      child: SizedBox(
+        width: controller.value.size.width,
+        height: controller.value.size.height,
+        child: VideoPlayer(controller),
+      ),
+    );
+  }
+}
+
+class _CameraFeedStatus extends StatelessWidget {
+  final IconData icon;
+  final String message;
+
+  const _CameraFeedStatus({
+    required this.icon,
+    required this.message,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: const BoxDecoration(color: Color(0xFF0F172A)),
+      child: Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, color: Colors.white, size: 34),
+            const SizedBox(height: 10),
+            Text(
+              message,
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.w800,
               ),
             ),
           ],
@@ -265,6 +749,7 @@ class _AirfieldWeatherCard extends ConsumerWidget {
       data: (weather) => weather,
       orElse: () => fallbackWeather(webcam),
     );
+    final titlePrefix = weather.isLive ? 'Live-' : 'Fallback-';
 
     return Card(
       child: Padding(
@@ -272,9 +757,27 @@ class _AirfieldWeatherCard extends ConsumerWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              'Wetter am Platz - ${weather.location}${weather.isLive ? '' : ' (Fallback)'}',
-              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w900),
+            Wrap(
+              spacing: 10,
+              runSpacing: 3,
+              crossAxisAlignment: WrapCrossAlignment.end,
+              children: [
+                Text(
+                  '${titlePrefix}Wetter am Platz - ${weather.location}${weather.isLive ? '' : ' (Fallback)'}',
+                  style: const TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+                const Text(
+                  'Aktualisierung alle 20 Minuten',
+                  style: TextStyle(
+                    color: Color(0xFF64748B),
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ],
             ),
             const SizedBox(height: 12),
             LayoutBuilder(
