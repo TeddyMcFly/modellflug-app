@@ -176,11 +176,14 @@ class _MemberListState extends State<_MemberList> {
             final chats = chatLoadFailed
                 ? const <ChatSummary>[]
                 : chatSnapshot.data ?? const <ChatSummary>[];
-            final chatsByPeer = {
-              for (final chat in chats)
-                if (chat.peerUidFor(widget.currentUser.uid).isNotEmpty)
-                  chat.peerUidFor(widget.currentUser.uid): chat,
-            };
+            final chatsByPeer = _directChatsByPeer(chats);
+            final flightRoomChat = _flightRoomChatFrom(chats);
+            final privateGroupChats = _privateGroupChatsFrom(chats);
+            final reachableMembers = [
+              for (final member in members)
+                if (member.reachableByChat && member.visibleInMemberList)
+                  member,
+            ];
             final unreadCount = chats.fold<int>(
               0,
               (sum, chat) => sum + chat.unreadCountFor(widget.currentUser.uid),
@@ -215,6 +218,30 @@ class _MemberListState extends State<_MemberList> {
                   ),
                 ],
                 const SizedBox(height: 12),
+                _FlightRadioPanel(
+                  enabled: widget.currentUserReachable,
+                  reachableCount: reachableMembers.length + 1,
+                  chat: flightRoomChat,
+                  currentUid: widget.currentUser.uid,
+                  onOpen: () => _openFlightRoom(context, reachableMembers),
+                  onCreatePrivateGroup: reachableMembers.length >= 2
+                      ? () => _openCreatePrivateGroup(context, reachableMembers)
+                      : null,
+                ),
+                if (privateGroupChats.isNotEmpty) ...[
+                  const SizedBox(height: 12),
+                  _PrivateGroupsPanel(
+                    chats: privateGroupChats,
+                    currentUid: widget.currentUser.uid,
+                    members: members,
+                    onOpen: (chat) => _openExistingGroup(
+                      context,
+                      chat,
+                      members,
+                    ),
+                  ),
+                ],
+                const SizedBox(height: 12),
                 const _MemberSectionHeader(),
                 const SizedBox(height: 10),
                 if (members.isEmpty)
@@ -239,6 +266,30 @@ class _MemberListState extends State<_MemberList> {
     );
   }
 
+  Map<String, ChatSummary> _directChatsByPeer(List<ChatSummary> chats) {
+    return {
+      for (final chat in chats)
+        if (chat.isDirect && chat.peerUidFor(widget.currentUser.uid).isNotEmpty)
+          chat.peerUidFor(widget.currentUser.uid): chat,
+    };
+  }
+
+  ChatSummary? _flightRoomChatFrom(List<ChatSummary> chats) {
+    for (final chat in chats) {
+      if (chat.isFlightRoom) {
+        return chat;
+      }
+    }
+    return null;
+  }
+
+  List<ChatSummary> _privateGroupChatsFrom(List<ChatSummary> chats) {
+    return [
+      for (final chat in chats)
+        if (chat.isPrivateGroup) chat,
+    ];
+  }
+
   String _emptyMembersMessage(User currentUser) {
     final account = currentUser.email?.trim();
     final accountText =
@@ -249,7 +300,7 @@ class _MemberListState extends State<_MemberList> {
   void _openChat(BuildContext context, MemberProfile member) {
     showDialog<void>(
       context: context,
-      builder: (context) => _MemberChatDialog(
+      builder: (context) => _ChatRoomDialog.direct(
         service: widget.service,
         currentUser: widget.currentUser,
         currentDisplayName: widget.currentDisplayName,
@@ -259,14 +310,102 @@ class _MemberListState extends State<_MemberList> {
     );
   }
 
+  void _openFlightRoom(
+    BuildContext context,
+    List<MemberProfile> reachableMembers,
+  ) {
+    if (!widget.currentUserReachable) {
+      return;
+    }
+    showDialog<void>(
+      context: context,
+      builder: (context) => _ChatRoomDialog.flightRoom(
+        service: widget.service,
+        currentUser: widget.currentUser,
+        currentDisplayName: widget.currentDisplayName,
+        currentPhotoSource: widget.currentPhotoSource,
+        members: reachableMembers,
+      ),
+    );
+  }
+
+  Future<void> _openCreatePrivateGroup(
+    BuildContext context,
+    List<MemberProfile> reachableMembers,
+  ) async {
+    final draft = await showDialog<_GroupDraft>(
+      context: context,
+      builder: (context) => _CreateGroupDialog(members: reachableMembers),
+    );
+    if (draft == null || !mounted || !context.mounted) {
+      return;
+    }
+    showDialog<void>(
+      context: context,
+      builder: (context) => _ChatRoomDialog.group(
+        service: widget.service,
+        currentUser: widget.currentUser,
+        currentDisplayName: widget.currentDisplayName,
+        currentPhotoSource: widget.currentPhotoSource,
+        title: draft.title,
+        members: draft.members,
+      ),
+    );
+  }
+
+  void _openExistingGroup(
+    BuildContext context,
+    ChatSummary chat,
+    List<MemberProfile> members,
+  ) {
+    final peers = [
+      for (final uid in chat.participantIds)
+        if (uid != widget.currentUser.uid)
+          _memberForChatParticipant(uid, chat, members),
+    ];
+    showDialog<void>(
+      context: context,
+      builder: (context) => _ChatRoomDialog.group(
+        service: widget.service,
+        currentUser: widget.currentUser,
+        currentDisplayName: widget.currentDisplayName,
+        currentPhotoSource: widget.currentPhotoSource,
+        title: chat.titleFor(widget.currentUser.uid),
+        members: peers,
+      ),
+    );
+  }
+
+  MemberProfile _memberForChatParticipant(
+    String uid,
+    ChatSummary chat,
+    List<MemberProfile> members,
+  ) {
+    for (final member in members) {
+      if (member.uid == uid) {
+        return member;
+      }
+    }
+    return MemberProfile(
+      uid: uid,
+      active: true,
+      memberSchemaVersion: MemberChatService.memberSchemaVersion,
+      displayName: chat.participantNames[uid] ?? 'Mitglied',
+      email: chat.participantEmails[uid],
+      club: '',
+      reachableByChat: true,
+      shareLocation: false,
+      presenceStatus: 'offline',
+      photoSource: chat.participantPhotos[uid],
+      lastSeen: null,
+    );
+  }
+
   void _notifyAboutNewUnreadMessages(
     BuildContext context,
     List<ChatSummary> chats,
     List<MemberProfile> members,
   ) {
-    final memberNames = {
-      for (final member in members) member.uid: member.displayName,
-    };
     final unreadChats = [
       for (final chat in chats)
         if (chat.isUnreadFor(widget.currentUser.uid)) chat,
@@ -294,9 +433,7 @@ class _MemberListState extends State<_MemberList> {
       (chat) => newKeys.contains(_notificationKeyFor(chat)),
       orElse: () => unreadChats.first,
     );
-    final peerName =
-        memberNames[newestChat.peerUidFor(widget.currentUser.uid)] ??
-            'Mitglied';
+    final chatName = newestChat.titleFor(widget.currentUser.uid);
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) {
@@ -304,17 +441,31 @@ class _MemberListState extends State<_MemberList> {
       }
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Neue Nachricht von $peerName'),
+          content: Text('Neue Nachricht in $chatName'),
           action: SnackBarAction(
             label: 'Oeffnen',
             onPressed: () {
-              final peer = members.where(
-                (member) =>
-                    member.uid == newestChat.peerUidFor(widget.currentUser.uid),
-              );
-              if (peer.isNotEmpty) {
-                _openChat(context, peer.first);
+              if (newestChat.isFlightRoom) {
+                final reachableMembers = [
+                  for (final member in members)
+                    if (member.reachableByChat && member.visibleInMemberList)
+                      member,
+                ];
+                _openFlightRoom(context, reachableMembers);
+                return;
               }
+              if (newestChat.isDirect) {
+                final peer = members.where(
+                  (member) =>
+                      member.uid ==
+                      newestChat.peerUidFor(widget.currentUser.uid),
+                );
+                if (peer.isNotEmpty) {
+                  _openChat(context, peer.first);
+                }
+                return;
+              }
+              _openExistingGroup(context, newestChat, members);
             },
           ),
         ),
@@ -481,6 +632,460 @@ class _MemberStatCard extends StatelessWidget {
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+class _FlightRadioPanel extends StatelessWidget {
+  final bool enabled;
+  final int reachableCount;
+  final ChatSummary? chat;
+  final String currentUid;
+  final VoidCallback onOpen;
+  final VoidCallback? onCreatePrivateGroup;
+
+  const _FlightRadioPanel({
+    required this.enabled,
+    required this.reachableCount,
+    required this.chat,
+    required this.currentUid,
+    required this.onOpen,
+    required this.onCreatePrivateGroup,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final unreadCount = chat?.unreadCountFor(currentUid) ?? 0;
+    final lastMessage = chat?.lastMessageFor(currentUid) ?? '';
+    final lastTime = chat?.lastMessageAt ?? chat?.updatedAt;
+
+    return Card(
+      color: Colors.white,
+      surfaceTintColor: Colors.transparent,
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Wrap(
+          spacing: 14,
+          runSpacing: 14,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          alignment: WrapAlignment.spaceBetween,
+          children: [
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 460),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Stack(
+                    clipBehavior: Clip.none,
+                    children: [
+                      const CircleAvatar(
+                        radius: 26,
+                        backgroundColor: Color(0xFF0A84FF),
+                        child: Icon(
+                          Icons.forum_rounded,
+                          color: Colors.white,
+                          size: 27,
+                        ),
+                      ),
+                      if (unreadCount > 0)
+                        Positioned(
+                          right: -6,
+                          top: -8,
+                          child: _UnreadBadge(count: unreadCount),
+                        ),
+                    ],
+                  ),
+                  const SizedBox(width: 12),
+                  Flexible(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'Flugfunk-Raum',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            color: Color(0xFF06172E),
+                            fontSize: 17,
+                            fontWeight: FontWeight.w900,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          enabled
+                              ? '$reachableCount chatbereite Teilnehmer'
+                              : 'Chat ist ausgeschaltet',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: Color(0xFF64748B),
+                            fontSize: 12,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                        if (lastMessage.isNotEmpty) ...[
+                          const SizedBox(height: 6),
+                          Text(
+                            lastMessage,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              color: unreadCount > 0
+                                  ? const Color(0xFF06172E)
+                                  : const Color(0xFF475569),
+                              fontSize: 12,
+                              fontWeight: unreadCount > 0
+                                  ? FontWeight.w900
+                                  : FontWeight.w700,
+                            ),
+                          ),
+                          if (lastTime != null)
+                            Text(
+                              _dateTimeLabel(lastTime),
+                              style: const TextStyle(
+                                color: Color(0xFF94A3B8),
+                                fontSize: 10,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                        ],
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                FilledButton.icon(
+                  onPressed: enabled ? onOpen : null,
+                  icon: const Icon(Icons.forum_rounded),
+                  label: const Text('Oeffnen'),
+                ),
+                OutlinedButton.icon(
+                  onPressed: enabled ? onCreatePrivateGroup : null,
+                  icon: const Icon(Icons.group_add_rounded),
+                  label: const Text('Private Runde'),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _PrivateGroupsPanel extends StatelessWidget {
+  final List<ChatSummary> chats;
+  final String currentUid;
+  final List<MemberProfile> members;
+  final ValueChanged<ChatSummary> onOpen;
+
+  const _PrivateGroupsPanel({
+    required this.chats,
+    required this.currentUid,
+    required this.members,
+    required this.onOpen,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      color: Colors.white,
+      surfaceTintColor: Colors.transparent,
+      clipBehavior: Clip.antiAlias,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const _PrivateGroupsHeader(),
+          for (final chat in chats)
+            _PrivateGroupRow(
+              chat: chat,
+              currentUid: currentUid,
+              members: members,
+              onOpen: () => onOpen(chat),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _PrivateGroupsHeader extends StatelessWidget {
+  const _PrivateGroupsHeader();
+
+  @override
+  Widget build(BuildContext context) {
+    return const DecoratedBox(
+      decoration: BoxDecoration(color: Color(0xFFF1F5F9)),
+      child: Padding(
+        padding: EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+        child: Row(
+          children: [
+            Icon(Icons.groups_rounded, color: Color(0xFF0A84FF), size: 20),
+            SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                'Private Runden',
+                style: TextStyle(
+                  color: Color(0xFF06172E),
+                  fontSize: 14,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _PrivateGroupRow extends StatelessWidget {
+  final ChatSummary chat;
+  final String currentUid;
+  final List<MemberProfile> members;
+  final VoidCallback onOpen;
+
+  const _PrivateGroupRow({
+    required this.chat,
+    required this.currentUid,
+    required this.members,
+    required this.onOpen,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final unreadCount = chat.unreadCountFor(currentUid);
+    final lastMessage = chat.lastMessageFor(currentUid);
+    final lastTime = chat.lastMessageAt ?? chat.updatedAt;
+    final participantLabel = _participantLabel(chat, members, currentUid);
+
+    return DecoratedBox(
+      decoration: const BoxDecoration(
+        border: Border(top: BorderSide(color: Color(0xFFE2E8F0))),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        child: Row(
+          children: [
+            Stack(
+              clipBehavior: Clip.none,
+              children: [
+                const CircleAvatar(
+                  radius: 22,
+                  backgroundColor: Color(0xFFE8EDF3),
+                  child: Icon(
+                    Icons.groups_rounded,
+                    color: Color(0xFF0A84FF),
+                  ),
+                ),
+                if (unreadCount > 0)
+                  Positioned(
+                    right: -7,
+                    top: -9,
+                    child: _UnreadBadge(count: unreadCount),
+                  ),
+              ],
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    chat.titleFor(currentUid),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: Color(0xFF06172E),
+                      fontSize: 14,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    participantLabel,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: Color(0xFF64748B),
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  if (lastMessage.isNotEmpty) ...[
+                    const SizedBox(height: 4),
+                    Text(
+                      lastMessage,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: unreadCount > 0
+                            ? const Color(0xFF06172E)
+                            : const Color(0xFF475569),
+                        fontSize: 12,
+                        fontWeight:
+                            unreadCount > 0 ? FontWeight.w900 : FontWeight.w700,
+                      ),
+                    ),
+                    if (lastTime != null)
+                      Text(
+                        _dateTimeLabel(lastTime),
+                        style: const TextStyle(
+                          color: Color(0xFF94A3B8),
+                          fontSize: 10,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                  ],
+                ],
+              ),
+            ),
+            const SizedBox(width: 10),
+            IconButton.filledTonal(
+              tooltip: 'Private Runde oeffnen',
+              onPressed: onOpen,
+              icon: const Icon(Icons.open_in_new_rounded),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _GroupDraft {
+  final String title;
+  final List<MemberProfile> members;
+
+  const _GroupDraft({
+    required this.title,
+    required this.members,
+  });
+}
+
+class _CreateGroupDialog extends StatefulWidget {
+  final List<MemberProfile> members;
+
+  const _CreateGroupDialog({required this.members});
+
+  @override
+  State<_CreateGroupDialog> createState() => _CreateGroupDialogState();
+}
+
+class _CreateGroupDialogState extends State<_CreateGroupDialog> {
+  final _title = TextEditingController();
+  final Set<String> _selectedIds = {};
+
+  @override
+  void dispose() {
+    _title.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final canCreate = _selectedIds.length >= 2;
+
+    return AlertDialog(
+      backgroundColor: Colors.white,
+      surfaceTintColor: Colors.transparent,
+      title: const Text('Private Runde'),
+      content: SizedBox(
+        width: 420,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: _title,
+              decoration: const InputDecoration(
+                labelText: 'Name',
+                hintText: 'z.B. Sonntagsflieger',
+              ),
+            ),
+            const SizedBox(height: 12),
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxHeight: 320),
+              child: ListView(
+                shrinkWrap: true,
+                children: [
+                  for (final member in widget.members)
+                    CheckboxListTile(
+                      value: _selectedIds.contains(member.uid),
+                      onChanged: (value) {
+                        setState(() {
+                          if (value == true) {
+                            _selectedIds.add(member.uid);
+                          } else {
+                            _selectedIds.remove(member.uid);
+                          }
+                        });
+                      },
+                      secondary: CircleAvatar(
+                        backgroundColor: _avatarColorFor(member.uid),
+                        foregroundImage: maybeMediaImageProvider(
+                          _safeMemberPhotoSource(member.photoSource),
+                        ),
+                        child: Text(
+                          _initialsFor(member.displayName),
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w900,
+                          ),
+                        ),
+                      ),
+                      title: Text(
+                        member.displayName,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      subtitle: member.email == null || member.email!.isEmpty
+                          ? null
+                          : Text(
+                              member.email!,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                      controlAffinity: ListTileControlAffinity.leading,
+                    ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Abbrechen'),
+        ),
+        FilledButton.icon(
+          onPressed: canCreate ? _create : null,
+          icon: const Icon(Icons.group_add_rounded),
+          label: const Text('Starten'),
+        ),
+      ],
+    );
+  }
+
+  void _create() {
+    final members = [
+      for (final member in widget.members)
+        if (_selectedIds.contains(member.uid)) member,
+    ];
+    final title = _title.text.trim().isNotEmpty
+        ? _title.text.trim()
+        : _defaultPrivateGroupTitle(members);
+    Navigator.of(context).pop(
+      _GroupDraft(
+        title: title,
+        members: members,
       ),
     );
   }
@@ -899,12 +1504,13 @@ class _LastChatCell extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final chat = this.chat;
-    if (chat == null || chat.lastMessage.isEmpty) {
+    final visibleLastMessage = chat?.lastMessageFor(currentUid) ?? '';
+    if (chat == null || visibleLastMessage.isEmpty) {
       return const _MutedText('Noch kein Chat');
     }
 
     final own = chat.lastSenderId == currentUid;
-    final text = own ? 'Du: ${chat.lastMessage}' : chat.lastMessage;
+    final text = own ? 'Du: $visibleLastMessage' : visibleLastMessage;
     final time = chat.lastMessageAt ?? chat.updatedAt;
 
     return ConstrainedBox(
@@ -977,26 +1583,87 @@ class _UnreadBadge extends StatelessWidget {
   }
 }
 
-class _MemberChatDialog extends StatefulWidget {
+enum _ChatRoomKind { direct, flightRoom, group }
+
+class _ChatRoomDialog extends StatefulWidget {
   final MemberChatService service;
   final User currentUser;
   final String currentDisplayName;
   final String? currentPhotoSource;
-  final MemberProfile peer;
+  final _ChatRoomKind kind;
+  final String title;
+  final List<MemberProfile> members;
 
-  const _MemberChatDialog({
+  const _ChatRoomDialog._({
     required this.service,
     required this.currentUser,
     required this.currentDisplayName,
     required this.currentPhotoSource,
-    required this.peer,
+    required this.kind,
+    required this.title,
+    required this.members,
   });
 
+  factory _ChatRoomDialog.direct({
+    required MemberChatService service,
+    required User currentUser,
+    required String currentDisplayName,
+    required String? currentPhotoSource,
+    required MemberProfile peer,
+  }) {
+    return _ChatRoomDialog._(
+      service: service,
+      currentUser: currentUser,
+      currentDisplayName: currentDisplayName,
+      currentPhotoSource: currentPhotoSource,
+      kind: _ChatRoomKind.direct,
+      title: 'Chat mit ${peer.displayName}',
+      members: [peer],
+    );
+  }
+
+  factory _ChatRoomDialog.flightRoom({
+    required MemberChatService service,
+    required User currentUser,
+    required String currentDisplayName,
+    required String? currentPhotoSource,
+    required List<MemberProfile> members,
+  }) {
+    return _ChatRoomDialog._(
+      service: service,
+      currentUser: currentUser,
+      currentDisplayName: currentDisplayName,
+      currentPhotoSource: currentPhotoSource,
+      kind: _ChatRoomKind.flightRoom,
+      title: 'Flugfunk-Raum',
+      members: members,
+    );
+  }
+
+  factory _ChatRoomDialog.group({
+    required MemberChatService service,
+    required User currentUser,
+    required String currentDisplayName,
+    required String? currentPhotoSource,
+    required String title,
+    required List<MemberProfile> members,
+  }) {
+    return _ChatRoomDialog._(
+      service: service,
+      currentUser: currentUser,
+      currentDisplayName: currentDisplayName,
+      currentPhotoSource: currentPhotoSource,
+      kind: _ChatRoomKind.group,
+      title: title,
+      members: members,
+    );
+  }
+
   @override
-  State<_MemberChatDialog> createState() => _MemberChatDialogState();
+  State<_ChatRoomDialog> createState() => _ChatRoomDialogState();
 }
 
-class _MemberChatDialogState extends State<_MemberChatDialog> {
+class _ChatRoomDialogState extends State<_ChatRoomDialog> {
   final _message = TextEditingController();
   final _scrollController = ScrollController();
   late final Future<String> _chatIdFuture;
@@ -1007,13 +1674,7 @@ class _MemberChatDialogState extends State<_MemberChatDialog> {
   @override
   void initState() {
     super.initState();
-    _chatIdFuture = widget.service
-        .openChat(
-      currentUser: widget.currentUser,
-      currentDisplayName: widget.currentDisplayName,
-      peer: widget.peer,
-    )
-        .then((chatId) {
+    _chatIdFuture = _openRoom().then((chatId) {
       unawaited(
         widget.service.markChatRead(
           chatId: chatId,
@@ -1022,6 +1683,32 @@ class _MemberChatDialogState extends State<_MemberChatDialog> {
       );
       return chatId;
     });
+  }
+
+  Future<String> _openRoom() {
+    switch (widget.kind) {
+      case _ChatRoomKind.direct:
+        return widget.service.openChat(
+          currentUser: widget.currentUser,
+          currentDisplayName: widget.currentDisplayName,
+          peer: widget.members.first,
+        );
+      case _ChatRoomKind.flightRoom:
+        return widget.service.openFlightRoom(
+          currentUser: widget.currentUser,
+          currentDisplayName: widget.currentDisplayName,
+          currentPhotoSource: widget.currentPhotoSource,
+          reachableMembers: widget.members,
+        );
+      case _ChatRoomKind.group:
+        return widget.service.openGroupChat(
+          currentUser: widget.currentUser,
+          currentDisplayName: widget.currentDisplayName,
+          currentPhotoSource: widget.currentPhotoSource,
+          title: widget.title,
+          peers: widget.members,
+        );
+    }
   }
 
   @override
@@ -1072,7 +1759,11 @@ class _MemberChatDialogState extends State<_MemberChatDialog> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                _ChatDialogHeader(peer: widget.peer),
+                _ChatDialogHeader(
+                  title: widget.title,
+                  subtitle: _roomSubtitle,
+                  members: widget.members,
+                ),
                 Expanded(
                   child: Padding(
                     padding: const EdgeInsets.fromLTRB(24, 14, 24, 14),
@@ -1086,10 +1777,12 @@ class _MemberChatDialogState extends State<_MemberChatDialog> {
                             Expanded(
                               child: TextField(
                                 controller: _message,
-                                enabled: !_sending,
+                                enabled: !_sending && _canSendMessages,
                                 textInputAction: TextInputAction.send,
-                                decoration: const InputDecoration(
-                                  labelText: 'Nachricht',
+                                decoration: InputDecoration(
+                                  labelText: _canSendMessages
+                                      ? 'Nachricht'
+                                      : 'Noch kein Gegenueber',
                                 ),
                                 onSubmitted: (_) => _send(chatId),
                               ),
@@ -1097,7 +1790,9 @@ class _MemberChatDialogState extends State<_MemberChatDialog> {
                             const SizedBox(width: 8),
                             IconButton.filled(
                               tooltip: 'Senden',
-                              onPressed: _sending ? null : () => _send(chatId),
+                              onPressed: _sending || !_canSendMessages
+                                  ? null
+                                  : () => _send(chatId),
                               icon: _sending
                                   ? const SizedBox(
                                       width: 18,
@@ -1149,7 +1844,10 @@ class _MemberChatDialogState extends State<_MemberChatDialog> {
 
   Widget _buildMessages(String chatId) {
     return StreamBuilder<List<ChatMessage>>(
-      stream: widget.service.watchMessages(chatId),
+      stream: widget.service.watchMessages(
+        chatId: chatId,
+        currentUid: widget.currentUser.uid,
+      ),
       builder: (context, snapshot) {
         if (snapshot.hasError) {
           return const _DialogInfo(
@@ -1188,26 +1886,59 @@ class _MemberChatDialogState extends State<_MemberChatDialog> {
           separatorBuilder: (context, index) => const SizedBox(height: 8),
           itemBuilder: (context, index) {
             final message = messages[index];
+            final sender = _senderProfile(message.senderId);
+            final own = message.senderId == widget.currentUser.uid;
             return _ChatBubble(
               message: message,
-              own: message.senderId == widget.currentUser.uid,
-              senderName: message.senderId == widget.currentUser.uid
-                  ? 'Du'
-                  : widget.peer.displayName,
-              avatarName: message.senderId == widget.currentUser.uid
-                  ? widget.currentDisplayName
-                  : widget.peer.displayName,
-              avatarSource: message.senderId == widget.currentUser.uid
-                  ? widget.currentPhotoSource
-                  : widget.peer.photoSource,
-              avatarColorKey: message.senderId == widget.currentUser.uid
-                  ? widget.currentUser.uid
-                  : widget.peer.uid,
+              own: own,
+              senderName: own ? 'Du' : sender.displayName,
+              avatarName: own ? widget.currentDisplayName : sender.displayName,
+              avatarSource:
+                  own ? widget.currentPhotoSource : sender.photoSource,
+              avatarColorKey: own ? widget.currentUser.uid : sender.uid,
             );
           },
         );
       },
     );
+  }
+
+  MemberProfile _senderProfile(String uid) {
+    for (final member in widget.members) {
+      if (member.uid == uid) {
+        return member;
+      }
+    }
+    return MemberProfile(
+      uid: uid,
+      active: true,
+      memberSchemaVersion: MemberChatService.memberSchemaVersion,
+      displayName: 'Mitglied',
+      email: null,
+      club: '',
+      reachableByChat: true,
+      shareLocation: false,
+      presenceStatus: 'offline',
+      photoSource: null,
+      lastSeen: null,
+    );
+  }
+
+  String get _roomSubtitle {
+    switch (widget.kind) {
+      case _ChatRoomKind.direct:
+        final peer = widget.members.first;
+        final email = peer.email?.trim();
+        return email != null && email.isNotEmpty ? email : 'Direkter Flugfunk';
+      case _ChatRoomKind.flightRoom:
+        return '${widget.members.length + 1} Teilnehmer';
+      case _ChatRoomKind.group:
+        return '${widget.members.length + 1} Teilnehmer';
+    }
+  }
+
+  bool get _canSendMessages {
+    return widget.members.isNotEmpty;
   }
 
   Future<void> _send(String chatId) async {
@@ -1221,7 +1952,6 @@ class _MemberChatDialogState extends State<_MemberChatDialog> {
       await widget.service.sendMessage(
         chatId: chatId,
         currentUser: widget.currentUser,
-        peer: widget.peer,
         text: text,
       );
       _message.clear();
@@ -1247,7 +1977,7 @@ class _MemberChatDialogState extends State<_MemberChatDialog> {
       builder: (context) => AlertDialog(
         title: const Text('Chatverlauf loeschen?'),
         content: const Text(
-          'Alle Nachrichten in diesem Chat werden entfernt. Das betrifft beide Chatteilnehmer.',
+          'Der Verlauf wird fuer dich ausgeblendet. Andere Teilnehmer behalten ihre Nachrichten.',
         ),
         actions: [
           TextButton(
@@ -1314,34 +2044,25 @@ class _MemberChatDialogState extends State<_MemberChatDialog> {
 }
 
 class _ChatDialogHeader extends StatelessWidget {
-  final MemberProfile peer;
+  final String title;
+  final String subtitle;
+  final List<MemberProfile> members;
 
-  const _ChatDialogHeader({required this.peer});
+  const _ChatDialogHeader({
+    required this.title,
+    required this.subtitle,
+    required this.members,
+  });
 
   @override
   Widget build(BuildContext context) {
-    final photoSource = _safeMemberPhotoSource(peer.photoSource);
-    final email = peer.email?.trim();
-
     return ColoredBox(
       color: _chatFrameColor,
       child: Padding(
         padding: const EdgeInsets.fromLTRB(18, 16, 18, 14),
         child: Row(
           children: [
-            CircleAvatar(
-              radius: 28,
-              backgroundColor: _avatarColorFor(peer.uid),
-              foregroundImage: maybeMediaImageProvider(photoSource),
-              child: Text(
-                _initialsFor(peer.displayName),
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 17,
-                  fontWeight: FontWeight.w900,
-                ),
-              ),
-            ),
+            _ChatHeaderAvatar(members: members),
             const SizedBox(width: 12),
             Expanded(
               child: Column(
@@ -1349,7 +2070,7 @@ class _ChatDialogHeader extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    'Chat mit ${peer.displayName}',
+                    title,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(
@@ -1360,9 +2081,7 @@ class _ChatDialogHeader extends StatelessWidget {
                   ),
                   const SizedBox(height: 2),
                   Text(
-                    email != null && email.isNotEmpty
-                        ? email
-                        : 'Chatteilnehmer',
+                    subtitle,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(
@@ -1376,6 +2095,78 @@ class _ChatDialogHeader extends StatelessWidget {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+class _ChatHeaderAvatar extends StatelessWidget {
+  final List<MemberProfile> members;
+
+  const _ChatHeaderAvatar({required this.members});
+
+  @override
+  Widget build(BuildContext context) {
+    if (members.isEmpty) {
+      return const CircleAvatar(
+        radius: 28,
+        backgroundColor: Color(0xFF0A84FF),
+        child: Icon(
+          Icons.forum_rounded,
+          color: Colors.white,
+          size: 28,
+        ),
+      );
+    }
+    if (members.length == 1) {
+      final member = members.first;
+      return CircleAvatar(
+        radius: 28,
+        backgroundColor: _avatarColorFor(member.uid),
+        foregroundImage: maybeMediaImageProvider(
+          _safeMemberPhotoSource(member.photoSource),
+        ),
+        child: Text(
+          _initialsFor(member.displayName),
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: 17,
+            fontWeight: FontWeight.w900,
+          ),
+        ),
+      );
+    }
+
+    final previewMembers = members.take(3).toList();
+    return SizedBox(
+      width: 58,
+      height: 42,
+      child: Stack(
+        children: [
+          for (var index = 0; index < previewMembers.length; index++)
+            Positioned(
+              left: index * 14,
+              child: CircleAvatar(
+                radius: 20,
+                backgroundColor: Colors.white,
+                child: CircleAvatar(
+                  radius: 18,
+                  backgroundColor: _avatarColorFor(previewMembers[index].uid),
+                  foregroundImage: maybeMediaImageProvider(
+                    _safeMemberPhotoSource(previewMembers[index].photoSource),
+                  ),
+                  child: Text(
+                    _initialsFor(previewMembers[index].displayName),
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 10,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+        ],
       ),
     );
   }
@@ -1680,6 +2471,42 @@ bool _hasProfilePhoto(User user, PilotProfile profile) {
 String _clubLabel(String club) {
   final clean = club.trim();
   return clean.isEmpty ? '-' : clean;
+}
+
+String _participantLabel(
+  ChatSummary chat,
+  List<MemberProfile> members,
+  String currentUid,
+) {
+  final names = [
+    for (final uid in chat.participantIds)
+      if (uid != currentUid) _participantName(uid, chat, members),
+  ].where((name) => name.trim().isNotEmpty).toList();
+  if (names.isEmpty) {
+    return 'Nur du';
+  }
+  return names.join(', ');
+}
+
+String _participantName(
+  String uid,
+  ChatSummary chat,
+  List<MemberProfile> members,
+) {
+  for (final member in members) {
+    if (member.uid == uid) {
+      return member.displayName;
+    }
+  }
+  return chat.participantNames[uid] ?? 'Mitglied';
+}
+
+String _defaultPrivateGroupTitle(List<MemberProfile> members) {
+  final names = [
+    for (final member in members)
+      if (member.displayName.trim().isNotEmpty) member.displayName.trim(),
+  ];
+  return names.isEmpty ? 'Private Runde' : names.join(', ');
 }
 
 String _lastSeenLabel(DateTime? lastSeen) {
