@@ -12,6 +12,7 @@ import '../../shared/services/member_chat_service.dart';
 import '../../shared/utils/media_source.dart';
 
 const _chatFrameColor = Color(0xFF06172E);
+const _flightRadioAsset = 'assets/icons/flugfunk.png';
 
 class FriendsPage extends ConsumerStatefulWidget {
   const FriendsPage({super.key});
@@ -1727,9 +1728,19 @@ class _ChatRoomDialogState extends State<_ChatRoomDialog> {
             );
           }
 
+          final viewport = MediaQuery.sizeOf(context);
+          final availableWidth = viewport.width - 40;
+          final availableHeight = viewport.height - 40;
+          final dialogWidth = availableWidth < 380
+              ? availableWidth
+              : availableWidth.clamp(380.0, 540.0).toDouble();
+          final dialogHeight = availableHeight < 560
+              ? availableHeight
+              : availableHeight.clamp(560.0, 640.0).toDouble();
+
           return SizedBox(
-            width: 460,
-            height: 500,
+            width: dialogWidth,
+            height: dialogHeight,
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
@@ -2032,44 +2043,65 @@ class _ChatDialogHeader extends StatelessWidget {
   Widget build(BuildContext context) {
     return ColoredBox(
       color: _chatFrameColor,
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(18, 16, 18, 14),
-        child: Row(
-          children: [
-            _ChatHeaderAvatar(members: members),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    title,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 18,
-                      fontWeight: FontWeight.w900,
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(minHeight: 142),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(22, 24, 18, 22),
+          child: Row(
+            children: [
+              _ChatHeaderAvatar(members: members),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 20,
+                        fontWeight: FontWeight.w900,
+                        height: 1.08,
+                      ),
                     ),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    subtitle,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      color: Color(0xFFBFDBFE),
-                      fontSize: 12,
-                      fontWeight: FontWeight.w700,
+                    const SizedBox(height: 6),
+                    Text(
+                      subtitle,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: Color(0xFFBFDBFE),
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700,
+                      ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
-            ),
-          ],
+              const SizedBox(width: 16),
+              const _FlightRadioHeaderLogo(),
+            ],
+          ),
         ),
       ),
+    );
+  }
+}
+
+class _FlightRadioHeaderLogo extends StatelessWidget {
+  const _FlightRadioHeaderLogo();
+
+  @override
+  Widget build(BuildContext context) {
+    return Image.asset(
+      _flightRadioAsset,
+      width: 92,
+      height: 92,
+      fit: BoxFit.contain,
+      filterQuality: FilterQuality.high,
     );
   }
 }
@@ -2083,19 +2115,19 @@ class _ChatHeaderAvatar extends StatelessWidget {
   Widget build(BuildContext context) {
     if (members.isEmpty) {
       return const CircleAvatar(
-        radius: 28,
+        radius: 36,
         backgroundColor: Color(0xFF0A84FF),
         child: Icon(
           Icons.forum_rounded,
           color: Colors.white,
-          size: 28,
+          size: 34,
         ),
       );
     }
     if (members.length == 1) {
       final member = members.first;
       return CircleAvatar(
-        radius: 28,
+        radius: 36,
         backgroundColor: _avatarColorFor(member.uid),
         foregroundImage: maybeMediaImageProvider(
           _safeMemberPhotoSource(member.photoSource),
@@ -2104,7 +2136,7 @@ class _ChatHeaderAvatar extends StatelessWidget {
           _initialsFor(member.displayName),
           style: const TextStyle(
             color: Colors.white,
-            fontSize: 17,
+            fontSize: 20,
             fontWeight: FontWeight.w900,
           ),
         ),
@@ -2113,18 +2145,18 @@ class _ChatHeaderAvatar extends StatelessWidget {
 
     final previewMembers = members.take(3).toList();
     return SizedBox(
-      width: 58,
-      height: 42,
+      width: 76,
+      height: 56,
       child: Stack(
         children: [
           for (var index = 0; index < previewMembers.length; index++)
             Positioned(
-              left: index * 14,
+              left: index * 18,
               child: CircleAvatar(
-                radius: 20,
+                radius: 27,
                 backgroundColor: Colors.white,
                 child: CircleAvatar(
-                  radius: 18,
+                  radius: 24,
                   backgroundColor: _avatarColorFor(previewMembers[index].uid),
                   foregroundImage: maybeMediaImageProvider(
                     _safeMemberPhotoSource(previewMembers[index].photoSource),
@@ -2133,7 +2165,7 @@ class _ChatHeaderAvatar extends StatelessWidget {
                     _initialsFor(previewMembers[index].displayName),
                     style: const TextStyle(
                       color: Colors.white,
-                      fontSize: 10,
+                      fontSize: 13,
                       fontWeight: FontWeight.w900,
                     ),
                   ),
