@@ -40,7 +40,7 @@ class _FriendsPageState extends ConsumerState<FriendsPage> {
     );
 
     return AppScaffold(
-      title: 'Mitglieder',
+      title: 'Flug-Funk',
       subtitle: 'Angemeldete Mitglieder und direkte Nachrichten im Blick.',
       action: _ChatAvailabilityPill(enabled: reachableByChat),
       children: [
@@ -242,8 +242,6 @@ class _MemberListState extends State<_MemberList> {
                   ),
                 ],
                 const SizedBox(height: 12),
-                const _MemberSectionHeader(),
-                const SizedBox(height: 10),
                 if (members.isEmpty)
                   _InfoCard(
                     icon: Icons.group_add_rounded,
@@ -476,30 +474,6 @@ class _MemberListState extends State<_MemberList> {
   String _notificationKeyFor(ChatSummary chat) {
     final date = chat.lastMessageAt ?? chat.updatedAt;
     return '${chat.id}:${date?.toIso8601String() ?? chat.lastMessage}';
-  }
-}
-
-class _MemberSectionHeader extends StatelessWidget {
-  const _MemberSectionHeader();
-
-  @override
-  Widget build(BuildContext context) {
-    return const Row(
-      children: [
-        Icon(Icons.people_alt_rounded, color: Color(0xFF0A84FF)),
-        SizedBox(width: 8),
-        Expanded(
-          child: Text(
-            'Mitglieder',
-            style: TextStyle(
-              color: Color(0xFF06172E),
-              fontSize: 18,
-              fontWeight: FontWeight.w900,
-            ),
-          ),
-        ),
-      ],
-    );
   }
 }
 
