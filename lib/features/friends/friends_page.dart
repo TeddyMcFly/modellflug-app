@@ -11,6 +11,8 @@ import '../../shared/services/auth_service.dart';
 import '../../shared/services/member_chat_service.dart';
 import '../../shared/utils/media_source.dart';
 
+const _chatFrameColor = Color(0xFF06172E);
+
 class FriendsPage extends ConsumerStatefulWidget {
   const FriendsPage({super.key});
 
@@ -54,6 +56,10 @@ class _FriendsPageState extends ConsumerState<FriendsPage> {
             service: chatService,
             currentUser: authUser,
             currentDisplayName: _displayNameFor(authUser, fleet),
+            currentPhotoSource: _chatAvatarSourceFor(
+              authUser,
+              fleet.pilotProfile,
+            ),
             currentUserReachable: reachableByChat,
           ),
       ],
@@ -114,12 +120,14 @@ class _MemberList extends StatefulWidget {
   final MemberChatService service;
   final User currentUser;
   final String currentDisplayName;
+  final String? currentPhotoSource;
   final bool currentUserReachable;
 
   const _MemberList({
     required this.service,
     required this.currentUser,
     required this.currentDisplayName,
+    required this.currentPhotoSource,
     required this.currentUserReachable,
   });
 
@@ -245,6 +253,7 @@ class _MemberListState extends State<_MemberList> {
         service: widget.service,
         currentUser: widget.currentUser,
         currentDisplayName: widget.currentDisplayName,
+        currentPhotoSource: widget.currentPhotoSource,
         peer: member,
       ),
     );
@@ -572,7 +581,7 @@ class _MembersTableHeader extends StatelessWidget {
             _TableHeaderCell(label: 'Verein', flex: 2),
             _TableHeaderCell(label: 'Zuletzt aktiv', flex: 2),
             _TableHeaderCell(label: 'Letzter Chat', flex: 3),
-            _TableHeaderCell(label: 'Aktion', flex: 2),
+            _TableHeaderCell(label: 'Flugfunk', flex: 2),
           ],
         ),
       ),
@@ -972,12 +981,14 @@ class _MemberChatDialog extends StatefulWidget {
   final MemberChatService service;
   final User currentUser;
   final String currentDisplayName;
+  final String? currentPhotoSource;
   final MemberProfile peer;
 
   const _MemberChatDialog({
     required this.service,
     required this.currentUser,
     required this.currentDisplayName,
+    required this.currentPhotoSource,
     required this.peer,
   });
 
@@ -991,6 +1002,7 @@ class _MemberChatDialogState extends State<_MemberChatDialog> {
   late final Future<String> _chatIdFuture;
   String? _lastReadSignature;
   bool _sending = false;
+  bool _clearingHistory = false;
 
   @override
   void initState() {
@@ -1024,7 +1036,13 @@ class _MemberChatDialogState extends State<_MemberChatDialog> {
     return AlertDialog(
       backgroundColor: Colors.white,
       surfaceTintColor: Colors.transparent,
+      contentPadding: EdgeInsets.zero,
       insetPadding: const EdgeInsets.all(20),
+      clipBehavior: Clip.antiAlias,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: const BorderSide(color: _chatFrameColor, width: 1.4),
+      ),
       content: FutureBuilder<String>(
         future: _chatIdFuture,
         builder: (context, snapshot) {
@@ -1050,54 +1068,82 @@ class _MemberChatDialogState extends State<_MemberChatDialog> {
 
           return SizedBox(
             width: 460,
-            height: 460,
+            height: 500,
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 _ChatDialogHeader(peer: widget.peer),
-                const SizedBox(height: 14),
-                const Divider(height: 1),
-                const SizedBox(height: 12),
-                Expanded(child: _buildMessages(chatId)),
-                const SizedBox(height: 12),
-                Row(
-                  children: [
-                    Expanded(
-                      child: TextField(
-                        controller: _message,
-                        enabled: !_sending,
-                        textInputAction: TextInputAction.send,
-                        decoration: const InputDecoration(
-                          labelText: 'Nachricht',
+                Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(24, 14, 24, 14),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Expanded(child: _buildMessages(chatId)),
+                        const SizedBox(height: 12),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: TextField(
+                                controller: _message,
+                                enabled: !_sending,
+                                textInputAction: TextInputAction.send,
+                                decoration: const InputDecoration(
+                                  labelText: 'Nachricht',
+                                ),
+                                onSubmitted: (_) => _send(chatId),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            IconButton.filled(
+                              tooltip: 'Senden',
+                              onPressed: _sending ? null : () => _send(chatId),
+                              icon: _sending
+                                  ? const SizedBox(
+                                      width: 18,
+                                      height: 18,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                      ),
+                                    )
+                                  : const Icon(Icons.send_rounded),
+                            ),
+                          ],
                         ),
-                        onSubmitted: (_) => _send(chatId),
-                      ),
+                        const SizedBox(height: 6),
+                        Row(
+                          children: [
+                            TextButton.icon(
+                              onPressed: _clearingHistory
+                                  ? null
+                                  : () => _confirmClearHistory(chatId),
+                              icon: _clearingHistory
+                                  ? const SizedBox(
+                                      width: 16,
+                                      height: 16,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                      ),
+                                    )
+                                  : const Icon(Icons.delete_sweep_rounded),
+                              label: const Text('Chatverlauf loeschen'),
+                            ),
+                            const Spacer(),
+                            TextButton(
+                              onPressed: () => Navigator.of(context).pop(),
+                              child: const Text('Schliessen'),
+                            ),
+                          ],
+                        ),
+                      ],
                     ),
-                    const SizedBox(width: 8),
-                    IconButton.filled(
-                      tooltip: 'Senden',
-                      onPressed: _sending ? null : () => _send(chatId),
-                      icon: _sending
-                          ? const SizedBox(
-                              width: 18,
-                              height: 18,
-                              child: CircularProgressIndicator(strokeWidth: 2),
-                            )
-                          : const Icon(Icons.send_rounded),
-                    ),
-                  ],
+                  ),
                 ),
               ],
             ),
           );
         },
       ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(),
-          child: const Text('Schliessen'),
-        ),
-      ],
     );
   }
 
@@ -1148,6 +1194,15 @@ class _MemberChatDialogState extends State<_MemberChatDialog> {
               senderName: message.senderId == widget.currentUser.uid
                   ? 'Du'
                   : widget.peer.displayName,
+              avatarName: message.senderId == widget.currentUser.uid
+                  ? widget.currentDisplayName
+                  : widget.peer.displayName,
+              avatarSource: message.senderId == widget.currentUser.uid
+                  ? widget.currentPhotoSource
+                  : widget.peer.photoSource,
+              avatarColorKey: message.senderId == widget.currentUser.uid
+                  ? widget.currentUser.uid
+                  : widget.peer.uid,
             );
           },
         );
@@ -1186,6 +1241,61 @@ class _MemberChatDialogState extends State<_MemberChatDialog> {
     }
   }
 
+  Future<void> _confirmClearHistory(String chatId) async {
+    final clear = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Chatverlauf loeschen?'),
+        content: const Text(
+          'Alle Nachrichten in diesem Chat werden entfernt. Das betrifft beide Chatteilnehmer.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Abbrechen'),
+          ),
+          FilledButton.icon(
+            onPressed: () => Navigator.of(context).pop(true),
+            icon: const Icon(Icons.delete_sweep_rounded),
+            label: const Text('Loeschen'),
+          ),
+        ],
+      ),
+    );
+
+    if (clear != true || _clearingHistory) {
+      return;
+    }
+
+    setState(() => _clearingHistory = true);
+    try {
+      await widget.service.clearChatHistory(
+        chatId: chatId,
+        currentUid: widget.currentUser.uid,
+      );
+      _lastReadSignature = null;
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Chatverlauf geloescht.')),
+      );
+    } on Object {
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Chatverlauf konnte nicht geloescht werden.'),
+        ),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _clearingHistory = false);
+      }
+    }
+  }
+
   void _markVisibleMessagesRead(String chatId, List<ChatMessage> messages) {
     final newestMessage = messages.last;
     final signature = '${newestMessage.id}:${newestMessage.createdAt}';
@@ -1213,52 +1323,90 @@ class _ChatDialogHeader extends StatelessWidget {
     final photoSource = _safeMemberPhotoSource(peer.photoSource);
     final email = peer.email?.trim();
 
-    return Row(
-      children: [
-        CircleAvatar(
-          radius: 28,
-          backgroundColor: _avatarColorFor(peer.uid),
-          foregroundImage: maybeMediaImageProvider(photoSource),
-          child: Text(
-            _initialsFor(peer.displayName),
-            style: const TextStyle(
-              color: Colors.white,
-              fontSize: 17,
-              fontWeight: FontWeight.w900,
-            ),
-          ),
-        ),
-        const SizedBox(width: 12),
-        Expanded(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                'Chat mit ${peer.displayName}',
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
+    return ColoredBox(
+      color: _chatFrameColor,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(18, 16, 18, 14),
+        child: Row(
+          children: [
+            CircleAvatar(
+              radius: 28,
+              backgroundColor: _avatarColorFor(peer.uid),
+              foregroundImage: maybeMediaImageProvider(photoSource),
+              child: Text(
+                _initialsFor(peer.displayName),
                 style: const TextStyle(
-                  color: Color(0xFF06172E),
-                  fontSize: 18,
+                  color: Colors.white,
+                  fontSize: 17,
                   fontWeight: FontWeight.w900,
                 ),
               ),
-              const SizedBox(height: 2),
-              Text(
-                email != null && email.isNotEmpty ? email : 'Chatteilnehmer',
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  color: Color(0xFF64748B),
-                  fontSize: 12,
-                  fontWeight: FontWeight.w700,
-                ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Chat mit ${peer.displayName}',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 18,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    email != null && email.isNotEmpty
+                        ? email
+                        : 'Chatteilnehmer',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: Color(0xFFBFDBFE),
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ],
               ),
-            ],
-          ),
+            ),
+          ],
         ),
-      ],
+      ),
+    );
+  }
+}
+
+class _ChatMessageAvatar extends StatelessWidget {
+  final String? source;
+  final String displayName;
+  final String colorKey;
+
+  const _ChatMessageAvatar({
+    required this.source,
+    required this.displayName,
+    required this.colorKey,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final photoSource = _safeMemberPhotoSource(source);
+    return CircleAvatar(
+      radius: 16,
+      backgroundColor: _avatarColorFor(colorKey),
+      foregroundImage: maybeMediaImageProvider(photoSource),
+      child: Text(
+        _initialsFor(displayName),
+        style: const TextStyle(
+          color: Colors.white,
+          fontSize: 10,
+          fontWeight: FontWeight.w900,
+        ),
+      ),
     );
   }
 }
@@ -1267,67 +1415,93 @@ class _ChatBubble extends StatelessWidget {
   final ChatMessage message;
   final bool own;
   final String senderName;
+  final String avatarName;
+  final String? avatarSource;
+  final String avatarColorKey;
 
   const _ChatBubble({
     required this.message,
     required this.own,
     required this.senderName,
+    required this.avatarName,
+    required this.avatarSource,
+    required this.avatarColorKey,
   });
 
   @override
   Widget build(BuildContext context) {
-    return Align(
-      alignment: own ? Alignment.centerRight : Alignment.centerLeft,
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 320),
-        child: DecoratedBox(
-          decoration: BoxDecoration(
-            color: own ? const Color(0xFF0A84FF) : const Color(0xFFE8EDF3),
-            borderRadius: BorderRadius.circular(8),
-          ),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-            child: Column(
-              crossAxisAlignment:
-                  own ? CrossAxisAlignment.end : CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  senderName,
-                  style: TextStyle(
-                    color: own
-                        ? Colors.white.withValues(alpha: 0.82)
-                        : const Color(0xFF0F172A),
-                    fontSize: 11,
-                    fontWeight: FontWeight.w900,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  message.text,
-                  style: TextStyle(
-                    color: own ? Colors.white : const Color(0xFF334155),
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-                if (message.createdAt != null) ...[
-                  const SizedBox(height: 4),
-                  Text(
-                    _timeLabel(message.createdAt!),
-                    style: TextStyle(
-                      color: own
-                          ? Colors.white.withValues(alpha: 0.78)
-                          : const Color(0xFF64748B),
-                      fontSize: 10,
-                      fontWeight: FontWeight.w700,
+    final avatar = _ChatMessageAvatar(
+      source: avatarSource,
+      displayName: avatarName,
+      colorKey: avatarColorKey,
+    );
+
+    return Row(
+      mainAxisAlignment: own ? MainAxisAlignment.end : MainAxisAlignment.start,
+      crossAxisAlignment: CrossAxisAlignment.end,
+      children: [
+        if (!own) ...[
+          avatar,
+          const SizedBox(width: 8),
+        ],
+        Flexible(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 290),
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                color: own ? const Color(0xFF0A84FF) : const Color(0xFFE8EDF3),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Padding(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                child: Column(
+                  crossAxisAlignment:
+                      own ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      senderName,
+                      style: TextStyle(
+                        color: own
+                            ? Colors.white.withValues(alpha: 0.82)
+                            : const Color(0xFF0F172A),
+                        fontSize: 11,
+                        fontWeight: FontWeight.w900,
+                      ),
                     ),
-                  ),
-                ],
-              ],
+                    const SizedBox(height: 4),
+                    Text(
+                      message.text,
+                      style: TextStyle(
+                        color: own ? Colors.white : const Color(0xFF334155),
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    if (message.createdAt != null) ...[
+                      const SizedBox(height: 4),
+                      Text(
+                        _timeLabel(message.createdAt!),
+                        style: TextStyle(
+                          color: own
+                              ? Colors.white.withValues(alpha: 0.78)
+                              : const Color(0xFF64748B),
+                          fontSize: 10,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
             ),
           ),
         ),
-      ),
+        if (own) ...[
+          const SizedBox(width: 8),
+          avatar,
+        ],
+      ],
     );
   }
 }
@@ -1462,7 +1636,26 @@ String? _safeMemberPhotoSource(String? source) {
   if (clean == null || clean.isEmpty) {
     return null;
   }
-  return clean.startsWith('data:image/') ? clean : null;
+  if (clean.startsWith('data:image/') || isNetworkMediaSource(clean)) {
+    return clean;
+  }
+  return null;
+}
+
+String? _chatAvatarSourceFor(User user, PilotProfile profile) {
+  final thumbnail = profile.memberPhotoSource?.trim();
+  if (thumbnail != null && thumbnail.isNotEmpty) {
+    return thumbnail;
+  }
+  final profilePhoto = profile.photoSource?.trim();
+  if (profilePhoto != null && profilePhoto.isNotEmpty) {
+    return profilePhoto;
+  }
+  final authPhoto = user.photoURL?.trim();
+  if (authPhoto != null && authPhoto.isNotEmpty) {
+    return authPhoto;
+  }
+  return null;
 }
 
 String? _memberPreviewSourceFor(PilotProfile profile) {

@@ -13,9 +13,9 @@ class StartSoundPlayer {
   bool _disposed = false;
   bool _started = false;
 
-  Future<void> play() async {
+  Future<bool> play() async {
     if (_disposed || _started) {
-      return;
+      return false;
     }
     _started = true;
 
@@ -28,9 +28,13 @@ class StartSoundPlayer {
 
     try {
       await audio.play().toDart;
+      return true;
     } catch (_) {
       // Browser koennen Autoplay mit Ton blockieren. Dann bleibt der Start
       // schlicht stumm, statt die App zu stoeren.
+      _started = false;
+      _audio = null;
+      return false;
     }
   }
 

@@ -44,7 +44,7 @@ class _LoginPageState extends ConsumerState<LoginPage> {
             fit: StackFit.expand,
             children: [
               Image.asset(
-                'assets/splash/landingpage_01.jpg',
+                'assets/splash/landingpage_heaven.png',
                 fit: BoxFit.cover,
                 opacity: const AlwaysStoppedAnimation(0.24),
               ),
@@ -339,7 +339,7 @@ class _AuthIntro extends StatelessWidget {
         ),
         const SizedBox(height: 14),
         Text(
-          'Modellflug App',
+          'Modellflug-Heaven',
           textAlign: compact ? TextAlign.center : TextAlign.left,
           style: const TextStyle(
             color: Colors.white,

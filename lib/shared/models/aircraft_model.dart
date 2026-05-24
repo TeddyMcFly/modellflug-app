@@ -21,15 +21,15 @@ const aircraftCategoryOptions = [
 ];
 
 const aircraftFeatureOptions = [
-  'Elektro',
-  'Verbrenner',
   'mehrmotorig',
   'Einziehfahrwerk',
   'Landeklappen',
+  'LED-Beleuchtung',
   'Wasserflugzeug',
   'Doppeldecker',
   'Dreifachdecker',
   'Indoor-geeignet',
+  'Warbird',
 ];
 
 String normalizeAircraftFeature(String value) {
@@ -37,6 +37,30 @@ String normalizeAircraftFeature(String value) {
     return 'Doppeldecker';
   }
   return aircraftFeatureOptions.contains(value) ? value : value;
+}
+
+const aircraftDriveTypeOptions = [
+  'Elektrisch',
+  'Verbrenner',
+];
+
+String normalizeAircraftDriveType(String value) {
+  final lower = value.toLowerCase().trim();
+  if (lower.isEmpty) {
+    return '';
+  }
+  if (lower.contains('elektro') ||
+      lower.contains('elektrisch') ||
+      lower.contains('brushless')) {
+    return 'Elektrisch';
+  }
+  if (lower.contains('verbrenner') ||
+      lower.contains('benzin') ||
+      lower.contains('methanol') ||
+      lower.contains('nitro')) {
+    return 'Verbrenner';
+  }
+  return '';
 }
 
 String normalizeAircraftCategory(String value) {
@@ -91,7 +115,7 @@ extension AircraftStatusText on AircraftStatus {
       case AircraftStatus.maintenance:
         return 'Reparatur';
       case AircraftStatus.destroyed:
-        return 'Zerstört';
+        return 'Ausgemustert';
     }
   }
 }
@@ -109,12 +133,17 @@ class AircraftModel {
   final String transmitterMemorySlot;
   final String receiver;
   final String propeller;
+  final String rcFunctions;
   final String materialFuselageWing;
   final String wingLoading;
+  final String centerOfGravity;
   final String recommendedDriveBattery;
   final String servos;
   final DateTime purchaseDate;
+  final String? purchaseDateInput;
   final String drive;
+  final String driveType;
+  final String speedController;
   final int batteryCount;
   final List<int> batteryCellOptions;
   final List<String> featureOptions;
@@ -143,12 +172,17 @@ class AircraftModel {
     required this.transmitterMemorySlot,
     required this.receiver,
     required this.propeller,
+    this.rcFunctions = '',
     this.materialFuselageWing = '',
     this.wingLoading = '',
+    this.centerOfGravity = '',
     this.recommendedDriveBattery = '',
     this.servos = '',
     required this.purchaseDate,
+    this.purchaseDateInput,
     required this.drive,
+    this.driveType = '',
+    this.speedController = '',
     required this.batteryCount,
     this.batteryCellOptions = const [],
     this.featureOptions = const [],
@@ -182,6 +216,9 @@ class AircraftModel {
     if (batteryCellOptions.isNotEmpty) {
       return batteryCellOptions;
     }
+    if (batteryCount <= 0) {
+      return const [];
+    }
     return [batteryCount];
   }
 
@@ -198,12 +235,17 @@ class AircraftModel {
     String? transmitterMemorySlot,
     String? receiver,
     String? propeller,
+    String? rcFunctions,
     String? materialFuselageWing,
     String? wingLoading,
+    String? centerOfGravity,
     String? recommendedDriveBattery,
     String? servos,
     DateTime? purchaseDate,
+    Object? purchaseDateInput = _unset,
     String? drive,
+    String? driveType,
+    String? speedController,
     int? batteryCount,
     List<int>? batteryCellOptions,
     List<String>? featureOptions,
@@ -233,13 +275,20 @@ class AircraftModel {
           transmitterMemorySlot ?? this.transmitterMemorySlot,
       receiver: receiver ?? this.receiver,
       propeller: propeller ?? this.propeller,
+      rcFunctions: rcFunctions ?? this.rcFunctions,
       materialFuselageWing: materialFuselageWing ?? this.materialFuselageWing,
       wingLoading: wingLoading ?? this.wingLoading,
+      centerOfGravity: centerOfGravity ?? this.centerOfGravity,
       recommendedDriveBattery:
           recommendedDriveBattery ?? this.recommendedDriveBattery,
       servos: servos ?? this.servos,
       purchaseDate: purchaseDate ?? this.purchaseDate,
+      purchaseDateInput: identical(purchaseDateInput, _unset)
+          ? this.purchaseDateInput
+          : purchaseDateInput as String?,
       drive: drive ?? this.drive,
+      driveType: driveType ?? this.driveType,
+      speedController: speedController ?? this.speedController,
       batteryCount: batteryCount ?? this.batteryCount,
       batteryCellOptions: batteryCellOptions ?? this.batteryCellOptions,
       featureOptions: featureOptions ?? this.featureOptions,
@@ -273,13 +322,20 @@ class AircraftModel {
       transmitterMemorySlot: json['transmitterMemorySlot'] as String? ?? '',
       receiver: json['receiver'] as String? ?? '',
       propeller: json['propeller'] as String? ?? '',
+      rcFunctions: json['rcFunctions'] as String? ?? '',
       materialFuselageWing: json['materialFuselageWing'] as String? ?? '',
       wingLoading: json['wingLoading'] as String? ?? '',
+      centerOfGravity: json['centerOfGravity'] as String? ?? '',
       recommendedDriveBattery: json['recommendedDriveBattery'] as String? ?? '',
       servos: json['servos'] as String? ?? '',
       purchaseDate: DateTime.tryParse(json['purchaseDate'] as String? ?? '') ??
           DateTime(2026),
+      purchaseDateInput: json.containsKey('purchaseDateInput')
+          ? json['purchaseDateInput'] as String? ?? ''
+          : null,
       drive: json['drive'] as String? ?? '',
+      driveType: _aircraftDriveTypeFromJson(json),
+      speedController: json['speedController'] as String? ?? '',
       batteryCount: json['batteryCount'] as int,
       batteryCellOptions: [
         for (final item in json['batteryCellOptions'] as List<dynamic>? ?? [])
@@ -326,12 +382,17 @@ class AircraftModel {
       'transmitterMemorySlot': transmitterMemorySlot,
       'receiver': receiver,
       'propeller': propeller,
+      'rcFunctions': rcFunctions,
       'materialFuselageWing': materialFuselageWing,
       'wingLoading': wingLoading,
+      'centerOfGravity': centerOfGravity,
       'recommendedDriveBattery': recommendedDriveBattery,
       'servos': servos,
       'purchaseDate': purchaseDate.toIso8601String(),
+      'purchaseDateInput': purchaseDateInput,
       'drive': drive,
+      'driveType': driveType,
+      'speedController': speedController,
       'batteryCount': batteryCount,
       'batteryCellOptions': batteryCellOptions,
       'featureOptions': featureOptions,
@@ -359,6 +420,24 @@ AircraftStatus _aircraftStatusFromJson(String? value) {
     (status) => status.name == value,
     orElse: () => AircraftStatus.ready,
   );
+}
+
+String _aircraftDriveTypeFromJson(Map<String, dynamic> json) {
+  final explicit =
+      normalizeAircraftDriveType(json['driveType'] as String? ?? '');
+  if (explicit.isNotEmpty) {
+    return explicit;
+  }
+
+  final features = json['featureOptions'] as List<dynamic>? ?? const [];
+  for (final feature in features) {
+    final normalized = normalizeAircraftDriveType(feature.toString());
+    if (normalized.isNotEmpty) {
+      return normalized;
+    }
+  }
+
+  return normalizeAircraftDriveType(json['drive'] as String? ?? '');
 }
 
 class FlightLogEntry {
@@ -629,6 +708,7 @@ class AppSettings {
   final bool notifyRepairs;
   final bool notifyGoodWeather;
   final bool playStartSound;
+  final bool playFlightTimerMinuteTone;
   final bool autoOpenDashboardAfterLoading;
   final bool surfaceSettingsInitialized;
   final bool automaticBackupEnabled;
@@ -656,6 +736,7 @@ class AppSettings {
     this.notifyRepairs = true,
     this.notifyGoodWeather = true,
     this.playStartSound = true,
+    this.playFlightTimerMinuteTone = true,
     this.autoOpenDashboardAfterLoading = true,
     this.surfaceSettingsInitialized = true,
     this.automaticBackupEnabled = true,
@@ -684,6 +765,7 @@ class AppSettings {
     bool? notifyRepairs,
     bool? notifyGoodWeather,
     bool? playStartSound,
+    bool? playFlightTimerMinuteTone,
     bool? autoOpenDashboardAfterLoading,
     bool? surfaceSettingsInitialized,
     bool? automaticBackupEnabled,
@@ -715,6 +797,8 @@ class AppSettings {
       notifyRepairs: notifyRepairs ?? this.notifyRepairs,
       notifyGoodWeather: notifyGoodWeather ?? this.notifyGoodWeather,
       playStartSound: playStartSound ?? this.playStartSound,
+      playFlightTimerMinuteTone:
+          playFlightTimerMinuteTone ?? this.playFlightTimerMinuteTone,
       autoOpenDashboardAfterLoading:
           autoOpenDashboardAfterLoading ?? this.autoOpenDashboardAfterLoading,
       surfaceSettingsInitialized:
@@ -771,6 +855,8 @@ class AppSettings {
       notifyRepairs: json['notifyRepairs'] as bool? ?? true,
       notifyGoodWeather: json['notifyGoodWeather'] as bool? ?? true,
       playStartSound: json['playStartSound'] as bool? ?? true,
+      playFlightTimerMinuteTone:
+          json['playFlightTimerMinuteTone'] as bool? ?? true,
       autoOpenDashboardAfterLoading:
           json['autoOpenDashboardAfterLoading'] as bool? ?? true,
       surfaceSettingsInitialized:
@@ -807,6 +893,7 @@ class AppSettings {
       'notifyRepairs': notifyRepairs,
       'notifyGoodWeather': notifyGoodWeather,
       'playStartSound': playStartSound,
+      'playFlightTimerMinuteTone': playFlightTimerMinuteTone,
       'autoOpenDashboardAfterLoading': autoOpenDashboardAfterLoading,
       'surfaceSettingsInitialized': surfaceSettingsInitialized,
       'automaticBackupEnabled': automaticBackupEnabled,

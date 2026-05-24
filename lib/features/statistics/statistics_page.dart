@@ -88,6 +88,11 @@ class StatisticsPage extends ConsumerWidget {
           aircraft: fleet.aircraft,
           flights: fleet.flights,
         ),
+        const SizedBox(height: 10),
+        _BatteryUsageForecastStats(
+          batteries: fleet.batteries,
+          maxCycles: fleet.appSettings.batteryProblemCycleThreshold,
+        ),
       ],
     );
   }
@@ -363,6 +368,17 @@ enum _FlightTimeRange {
   const _FlightTimeRange(this.label);
 }
 
+const _flightTimeBarWidth = 22.0;
+const _flightTimeBarTopRadius = 5.0;
+const _flightTimeLeftAxisNameSize = 24.0;
+const _flightTimeLeftTitlesReservedSize = 48.0;
+const _flightTimeBottomAxisNameSize = 28.0;
+const _flightTimeBottomTitlesReservedSize = 62.0;
+const _flightTimeChartLeftInset =
+    _flightTimeLeftAxisNameSize + _flightTimeLeftTitlesReservedSize;
+const _flightTimeChartBottomInset =
+    _flightTimeBottomAxisNameSize + _flightTimeBottomTitlesReservedSize;
+
 class _FlightTimeBars extends StatefulWidget {
   final List<FlightLogEntry> flights;
 
@@ -382,6 +398,7 @@ class _FlightTimeBarsState extends State<_FlightTimeBars> {
       0,
       (max, item) => item.hours > max ? item.hours : max,
     );
+    final chartMaxHours = maxHours <= 0 ? 1.0 : maxHours * 1.35;
 
     return SizedBox(
       width: 900,
@@ -440,16 +457,24 @@ class _FlightTimeBarsState extends State<_FlightTimeBars> {
                 child: Stack(
                   children: [
                     Positioned.fill(
-                      child: CustomPaint(
-                        painter: _FlightTimeAreaPainter(
-                          points: data,
-                          maxHours: maxHours <= 0 ? 1 : maxHours * 1.35,
+                      child: Padding(
+                        padding: const EdgeInsets.only(
+                          left: _flightTimeChartLeftInset,
+                          bottom: _flightTimeChartBottomInset,
+                        ),
+                        child: CustomPaint(
+                          painter: _FlightTimeAreaPainter(
+                            points: data,
+                            maxHours: chartMaxHours,
+                          ),
                         ),
                       ),
                     ),
                     BarChart(
                       BarChartData(
-                        maxY: maxHours <= 0 ? 1 : maxHours * 1.35,
+                        minY: 0,
+                        maxY: chartMaxHours,
+                        alignment: BarChartAlignment.spaceEvenly,
                         barTouchData: BarTouchData(
                           enabled: false,
                           touchTooltipData: BarTouchTooltipData(
@@ -490,7 +515,7 @@ class _FlightTimeBarsState extends State<_FlightTimeBars> {
                             sideTitles: SideTitles(showTitles: false),
                           ),
                           leftTitles: AxisTitles(
-                            axisNameSize: 24,
+                            axisNameSize: _flightTimeLeftAxisNameSize,
                             axisNameWidget: const Text(
                               'Stunden',
                               style: TextStyle(
@@ -501,7 +526,7 @@ class _FlightTimeBarsState extends State<_FlightTimeBars> {
                             ),
                             sideTitles: SideTitles(
                               showTitles: true,
-                              reservedSize: 48,
+                              reservedSize: _flightTimeLeftTitlesReservedSize,
                               interval: _chartInterval(maxHours),
                               getTitlesWidget: (value, meta) => Text(
                                 value.toStringAsFixed(value < 10 ? 1 : 0),
@@ -513,7 +538,7 @@ class _FlightTimeBarsState extends State<_FlightTimeBars> {
                             ),
                           ),
                           bottomTitles: AxisTitles(
-                            axisNameSize: 28,
+                            axisNameSize: _flightTimeBottomAxisNameSize,
                             axisNameWidget: Padding(
                               padding: const EdgeInsets.only(top: 12),
                               child: Text(
@@ -527,7 +552,7 @@ class _FlightTimeBarsState extends State<_FlightTimeBars> {
                             ),
                             sideTitles: SideTitles(
                               showTitles: true,
-                              reservedSize: 62,
+                              reservedSize: _flightTimeBottomTitlesReservedSize,
                               getTitlesWidget: (value, meta) {
                                 final index = value.toInt();
                                 if (index < 0 || index >= data.length) {
@@ -557,10 +582,12 @@ class _FlightTimeBarsState extends State<_FlightTimeBars> {
                               barRods: [
                                 BarChartRodData(
                                   toY: data[i].hours,
-                                  width: 22,
+                                  width: _flightTimeBarWidth,
                                   color: const Color(0xFF0A84FF),
                                   borderRadius: const BorderRadius.vertical(
-                                    top: Radius.circular(5),
+                                    top: Radius.circular(
+                                      _flightTimeBarTopRadius,
+                                    ),
                                   ),
                                 ),
                               ],
@@ -600,23 +627,18 @@ class _FlightTimeAreaPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    if (points.length < 2 || maxHours <= 0) {
+    if (points.length < 2 || maxHours <= 0 || size.isEmpty) {
       return;
     }
 
-    final plot = Rect.fromLTWH(
-      48,
-      18,
-      size.width - 60,
-      size.height - 108,
-    );
-    final step = plot.width / (points.length - 1);
+    final plot = Offset.zero & size;
+    final eachSpace = (size.width - (points.length * _flightTimeBarWidth)) /
+        (points.length + 1);
     final line = Path();
 
     for (var i = 0; i < points.length; i++) {
-      final x = plot.left + step * i;
-      final normalized = (points[i].hours / maxHours).clamp(0.0, 1.0);
-      final y = plot.bottom - plot.height * normalized;
+      final x = eachSpace * (i + 1) + _flightTimeBarWidth * (i + 0.5);
+      final y = _barTopY(points[i].hours, size.height);
       if (i == 0) {
         line.moveTo(x, y);
       } else {
@@ -648,6 +670,19 @@ class _FlightTimeAreaPainter extends CustomPainter {
 
     canvas.drawPath(area, areaPaint);
     canvas.drawPath(line, linePaint);
+  }
+
+  double _barTopY(double hours, double height) {
+    if (hours <= 0) {
+      return height;
+    }
+
+    final normalized = (hours / maxHours).clamp(0.0, 1.0);
+    final dataY = height - height * normalized;
+
+    // fl_chart keeps very small rounded bars at least this high.
+    final minimumVisibleBarTop = height - _flightTimeBarTopRadius;
+    return dataY > minimumVisibleBarTop ? minimumVisibleBarTop : dataY;
   }
 
   @override
@@ -1052,6 +1087,512 @@ class _CategoryUsageIcon extends StatelessWidget {
   }
 }
 
+class _BatteryUsageForecastStats extends StatelessWidget {
+  final List<BatteryPack> batteries;
+  final int maxCycles;
+
+  const _BatteryUsageForecastStats({
+    required this.batteries,
+    required this.maxCycles,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final safeMaxCycles = maxCycles <= 0 ? 1 : maxCycles;
+    final typeStats = _buildBatteryTypeStats(batteries);
+    final cycleStats = _buildBatteryCycleStats(batteries, safeMaxCycles);
+
+    return SizedBox(
+      width: 900,
+      child: Card(
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Row(
+                children: [
+                  Icon(
+                    Icons.battery_charging_full_rounded,
+                    color: Color(0xFF0A84FF),
+                    size: 24,
+                  ),
+                  SizedBox(width: 10),
+                  Text(
+                    'Akkus - Einsatz und Prognose',
+                    style: _sectionTitleStyle,
+                  ),
+                ],
+              ),
+              const SizedBox(height: 14),
+              if (batteries.isEmpty)
+                const Text(
+                  'Noch keine Akku-Daten vorhanden.',
+                  style: TextStyle(
+                    color: Color(0xFF64748B),
+                    fontWeight: FontWeight.w800,
+                  ),
+                )
+              else
+                LayoutBuilder(
+                  builder: (context, constraints) {
+                    final typeChart =
+                        _BatteryTypeDistributionChart(stats: typeStats);
+                    final cycleChart = _BatteryCycleForecastChart(
+                      stats: cycleStats,
+                      maxCycles: safeMaxCycles,
+                    );
+
+                    if (constraints.maxWidth < 760) {
+                      return Column(
+                        children: [
+                          typeChart,
+                          const SizedBox(height: 14),
+                          cycleChart,
+                        ],
+                      );
+                    }
+
+                    return Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Expanded(child: typeChart),
+                        const SizedBox(width: 18),
+                        Expanded(child: cycleChart),
+                      ],
+                    );
+                  },
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _BatteryTypeDistributionChart extends StatelessWidget {
+  final List<_BatteryTypeStats> stats;
+
+  const _BatteryTypeDistributionChart({required this.stats});
+
+  @override
+  Widget build(BuildContext context) {
+    final total = stats.fold<int>(0, (sum, item) => sum + item.count);
+
+    return _BatteryStatsPanel(
+      title: 'Verteilung der Akku-Arten',
+      child: Column(
+        children: [
+          SizedBox(
+            height: 190,
+            child: Stack(
+              alignment: Alignment.center,
+              children: [
+                PieChart(
+                  PieChartData(
+                    startDegreeOffset: -90,
+                    centerSpaceRadius: 54,
+                    sectionsSpace: stats.length <= 1 ? 0 : 3,
+                    sections: [
+                      for (var i = 0; i < stats.length; i++)
+                        PieChartSectionData(
+                          value: stats[i].count.toDouble(),
+                          color: _batteryChartColor(i),
+                          title: '',
+                          radius: 42,
+                        ),
+                    ],
+                  ),
+                ),
+                Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      '$total',
+                      style: _numberTextStyle(
+                        fontSize: 24,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                    const Text(
+                      'Akkus',
+                      style: TextStyle(
+                        color: Color(0xFF64748B),
+                        fontSize: 11,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 12,
+            runSpacing: 9,
+            children: [
+              for (var i = 0; i < stats.length; i++)
+                _BatteryTypeLegendItem(
+                  color: _batteryChartColor(i),
+                  stats: stats[i],
+                  percent: total == 0 ? 0 : stats[i].count / total * 100,
+                ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _BatteryCycleForecastChart extends StatelessWidget {
+  final List<_BatteryCycleStats> stats;
+  final int maxCycles;
+
+  const _BatteryCycleForecastChart({
+    required this.stats,
+    required this.maxCycles,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return _BatteryStatsPanel(
+      title: 'Cycle-Zahlen / Max. $maxCycles',
+      child: Column(
+        children: [
+          const Row(
+            children: [
+              Text(
+                '0%',
+                style: _batteryScaleTextStyle,
+              ),
+              Spacer(),
+              Text(
+                '50%',
+                style: _batteryScaleTextStyle,
+              ),
+              Spacer(),
+              Text(
+                '100%',
+                style: _batteryScaleTextStyle,
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          for (var i = 0; i < stats.length; i++) ...[
+            _BatteryCycleBarRow(stats: stats[i]),
+            if (i != stats.length - 1) const SizedBox(height: 10),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _BatteryStatsPanel extends StatelessWidget {
+  final String title;
+  final Widget child;
+
+  const _BatteryStatsPanel({
+    required this.title,
+    required this.child,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF8FAFC),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: const Color(0xFFE2E8F0)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            title,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+              color: Color(0xFF06172E),
+              fontSize: 14,
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+          const SizedBox(height: 12),
+          child,
+        ],
+      ),
+    );
+  }
+}
+
+class _BatteryTypeLegendItem extends StatelessWidget {
+  final Color color;
+  final _BatteryTypeStats stats;
+  final double percent;
+
+  const _BatteryTypeLegendItem({
+    required this.color,
+    required this.stats,
+    required this.percent,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: 176,
+      child: Row(
+        children: [
+          Container(
+            width: 12,
+            height: 30,
+            decoration: BoxDecoration(
+              color: color,
+              borderRadius: BorderRadius.circular(999),
+            ),
+          ),
+          const SizedBox(width: 8),
+          const Icon(
+            Icons.battery_charging_full_rounded,
+            color: Color(0xFF0A84FF),
+            size: 20,
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              stats.label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                color: Color(0xFF06172E),
+                fontSize: 12,
+                fontWeight: FontWeight.w900,
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+          Text(
+            '${stats.count} (${percent.toStringAsFixed(0)}%)',
+            style: _numberTextStyle(
+              color: const Color(0xFF475569),
+              fontSize: 12,
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _BatteryCycleBarRow extends StatelessWidget {
+  final _BatteryCycleStats stats;
+
+  const _BatteryCycleBarRow({required this.stats});
+
+  @override
+  Widget build(BuildContext context) {
+    final barColor = Color.lerp(
+      const Color(0xFF16A34A),
+      const Color(0xFFDC2626),
+      stats.ratio.clamp(0.0, 1.0),
+    )!;
+    final percent = stats.ratio * 100;
+
+    return Row(
+      children: [
+        SizedBox(
+          width: 118,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                stats.label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  color: Color(0xFF06172E),
+                  fontSize: 12,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+              Text(
+                stats.typeLabel,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  color: Color(0xFF64748B),
+                  fontSize: 10,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: SizedBox(
+            height: 16,
+            child: Stack(
+              alignment: Alignment.centerLeft,
+              children: [
+                Container(
+                  height: 8,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFE2E8F0),
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                ),
+                FractionallySizedBox(
+                  widthFactor: stats.ratio.clamp(0.0, 1.0),
+                  child: Container(
+                    height: 8,
+                    decoration: BoxDecoration(
+                      color: barColor,
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                  ),
+                ),
+                Positioned(
+                  left: 0,
+                  right: 0,
+                  child: Container(
+                    height: 8,
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(999),
+                      border: Border.all(
+                        color: Colors.white.withValues(alpha: 0.72),
+                        width: 0.8,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(width: 10),
+        SizedBox(
+          width: 82,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Text(
+                '${stats.cycles}/${stats.maxCycles}',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: _numberTextStyle(
+                  color: barColor,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+              Text(
+                '${percent.toStringAsFixed(0)}%',
+                style: const TextStyle(
+                  color: Color(0xFF64748B),
+                  fontSize: 10,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _BatteryTypeStats {
+  final String label;
+  final int count;
+
+  const _BatteryTypeStats({
+    required this.label,
+    required this.count,
+  });
+}
+
+class _BatteryCycleStats {
+  final String label;
+  final String typeLabel;
+  final int cycles;
+  final int maxCycles;
+
+  const _BatteryCycleStats({
+    required this.label,
+    required this.typeLabel,
+    required this.cycles,
+    required this.maxCycles,
+  });
+
+  double get ratio => maxCycles <= 0 ? 0 : cycles / maxCycles;
+}
+
+List<_BatteryTypeStats> _buildBatteryTypeStats(List<BatteryPack> batteries) {
+  final counts = <String, int>{};
+  for (final battery in batteries) {
+    final label = _batteryTypeLabel(battery);
+    counts[label] = (counts[label] ?? 0) + 1;
+  }
+
+  final stats = [
+    for (final entry in counts.entries)
+      _BatteryTypeStats(label: entry.key, count: entry.value),
+  ]..sort((a, b) {
+      final countCompare = b.count.compareTo(a.count);
+      if (countCompare != 0) {
+        return countCompare;
+      }
+      return a.label.compareTo(b.label);
+    });
+
+  return stats;
+}
+
+List<_BatteryCycleStats> _buildBatteryCycleStats(
+  List<BatteryPack> batteries,
+  int maxCycles,
+) {
+  final stats = [
+    for (final battery in batteries)
+      _BatteryCycleStats(
+        label: _batteryDisplayLabel(battery),
+        typeLabel: _batteryTypeLabel(battery),
+        cycles: battery.cycles,
+        maxCycles: maxCycles,
+      ),
+  ]..sort((a, b) {
+      final ratioCompare = b.ratio.compareTo(a.ratio);
+      if (ratioCompare != 0) {
+        return ratioCompare;
+      }
+      return b.cycles.compareTo(a.cycles);
+    });
+
+  return stats;
+}
+
+String _batteryDisplayLabel(BatteryPack battery) {
+  if (battery.inventoryNumber > 0) {
+    return 'Akku ${battery.inventoryNumber}: ${battery.label}';
+  }
+  return battery.label;
+}
+
+String _batteryTypeLabel(BatteryPack battery) {
+  final chemistry = battery.chemistry.trim();
+  final chemistryLabel = chemistry.isEmpty ? 'Unbekannt' : chemistry;
+  return battery.cells > 0
+      ? '$chemistryLabel ${battery.cells}S'
+      : chemistryLabel;
+}
+
 List<_FlightTimePoint> _buildFlightTimeData(
   List<FlightLogEntry> flights,
   _FlightTimeRange range,
@@ -1252,6 +1793,12 @@ const _sectionTitleStyle = TextStyle(
   fontWeight: FontWeight.w900,
 );
 
+const _batteryScaleTextStyle = TextStyle(
+  color: Color(0xFF64748B),
+  fontSize: 10,
+  fontWeight: FontWeight.w800,
+);
+
 String? _categoryImageAsset(String category) {
   if (_isDrohneCategory(category)) {
     return 'assets/icons/drohne_60.png';
@@ -1421,6 +1968,20 @@ Color _categoryChartColor(int index) {
     Color(0xFF16A34A),
     Color(0xFFF59E0B),
     Color(0xFF7C3AED),
+    Color(0xFFDC2626),
+    Color(0xFF475569),
+  ];
+
+  return colors[index % colors.length];
+}
+
+Color _batteryChartColor(int index) {
+  const colors = [
+    Color(0xFF16A34A),
+    Color(0xFF0A84FF),
+    Color(0xFFF59E0B),
+    Color(0xFF7C3AED),
+    Color(0xFF0891B2),
     Color(0xFFDC2626),
     Color(0xFF475569),
   ];

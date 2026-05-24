@@ -212,6 +212,62 @@ class MemberChatService {
 
     await batch.commit();
   }
+
+  Future<void> clearChatHistory({
+    required String chatId,
+    required String currentUid,
+  }) async {
+    final chatRef = _chats.doc(chatId);
+    final chatSnapshot = await chatRef.get();
+    final data = chatSnapshot.data();
+    final participantIds = [
+      for (final item in data?['participantIds'] as List<dynamic>? ?? [])
+        if (item is String) item,
+    ];
+    if (!participantIds.contains(currentUid)) {
+      throw StateError('Only chat participants can clear a chat history.');
+    }
+
+    var deletedAnyMessages = false;
+    while (true) {
+      final messages = await chatRef.collection('messages').limit(450).get();
+      if (messages.docs.isEmpty) {
+        break;
+      }
+
+      final batch = _firestore.batch();
+      for (final doc in messages.docs) {
+        batch.delete(doc.reference);
+      }
+      _queueClearChatSummary(batch, chatRef, participantIds);
+      await batch.commit();
+      deletedAnyMessages = true;
+    }
+
+    if (!deletedAnyMessages) {
+      final batch = _firestore.batch();
+      _queueClearChatSummary(batch, chatRef, participantIds);
+      await batch.commit();
+    }
+  }
+
+  void _queueClearChatSummary(
+    WriteBatch batch,
+    DocumentReference<Map<String, dynamic>> chatRef,
+    List<String> participantIds,
+  ) {
+    final now = DateTime.now().toUtc().toIso8601String();
+    batch.update(chatRef, {
+      'lastMessage': '',
+      'lastSenderId': '',
+      'lastRecipientId': '',
+      'lastMessageAt': FieldValue.delete(),
+      'lastMessageAtClient': null,
+      for (final uid in participantIds) 'unreadCounts.$uid': 0,
+      'updatedAt': FieldValue.serverTimestamp(),
+      'updatedAtClient': now,
+    });
+  }
 }
 
 class ChatSummary {

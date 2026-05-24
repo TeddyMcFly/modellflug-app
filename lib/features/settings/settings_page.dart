@@ -75,7 +75,7 @@ class SettingsPage extends ConsumerWidget {
             children: [
               const _SettingsTabs(),
               Container(
-                height: 1820,
+                height: 1870,
                 decoration: const BoxDecoration(
                   borderRadius: BorderRadius.only(
                     bottomLeft: Radius.circular(8),
@@ -1965,8 +1965,17 @@ class _AppSettingsCard extends StatelessWidget {
                       ),
                     ),
                     _SwitchSettingTile(
+                      icon: Icons.timer_rounded,
+                      title: 'Startansage und Minutenton beim Flugtimer',
+                      value: settings.playFlightTimerMinuteTone,
+                      onChanged: (value) => onSettingsChanged(
+                        settings.copyWith(playFlightTimerMinuteTone: value),
+                      ),
+                    ),
+                    _SwitchSettingTile(
                       icon: Icons.login_rounded,
-                      title: 'Nach 100 % Laden automatisch Dashboard zeigen',
+                      title:
+                          'Programmstart: Bei 100 % automatisch zum Dashboard',
                       value: settings.autoOpenDashboardAfterLoading,
                       onChanged: (value) => onSettingsChanged(
                         settings.copyWith(
@@ -2123,6 +2132,12 @@ class _AppSettingsCard extends StatelessWidget {
                       title: 'Was ist neu',
                       value: 'Aenderungen anzeigen',
                       onTap: () => _showWhatsNewDialog(context),
+                    ),
+                    _ActionSettingTile(
+                      icon: Icons.help_center_rounded,
+                      title: 'Programm-Hilfe',
+                      value: 'PDF-Hilfe oeffnen',
+                      onTap: () => _showProgramHelpDialog(context),
                     ),
                     _ActionSettingTile(
                       icon: Icons.contact_mail_rounded,
@@ -3235,6 +3250,35 @@ Future<void> _showWhatsNewDialog(BuildContext context) async {
   await showDialog<void>(
     context: context,
     builder: (context) => const _WhatsNewDialog(),
+  );
+}
+
+Future<void> _showProgramHelpDialog(BuildContext context) async {
+  await showDialog<void>(
+    context: context,
+    builder: (context) {
+      return AlertDialog(
+        title: const Text('Programm-Hilfe'),
+        content: const SizedBox(
+          width: 420,
+          child: Text(
+            'Die Hilfe-PDF wird spaeter hier geoeffnet. Am sparsamsten ist eine kleine PDF-Datei, die mit der App ausgeliefert und nach dem ersten Laden im Browser zwischengespeichert wird.',
+            style: TextStyle(
+              color: Color(0xFF334155),
+              fontSize: 13,
+              height: 1.35,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ),
+        actions: [
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Schliessen'),
+          ),
+        ],
+      );
+    },
   );
 }
 

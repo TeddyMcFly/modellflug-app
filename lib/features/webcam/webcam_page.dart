@@ -1380,12 +1380,11 @@ class _WindCompass extends StatelessWidget {
               children: [
                 TextSpan(text: '$label $degrees Grad\n'),
                 TextSpan(
-                  text: 'Wind $windSpeed',
+                  text: 'Wind ${_keepSpeedUnitTogether(windSpeed)}\n',
                   style: const TextStyle(color: Color(0xFF0A84FF)),
                 ),
-                const TextSpan(text: ' / '),
                 TextSpan(
-                  text: 'Boeen $gustSpeed',
+                  text: 'Boeen ${_keepSpeedUnitTogether(gustSpeed)}',
                   style: const TextStyle(color: Color(0xFFE11D2E)),
                 ),
               ],
@@ -1401,6 +1400,10 @@ class _WindCompass extends StatelessWidget {
       ),
     );
   }
+}
+
+String _keepSpeedUnitTogether(String value) {
+  return value.replaceAll('km/h', 'km\u{2060}/\u{2060}h');
 }
 
 class _WindCompassInstrument extends StatefulWidget {

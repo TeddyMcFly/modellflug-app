@@ -15,7 +15,7 @@ class LandingPage extends ConsumerStatefulWidget {
 }
 
 class _LandingPageState extends ConsumerState<LandingPage> {
-  static const _landingImage = 'assets/splash/landingpage_01.jpg';
+  static const _landingImage = 'assets/splash/landingpage_heaven.png';
   static const _startSound = 'assets/audio/prog_start.mp3';
   static bool _startSoundPlayed = false;
   static const _loadingSteps = [
@@ -33,6 +33,7 @@ class _LandingPageState extends ConsumerState<LandingPage> {
   int _stepIndex = 0;
   bool _isLeaving = false;
   bool _loadingCompleteHandled = false;
+  bool _showEnableSoundButton = false;
 
   bool get _isReady => _progress >= 1;
 
@@ -42,7 +43,7 @@ class _LandingPageState extends ConsumerState<LandingPage> {
     _startSoundPlayer = StartSoundPlayer(_startSound);
     _soundDelayTimer = Timer(
       const Duration(milliseconds: 500),
-      _playStartSoundIfAllowed,
+      () => unawaited(_playStartSoundIfAllowed()),
     );
 
     _timer = Timer.periodic(const Duration(milliseconds: 180), (timer) {
@@ -72,7 +73,7 @@ class _LandingPageState extends ConsumerState<LandingPage> {
     super.dispose();
   }
 
-  void _playStartSoundIfAllowed() {
+  Future<void> _playStartSoundIfAllowed() async {
     if (!mounted || _startSoundPlayed) {
       return;
     }
@@ -82,17 +83,77 @@ class _LandingPageState extends ConsumerState<LandingPage> {
       _soundDelayTimer?.cancel();
       _soundDelayTimer = Timer(
         const Duration(milliseconds: 100),
-        _playStartSoundIfAllowed,
+        () => unawaited(_playStartSoundIfAllowed()),
       );
       return;
     }
 
     if (!fleet.appSettings.playStartSound) {
+      if (_showEnableSoundButton) {
+        setState(() {
+          _showEnableSoundButton = false;
+        });
+      }
+      return;
+    }
+
+    final didStart = await _startSoundPlayer.play();
+    if (!mounted) {
+      return;
+    }
+
+    if (didStart) {
+      _startSoundPlayed = true;
+      if (_showEnableSoundButton) {
+        setState(() {
+          _showEnableSoundButton = false;
+        });
+      }
+      return;
+    }
+
+    if (!_showEnableSoundButton) {
+      setState(() {
+        _showEnableSoundButton = true;
+      });
+    }
+  }
+
+  Future<void> _enableStartSound() async {
+    if (_startSoundPlayed) {
+      setState(() {
+        _showEnableSoundButton = false;
+      });
+      return;
+    }
+
+    final fleet = ref.read(fleetProvider);
+    if (!fleet.isLoaded || !fleet.appSettings.playStartSound) {
+      return;
+    }
+
+    final didStart = await _startSoundPlayer.play();
+    if (!mounted) {
+      return;
+    }
+
+    if (!didStart) {
+      setState(() {
+        _showEnableSoundButton = true;
+      });
       return;
     }
 
     _startSoundPlayed = true;
-    unawaited(_startSoundPlayer.play());
+    setState(() {
+      _showEnableSoundButton = false;
+    });
+
+    if (_isReady &&
+        fleet.appSettings.autoOpenDashboardAfterLoading &&
+        !_isLeaving) {
+      unawaited(_openDashboard());
+    }
   }
 
   Future<void> _handleLoadingComplete() async {
@@ -109,7 +170,8 @@ class _LandingPageState extends ConsumerState<LandingPage> {
       return;
     }
 
-    if (ref.read(fleetProvider).appSettings.autoOpenDashboardAfterLoading) {
+    if (ref.read(fleetProvider).appSettings.autoOpenDashboardAfterLoading &&
+        !_showEnableSoundButton) {
       await _openDashboard();
     }
   }
@@ -133,6 +195,7 @@ class _LandingPageState extends ConsumerState<LandingPage> {
     if (_isReady &&
         fleet.isLoaded &&
         fleet.appSettings.autoOpenDashboardAfterLoading &&
+        !_showEnableSoundButton &&
         !_isLeaving) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) {
@@ -191,7 +254,7 @@ class _LandingPageState extends ConsumerState<LandingPage> {
                               Image.asset(
                                 _landingImage,
                                 fit: BoxFit.cover,
-                                semanticLabel: 'Modellflug App Landing Page',
+                                semanticLabel: 'Modellflug-Heaven Landing Page',
                               ),
                               Align(
                                 alignment: Alignment.bottomCenter,
@@ -202,6 +265,9 @@ class _LandingPageState extends ConsumerState<LandingPage> {
                                     progress: _progress,
                                     status: _loadingSteps[_stepIndex],
                                     isReady: _isReady,
+                                    showEnableSoundButton:
+                                        _showEnableSoundButton,
+                                    onEnableSound: _enableStartSound,
                                     onOpenDashboard: _openDashboard,
                                   ),
                                 ),
@@ -226,12 +292,16 @@ class _LoadingPanel extends StatelessWidget {
   final double progress;
   final String status;
   final bool isReady;
+  final bool showEnableSoundButton;
+  final VoidCallback onEnableSound;
   final VoidCallback onOpenDashboard;
 
   const _LoadingPanel({
     required this.progress,
     required this.status,
     required this.isReady,
+    required this.showEnableSoundButton,
+    required this.onEnableSound,
     required this.onOpenDashboard,
   });
 
@@ -239,74 +309,103 @@ class _LoadingPanel extends StatelessWidget {
   Widget build(BuildContext context) {
     return SizedBox(
       width: 300,
-      child: AnimatedSwitcher(
-        duration: const Duration(milliseconds: 260),
-        child: isReady
-            ? FilledButton.icon(
-                key: const ValueKey('ready-button'),
-                onPressed: onOpenDashboard,
-                icon: const Icon(Icons.flight_takeoff_rounded),
-                label: const Text('Dashboard oeffnen'),
-                style: FilledButton.styleFrom(
-                  backgroundColor:
-                      const Color(0xFF0A84FF).withValues(alpha: 0.92),
-                  minimumSize: const Size(190, 40),
-                  textStyle: const TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w900,
-                  ),
-                ),
-              )
-            : Column(
-                key: const ValueKey('loading-panel'),
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  AnimatedOpacity(
-                    duration: const Duration(milliseconds: 240),
-                    opacity: 0.82,
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        const Icon(
-                          Icons.flight_takeoff_rounded,
-                          color: Color(0xFF0A84FF),
-                          size: 14,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          AnimatedSwitcher(
+            duration: const Duration(milliseconds: 220),
+            child: showEnableSoundButton
+                ? Padding(
+                    key: const ValueKey('enable-sound-button'),
+                    padding: const EdgeInsets.only(bottom: 10),
+                    child: FilledButton.icon(
+                      onPressed: onEnableSound,
+                      icon: const Icon(Icons.volume_up_rounded, size: 18),
+                      label: const Text('Ton aktivieren'),
+                      style: FilledButton.styleFrom(
+                        backgroundColor:
+                            const Color(0xFF22C55E).withValues(alpha: 0.94),
+                        foregroundColor: Colors.white,
+                        minimumSize: const Size(190, 40),
+                        textStyle: const TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w900,
                         ),
-                        const SizedBox(width: 6),
-                        Text(
-                          status.toUpperCase(),
-                          textAlign: TextAlign.center,
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 11,
-                            fontWeight: FontWeight.w900,
-                            letterSpacing: 0.6,
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        Text(
-                          '${(progress * 100).round()}%',
-                          style: const TextStyle(
-                            color: Color(0xFFBFDBFE),
-                            fontSize: 11,
-                            fontWeight: FontWeight.w800,
-                          ),
-                        ),
-                      ],
+                      ),
                     ),
-                  ),
-                  const SizedBox(height: 6),
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(8),
-                    child: LinearProgressIndicator(
-                      minHeight: 4,
-                      value: progress,
-                      color: const Color(0xFF0A84FF),
-                      backgroundColor: Colors.white.withValues(alpha: 0.24),
+                  )
+                : const SizedBox.shrink(key: ValueKey('enable-sound-empty')),
+          ),
+          AnimatedSwitcher(
+            duration: const Duration(milliseconds: 260),
+            child: isReady
+                ? FilledButton.icon(
+                    key: const ValueKey('ready-button'),
+                    onPressed: onOpenDashboard,
+                    icon: const Icon(Icons.flight_takeoff_rounded),
+                    label: const Text('Dashboard oeffnen'),
+                    style: FilledButton.styleFrom(
+                      backgroundColor:
+                          const Color(0xFF0A84FF).withValues(alpha: 0.92),
+                      minimumSize: const Size(190, 40),
+                      textStyle: const TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w900,
+                      ),
                     ),
+                  )
+                : Column(
+                    key: const ValueKey('loading-panel'),
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      AnimatedOpacity(
+                        duration: const Duration(milliseconds: 240),
+                        opacity: 0.82,
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            const Icon(
+                              Icons.flight_takeoff_rounded,
+                              color: Color(0xFF0A84FF),
+                              size: 14,
+                            ),
+                            const SizedBox(width: 6),
+                            Text(
+                              status.toUpperCase(),
+                              textAlign: TextAlign.center,
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 11,
+                                fontWeight: FontWeight.w900,
+                                letterSpacing: 0.6,
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Text(
+                              '${(progress * 100).round()}%',
+                              style: const TextStyle(
+                                color: Color(0xFFBFDBFE),
+                                fontSize: 11,
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(8),
+                        child: LinearProgressIndicator(
+                          minHeight: 4,
+                          value: progress,
+                          color: const Color(0xFF0A84FF),
+                          backgroundColor: Colors.white.withValues(alpha: 0.24),
+                        ),
+                      ),
+                    ],
                   ),
-                ],
-              ),
+          ),
+        ],
       ),
     );
   }

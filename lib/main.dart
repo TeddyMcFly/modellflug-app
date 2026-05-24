@@ -38,7 +38,7 @@ class _ModellflugAppState extends State<ModellflugApp> {
   Widget build(BuildContext context) {
     return MaterialApp.router(
       debugShowCheckedModeBanner: false,
-      title: 'Modellflug App',
+      title: 'Modellflug-Heaven',
       theme: AppTheme.lightTheme,
       darkTheme: AppTheme.darkTheme,
       routerConfig: _router,

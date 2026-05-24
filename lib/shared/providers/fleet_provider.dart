@@ -341,7 +341,7 @@ class FleetNotifier extends StateNotifier<FleetState> {
     );
   }
 
-  void addFlight(FlightLogEntry entry) {
+  void addFlight(FlightLogEntry entry, {String? usedBatteryId}) {
     final updatedAircraft = [
       for (final item in state.aircraft)
         if (item.id == entry.aircraftId)
@@ -352,14 +352,26 @@ class FleetNotifier extends StateNotifier<FleetState> {
         else
           item,
     ];
+    final updatedBatteries = [
+      for (final item in state.batteries)
+        if (item.id == usedBatteryId)
+          item.copyWith(cycles: item.cycles + 1, lastUsed: entry.date)
+        else
+          item,
+    ];
 
     state = state.copyWith(
       aircraft: updatedAircraft,
+      batteries: updatedBatteries,
       flights: [entry, ...state.flights],
     );
     final changedAircraft = [
       for (final aircraft in updatedAircraft)
         if (aircraft.id == entry.aircraftId) aircraft,
+    ];
+    final changedBatteries = [
+      for (final battery in updatedBatteries)
+        if (battery.id == usedBatteryId) battery,
     ];
     _persistLater(
       (repository, user, snapshot) => repository.saveFlight(
@@ -367,6 +379,7 @@ class FleetNotifier extends StateNotifier<FleetState> {
         state: snapshot,
         flight: entry,
         changedAircraft: changedAircraft,
+        changedBatteries: changedBatteries,
       ),
     );
   }

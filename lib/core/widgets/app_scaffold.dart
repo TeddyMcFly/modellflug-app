@@ -1446,7 +1446,7 @@ class _BrandBlock extends StatelessWidget {
           _BrandIcon(),
           SizedBox(height: 5),
           Text(
-            'Modellflug-App',
+            'Modellflug-Heaven',
             textAlign: TextAlign.center,
             overflow: TextOverflow.ellipsis,
             style: TextStyle(

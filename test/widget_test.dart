@@ -8,7 +8,7 @@ void main() {
     await tester.pumpWidget(const ProviderScope(child: ModellflugApp()));
 
     expect(
-      find.bySemanticsLabel('Modellflug App Landing Page'),
+      find.bySemanticsLabel('Modellflug-Heaven Landing Page'),
       findsOneWidget,
     );
 

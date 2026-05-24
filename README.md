@@ -1,4 +1,18 @@
-# modellflug_app
+# Modellflug-Heaven
+
+## Homepage lokal starten
+
+Fuer die getrennte Info-Homepage im Ordner `homepage` reicht:
+
+```powershell
+.\Start.cmd
+```
+
+Danach wird die lokale Adresse angezeigt:
+
+```text
+http://localhost:52800/
+```
 
 A new Flutter project.
 

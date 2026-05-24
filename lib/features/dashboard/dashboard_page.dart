@@ -1308,8 +1308,13 @@ class _TransmitterAssignmentsTable extends StatelessWidget {
                               DataColumn(
                                   label: _DashboardTableHeader('Sender')),
                               DataColumn(
-                                label: _DashboardTableHeader(
-                                  'Sender-Speicherplatz',
+                                label: SizedBox(
+                                  width: 105,
+                                  child: Center(
+                                    child: _DashboardTableHeader(
+                                      'Speicherplatz',
+                                    ),
+                                  ),
                                 ),
                               ),
                             ],
@@ -1329,9 +1334,15 @@ class _TransmitterAssignmentsTable extends StatelessWidget {
                                       ),
                                     ),
                                     DataCell(
-                                      _DashboardTableText(
-                                        _tableFallback(
-                                          aircraft.transmitterMemorySlot,
+                                      SizedBox(
+                                        width: 105,
+                                        child: Center(
+                                          child: _DashboardTableText(
+                                            _tableFallback(
+                                              aircraft.transmitterMemorySlot,
+                                            ),
+                                            textAlign: TextAlign.center,
+                                          ),
                                         ),
                                       ),
                                     ),
@@ -1420,13 +1431,18 @@ class _DashboardTableHeader extends StatelessWidget {
 
 class _DashboardTableText extends StatelessWidget {
   final String text;
+  final TextAlign textAlign;
 
-  const _DashboardTableText(this.text);
+  const _DashboardTableText(
+    this.text, {
+    this.textAlign = TextAlign.left,
+  });
 
   @override
   Widget build(BuildContext context) {
     return Text(
       text,
+      textAlign: textAlign,
       overflow: TextOverflow.ellipsis,
       style: const TextStyle(
         color: Color(0xFF334155),
