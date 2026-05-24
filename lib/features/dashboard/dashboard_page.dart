@@ -7,6 +7,7 @@ import '../../core/widgets/app_scaffold.dart';
 import '../../shared/models/aircraft_model.dart';
 import '../../shared/providers/fleet_provider.dart';
 import '../../shared/services/open_meteo_service.dart';
+import '../../shared/utils/flight_time_format.dart';
 import '../../shared/utils/media_source.dart';
 import '../webcam/webcam_page.dart';
 
@@ -40,7 +41,7 @@ class DashboardPage extends ConsumerWidget {
             _MetricCard(
               icon: Icons.timelapse_rounded,
               label: 'Gesamtflugzeit',
-              value: '${fleet.totalHours.toStringAsFixed(1)} h',
+              value: formatFlightMinutes(fleet.totalMinutes),
             ),
             _MetricCard(
               icon: Icons.flight_takeoff_rounded,
@@ -286,7 +287,7 @@ class _AircraftPhotoTile extends StatelessWidget {
               ),
               const SizedBox(height: 2),
               Text(
-                '${aircraft.status.label} - ${aircraft.flightHours.toStringAsFixed(1)} h',
+                '${aircraft.status.label} - ${formatFlightHours(aircraft.flightHours)}',
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: TextStyle(

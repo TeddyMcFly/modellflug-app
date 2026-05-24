@@ -16,6 +16,7 @@ const _navigationColor = Color(0xFF06172E);
 const _accentColor = Color(0xFF0A84FF);
 const _activeNavColor = _accentColor;
 const _pageBackgroundColor = Color(0xFFF3F5F8);
+const _navigationHeaderLogoAsset = 'assets/icons/navigation_header_logo.png';
 
 class AppScaffold extends ConsumerWidget {
   final String title;
@@ -1466,114 +1467,15 @@ class _BrandIcon extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return const SizedBox(
-      width: 68,
-      height: 46,
-      child: CustomPaint(
-        painter: _BrandIconPainter(),
-        child: Center(
-          child: Icon(
-            Icons.airplanemode_active_rounded,
-            color: Colors.white,
-            size: 25,
-          ),
-        ),
-      ),
+    return Image.asset(
+      _navigationHeaderLogoAsset,
+      width: 104,
+      height: 44,
+      fit: BoxFit.contain,
+      filterQuality: FilterQuality.high,
+      semanticLabel: 'Modellflug-Heaven',
     );
   }
-}
-
-class _BrandIconPainter extends CustomPainter {
-  const _BrandIconPainter();
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final center = Offset(size.width / 2, size.height / 2);
-    final ringPaint = Paint()
-      ..color = Colors.white.withValues(alpha: 0.96)
-      ..strokeWidth = 2.4
-      ..style = PaintingStyle.stroke;
-
-    void drawWing({
-      required bool left,
-      required double top,
-      required double outerInset,
-      required double inner,
-      required double thickness,
-      required double alpha,
-    }) {
-      final paint = Paint()
-        ..color = Colors.white.withValues(alpha: alpha)
-        ..style = PaintingStyle.fill;
-      final path = Path();
-
-      if (left) {
-        path
-          ..moveTo(size.width * outerInset, size.height * top)
-          ..lineTo(size.width * inner, size.height * top)
-          ..lineTo(
-              size.width * (inner - 0.055), size.height * (top + thickness))
-          ..lineTo(
-            size.width * (outerInset + 0.075),
-            size.height * (top + thickness),
-          )
-          ..close();
-      } else {
-        path
-          ..moveTo(size.width * (1 - inner), size.height * top)
-          ..lineTo(size.width * (1 - outerInset), size.height * top)
-          ..lineTo(
-            size.width * (1 - outerInset - 0.075),
-            size.height * (top + thickness),
-          )
-          ..lineTo(
-            size.width * (1 - inner + 0.055),
-            size.height * (top + thickness),
-          )
-          ..close();
-      }
-
-      canvas.drawPath(path, paint);
-    }
-
-    for (final side in [true, false]) {
-      drawWing(
-        left: side,
-        top: 0.31,
-        outerInset: 0.00,
-        inner: 0.42,
-        thickness: 0.12,
-        alpha: 0.94,
-      );
-      drawWing(
-        left: side,
-        top: 0.48,
-        outerInset: 0.035,
-        inner: 0.38,
-        thickness: 0.11,
-        alpha: 0.82,
-      );
-      drawWing(
-        left: side,
-        top: 0.64,
-        outerInset: 0.075,
-        inner: 0.34,
-        thickness: 0.09,
-        alpha: 0.68,
-      );
-    }
-
-    canvas.drawArc(
-      Rect.fromCircle(center: center, radius: size.height * 0.37),
-      -2.65,
-      5.3,
-      false,
-      ringPaint,
-    );
-  }
-
-  @override
-  bool shouldRepaint(covariant _BrandIconPainter oldDelegate) => false;
 }
 
 class _TopNav extends StatelessWidget {

@@ -6,6 +6,7 @@ import 'package:uuid/uuid.dart';
 import '../../core/widgets/app_scaffold.dart';
 import '../../shared/models/aircraft_model.dart';
 import '../../shared/providers/fleet_provider.dart';
+import '../../shared/utils/flight_time_format.dart';
 import '../../shared/utils/media_source.dart';
 
 class FlightbookPage extends ConsumerWidget {
@@ -35,7 +36,7 @@ class FlightbookPage extends ConsumerWidget {
             _FlightbookMetricCard(
               icon: Icons.timelapse_rounded,
               label: 'Gesamtflugzeit',
-              value: '${_totalFlightHours(fleet.flights).toStringAsFixed(1)} h',
+              value: formatFlightMinutes(_totalFlightMinutes(fleet.flights)),
             ),
             _FlightbookMetricCard(
               icon: Icons.flight_takeoff_rounded,
@@ -731,12 +732,11 @@ IconData _categoryIcon(String category) {
   return Icons.airplanemode_active_rounded;
 }
 
-double _totalFlightHours(List<FlightLogEntry> flights) {
-  final totalMinutes = flights.fold<int>(
+int _totalFlightMinutes(List<FlightLogEntry> flights) {
+  return flights.fold<int>(
     0,
     (sum, flight) => sum + flight.durationMinutes,
   );
-  return totalMinutes / 60;
 }
 
 class _FlightDialog extends StatefulWidget {

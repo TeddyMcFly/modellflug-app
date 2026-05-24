@@ -38,8 +38,10 @@ class FleetState {
 
   int get totalFlights => flights.length;
 
-  double get totalHours =>
-      flights.fold(0, (sum, item) => sum + item.durationMinutes / 60);
+  int get totalMinutes =>
+      flights.fold(0, (sum, item) => sum + item.durationMinutes);
+
+  double get totalHours => totalMinutes / 60;
 
   int get nextBatteryInventoryNumber {
     if (batteries.isEmpty) {

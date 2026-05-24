@@ -12,7 +12,7 @@ import '../../shared/services/member_chat_service.dart';
 import '../../shared/utils/media_source.dart';
 
 const _chatFrameColor = Color(0xFF06172E);
-const _flightRadioAsset = 'assets/icons/flugfunk.png';
+const _flightRadioAsset = 'assets/icons/flight_radio_header_logo.png';
 
 class FriendsPage extends ConsumerStatefulWidget {
   const FriendsPage({super.key});
@@ -41,7 +41,7 @@ class _FriendsPageState extends ConsumerState<FriendsPage> {
     );
 
     return AppScaffold(
-      title: 'Flug-Funk',
+      title: 'Flugfunk',
       subtitle: 'Angemeldete Mitglieder und direkte Nachrichten im Blick.',
       action: _ChatAvailabilityPill(enabled: reachableByChat),
       children: [
@@ -210,29 +210,31 @@ class _MemberListState extends State<_MemberList> {
                   ),
                 ],
                 const SizedBox(height: 12),
-                _FlightRadioPanel(
-                  enabled: widget.currentUserReachable,
-                  reachableCount: reachableMembers.length + 1,
-                  chat: flightRoomChat,
-                  currentUid: widget.currentUser.uid,
-                  onOpen: () => _openFlightRoom(context, reachableMembers),
-                  onCreatePrivateGroup: reachableMembers.length >= 2
-                      ? () => _openCreatePrivateGroup(context, reachableMembers)
-                      : null,
-                ),
-                if (privateGroupChats.isNotEmpty) ...[
-                  const SizedBox(height: 12),
-                  _PrivateGroupsPanel(
+                _RadioRoomsGrid(
+                  flightRoom: _FlightRadioPanel(
+                    enabled: widget.currentUserReachable,
+                    reachableCount: reachableMembers.length + 1,
+                    chat: flightRoomChat,
+                    currentUid: widget.currentUser.uid,
+                    onOpen: () => _openFlightRoom(context, reachableMembers),
+                  ),
+                  privateRound: _PrivateRoundPanel(
+                    enabled: widget.currentUserReachable,
+                    reachablePeerCount: reachableMembers.length,
                     chats: privateGroupChats,
                     currentUid: widget.currentUser.uid,
                     members: members,
+                    onCreate: reachableMembers.length >= 2
+                        ? () =>
+                            _openCreatePrivateGroup(context, reachableMembers)
+                        : null,
                     onOpen: (chat) => _openExistingGroup(
                       context,
                       chat,
                       members,
                     ),
                   ),
-                ],
+                ),
                 const SizedBox(height: 12),
                 if (members.isEmpty)
                   _InfoCard(
@@ -603,13 +605,48 @@ class _MemberStatCard extends StatelessWidget {
   }
 }
 
+class _RadioRoomsGrid extends StatelessWidget {
+  final Widget flightRoom;
+  final Widget privateRound;
+
+  const _RadioRoomsGrid({
+    required this.flightRoom,
+    required this.privateRound,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        if (constraints.maxWidth >= 860) {
+          return Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(child: flightRoom),
+              const SizedBox(width: 12),
+              Expanded(child: privateRound),
+            ],
+          );
+        }
+
+        return Column(
+          children: [
+            flightRoom,
+            const SizedBox(height: 12),
+            privateRound,
+          ],
+        );
+      },
+    );
+  }
+}
+
 class _FlightRadioPanel extends StatelessWidget {
   final bool enabled;
   final int reachableCount;
   final ChatSummary? chat;
   final String currentUid;
   final VoidCallback onOpen;
-  final VoidCallback? onCreatePrivateGroup;
 
   const _FlightRadioPanel({
     required this.enabled,
@@ -617,7 +654,6 @@ class _FlightRadioPanel extends StatelessWidget {
     required this.chat,
     required this.currentUid,
     required this.onOpen,
-    required this.onCreatePrivateGroup,
   });
 
   @override
@@ -631,113 +667,92 @@ class _FlightRadioPanel extends StatelessWidget {
       surfaceTintColor: Colors.transparent,
       child: Padding(
         padding: const EdgeInsets.all(16),
-        child: Wrap(
-          spacing: 14,
-          runSpacing: 14,
-          crossAxisAlignment: WrapCrossAlignment.center,
-          alignment: WrapAlignment.spaceBetween,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 460),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Stack(
-                    clipBehavior: Clip.none,
+            Row(
+              children: [
+                Stack(
+                  clipBehavior: Clip.none,
+                  children: [
+                    const CircleAvatar(
+                      radius: 26,
+                      backgroundColor: Color(0xFF0A84FF),
+                      child: Icon(
+                        Icons.forum_rounded,
+                        color: Colors.white,
+                        size: 27,
+                      ),
+                    ),
+                    if (unreadCount > 0)
+                      Positioned(
+                        right: -6,
+                        top: -8,
+                        child: _UnreadBadge(count: unreadCount),
+                      ),
+                  ],
+                ),
+                const SizedBox(width: 12),
+                Flexible(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const CircleAvatar(
-                        radius: 26,
-                        backgroundColor: Color(0xFF0A84FF),
-                        child: Icon(
-                          Icons.forum_rounded,
-                          color: Colors.white,
-                          size: 27,
+                      const Text(
+                        'Flugfunk-Raum',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: Color(0xFF06172E),
+                          fontSize: 17,
+                          fontWeight: FontWeight.w900,
                         ),
                       ),
-                      if (unreadCount > 0)
-                        Positioned(
-                          right: -6,
-                          top: -8,
-                          child: _UnreadBadge(count: unreadCount),
+                      const SizedBox(height: 2),
+                      Text(
+                        enabled
+                            ? '$reachableCount chatbereite Teilnehmer'
+                            : 'Chat ist ausgeschaltet',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: Color(0xFF64748B),
+                          fontSize: 12,
+                          fontWeight: FontWeight.w800,
                         ),
+                      ),
                     ],
                   ),
-                  const SizedBox(width: 12),
-                  Flexible(
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text(
-                          'Flugfunk-Raum',
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            color: Color(0xFF06172E),
-                            fontSize: 17,
-                            fontWeight: FontWeight.w900,
-                          ),
-                        ),
-                        const SizedBox(height: 2),
-                        Text(
-                          enabled
-                              ? '$reachableCount chatbereite Teilnehmer'
-                              : 'Chat ist ausgeschaltet',
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                            color: Color(0xFF64748B),
-                            fontSize: 12,
-                            fontWeight: FontWeight.w800,
-                          ),
-                        ),
-                        if (lastMessage.isNotEmpty) ...[
-                          const SizedBox(height: 6),
-                          Text(
-                            lastMessage,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                              color: unreadCount > 0
-                                  ? const Color(0xFF06172E)
-                                  : const Color(0xFF475569),
-                              fontSize: 12,
-                              fontWeight: unreadCount > 0
-                                  ? FontWeight.w900
-                                  : FontWeight.w700,
-                            ),
-                          ),
-                          if (lastTime != null)
-                            Text(
-                              _dateTimeLabel(lastTime),
-                              style: const TextStyle(
-                                color: Color(0xFF94A3B8),
-                                fontSize: 10,
-                                fontWeight: FontWeight.w700,
-                              ),
-                            ),
-                        ],
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                FilledButton.icon(
-                  onPressed: enabled ? onOpen : null,
-                  icon: const Icon(Icons.forum_rounded),
-                  label: const Text('Oeffnen'),
-                ),
-                OutlinedButton.icon(
-                  onPressed: enabled ? onCreatePrivateGroup : null,
-                  icon: const Icon(Icons.group_add_rounded),
-                  label: const Text('Private Runde'),
                 ),
               ],
+            ),
+            const SizedBox(height: 12),
+            const Text(
+              'Gemeinsamer Raum fuer alle chatbereiten Mitglieder. Ideal fuer kurze Absprachen am Platz und Nachrichten an die ganze Runde.',
+              style: TextStyle(
+                color: Color(0xFF475569),
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
+                height: 1.35,
+              ),
+            ),
+            if (lastMessage.isNotEmpty) ...[
+              const SizedBox(height: 12),
+              _LastRoomMessage(
+                unread: unreadCount > 0,
+                message: lastMessage,
+                time: lastTime,
+              ),
+            ],
+            const SizedBox(height: 14),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: FilledButton.icon(
+                onPressed: enabled ? onOpen : null,
+                icon: const Icon(Icons.forum_rounded),
+                label: const Text('Flugfunk oeffnen'),
+              ),
             ),
           ],
         ),
@@ -746,29 +761,120 @@ class _FlightRadioPanel extends StatelessWidget {
   }
 }
 
-class _PrivateGroupsPanel extends StatelessWidget {
+class _PrivateRoundPanel extends StatelessWidget {
+  final bool enabled;
+  final int reachablePeerCount;
   final List<ChatSummary> chats;
   final String currentUid;
   final List<MemberProfile> members;
+  final VoidCallback? onCreate;
   final ValueChanged<ChatSummary> onOpen;
 
-  const _PrivateGroupsPanel({
+  const _PrivateRoundPanel({
+    required this.enabled,
+    required this.reachablePeerCount,
     required this.chats,
     required this.currentUid,
     required this.members,
+    required this.onCreate,
     required this.onOpen,
   });
 
   @override
   Widget build(BuildContext context) {
+    final canCreate = enabled && onCreate != null;
+    final status = enabled
+        ? '$reachablePeerCount Mitglieder auswaehlbar'
+        : 'Chat ist ausgeschaltet';
+
     return Card(
       color: Colors.white,
       surfaceTintColor: Colors.transparent,
       clipBehavior: Clip.antiAlias,
       child: Column(
         mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          const _PrivateGroupsHeader(),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    const CircleAvatar(
+                      radius: 26,
+                      backgroundColor: Color(0xFFE8EDF3),
+                      child: Icon(
+                        Icons.group_add_rounded,
+                        color: Color(0xFF0A84FF),
+                        size: 27,
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            'Private Runde',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              color: Color(0xFF06172E),
+                              fontSize: 17,
+                              fontWeight: FontWeight.w900,
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            status,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              color: Color(0xFF64748B),
+                              fontSize: 12,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                const Text(
+                  'Eigener Chatraum fuer ausgewaehlte Mitglieder. Gut fuer Teams, Verabredungen oder Themen, die nicht an alle gehen sollen.',
+                  style: TextStyle(
+                    color: Color(0xFF475569),
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                    height: 1.35,
+                  ),
+                ),
+                const SizedBox(height: 14),
+                FilledButton.icon(
+                  onPressed: canCreate ? onCreate : null,
+                  icon: const Icon(Icons.group_add_rounded),
+                  label: const Text('Private Runde starten'),
+                ),
+                if (enabled && onCreate == null) ...[
+                  const SizedBox(height: 8),
+                  const Text(
+                    'Mindestens zwei andere chatbereite Mitglieder werden gebraucht.',
+                    style: TextStyle(
+                      color: Color(0xFF94A3B8),
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+          if (chats.isNotEmpty) const _PrivateGroupsHeader(),
           for (final chat in chats)
             _PrivateGroupRow(
               chat: chat,
@@ -777,6 +883,60 @@ class _PrivateGroupsPanel extends StatelessWidget {
               onOpen: () => onOpen(chat),
             ),
         ],
+      ),
+    );
+  }
+}
+
+class _LastRoomMessage extends StatelessWidget {
+  final bool unread;
+  final String message;
+  final DateTime? time;
+
+  const _LastRoomMessage({
+    required this.unread,
+    required this.message,
+    required this.time,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: const Color(0xFFF8FAFC),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: const Color(0xFFE2E8F0)),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(10),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              message,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color:
+                    unread ? const Color(0xFF06172E) : const Color(0xFF475569),
+                fontSize: 12,
+                fontWeight: unread ? FontWeight.w900 : FontWeight.w700,
+              ),
+            ),
+            if (time != null) ...[
+              const SizedBox(height: 3),
+              Text(
+                _dateTimeLabel(time!),
+                style: const TextStyle(
+                  color: Color(0xFF94A3B8),
+                  fontSize: 10,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ],
+          ],
+        ),
       ),
     );
   }
@@ -2035,9 +2195,9 @@ class _ChatDialogHeader extends StatelessWidget {
     return ColoredBox(
       color: _chatFrameColor,
       child: ConstrainedBox(
-        constraints: const BoxConstraints(minHeight: 142),
+        constraints: const BoxConstraints(minHeight: 148),
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(22, 24, 18, 22),
+          padding: const EdgeInsets.fromLTRB(22, 14, 30, 14),
           child: Row(
             children: [
               _ChatHeaderAvatar(members: members),
@@ -2087,12 +2247,15 @@ class _FlightRadioHeaderLogo extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Image.asset(
-      _flightRadioAsset,
-      width: 92,
-      height: 92,
-      fit: BoxFit.contain,
-      filterQuality: FilterQuality.high,
+    return Padding(
+      padding: const EdgeInsets.only(right: 4),
+      child: Image.asset(
+        _flightRadioAsset,
+        width: 168,
+        height: 112,
+        fit: BoxFit.contain,
+        filterQuality: FilterQuality.high,
+      ),
     );
   }
 }

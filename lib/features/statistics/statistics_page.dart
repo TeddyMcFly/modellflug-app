@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/widgets/app_scaffold.dart';
 import '../../shared/models/aircraft_model.dart';
 import '../../shared/providers/fleet_provider.dart';
+import '../../shared/utils/flight_time_format.dart';
 
 class StatisticsPage extends ConsumerWidget {
   const StatisticsPage({super.key});
@@ -25,7 +26,7 @@ class StatisticsPage extends ConsumerWidget {
 
     return AppScaffold(
       title: 'Statistiken',
-      subtitle: 'Flugstunden, Starts und Einsatzbereitschaft auswerten.',
+      subtitle: 'Flugzeiten, Starts und Einsatzbereitschaft auswerten.',
       children: [
         Wrap(
           spacing: 10,
@@ -43,7 +44,7 @@ class StatisticsPage extends ConsumerWidget {
             _StatTile(
               icon: Icons.timer_rounded,
               label: 'Gesamtflugzeit',
-              value: fleet.totalHours.toStringAsFixed(1),
+              value: formatFlightMinutes(fleet.totalMinutes),
               helper: _percentChangeText(hoursThisMonth, hoursPreviousMonth),
             ),
             _StatTile(
@@ -195,13 +196,13 @@ class _AircraftHoursChart extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               const Text(
-                'Flugstunden je Modell',
+                'Gesamtflugzeit je Modell',
                 style: _sectionTitleStyle,
               ),
               const SizedBox(height: 22),
               if (aircraftWithHours.isEmpty)
                 const Text(
-                  'Noch keine Flugstunden vorhanden.',
+                  'Noch keine Flugzeit vorhanden.',
                   style: TextStyle(
                     color: Color(0xFF64748B),
                     fontWeight: FontWeight.w800,
@@ -239,14 +240,16 @@ class _AircraftHoursChart extends StatelessWidget {
                             mainAxisSize: MainAxisSize.min,
                             children: [
                               Text(
-                                totalHours.toStringAsFixed(1),
+                                formatFlightHours(totalHours),
+                                textAlign: TextAlign.center,
                                 style: _numberTextStyle(
                                   color: const Color(0xFF06172E),
-                                  fontSize: 23,
+                                  fontSize: 17,
+                                  fontWeight: FontWeight.w900,
                                 ),
                               ),
                               const Text(
-                                'Flugstunden',
+                                'Gesamtflugzeit',
                                 style: TextStyle(
                                   color: Color(0xFF64748B),
                                   fontSize: 11,
@@ -345,7 +348,7 @@ class _AircraftHoursLegendItem extends StatelessWidget {
           ),
           const SizedBox(width: 8),
           Text(
-            '${hours.toStringAsFixed(1)} h (${percent.toStringAsFixed(0)}%)',
+            '${formatFlightHours(hours)} (${percent.toStringAsFixed(0)}%)',
             style: _numberTextStyle(
               color: const Color(0xFF475569),
               fontSize: 12,
@@ -371,7 +374,7 @@ enum _FlightTimeRange {
 const _flightTimeBarWidth = 22.0;
 const _flightTimeBarTopRadius = 5.0;
 const _flightTimeLeftAxisNameSize = 24.0;
-const _flightTimeLeftTitlesReservedSize = 48.0;
+const _flightTimeLeftTitlesReservedSize = 78.0;
 const _flightTimeBottomAxisNameSize = 28.0;
 const _flightTimeBottomTitlesReservedSize = 62.0;
 const _flightTimeChartLeftInset =
@@ -389,7 +392,7 @@ class _FlightTimeBars extends StatefulWidget {
 }
 
 class _FlightTimeBarsState extends State<_FlightTimeBars> {
-  _FlightTimeRange _range = _FlightTimeRange.month;
+  _FlightTimeRange _range = _FlightTimeRange.week;
 
   @override
   Widget build(BuildContext context) {
@@ -398,7 +401,10 @@ class _FlightTimeBarsState extends State<_FlightTimeBars> {
       0,
       (max, item) => item.hours > max ? item.hours : max,
     );
-    final chartMaxHours = maxHours <= 0 ? 1.0 : maxHours * 1.35;
+    final chartInterval = _chartInterval(maxHours);
+    final rawChartMaxHours = maxHours <= 0 ? 1.0 : maxHours * 1.35;
+    final chartMaxHours =
+        (rawChartMaxHours / chartInterval).ceil() * chartInterval;
 
     return SizedBox(
       width: 900,
@@ -421,7 +427,7 @@ class _FlightTimeBarsState extends State<_FlightTimeBars> {
                         ),
                         SizedBox(width: 10),
                         Text(
-                          'Gesamt-Flugzeit (Stunden)',
+                          'Gesamt-Flugzeit',
                           style: _sectionTitleStyle,
                         ),
                       ],
@@ -483,10 +489,10 @@ class _FlightTimeBarsState extends State<_FlightTimeBars> {
                             tooltipMargin: 4,
                             getTooltipItem: (group, groupIndex, rod, rodIndex) {
                               return BarTooltipItem(
-                                '${rod.toY.toStringAsFixed(1)} h',
+                                formatFlightHours(rod.toY),
                                 _numberTextStyle(
                                   color: const Color(0xFF06172E),
-                                  fontSize: 10,
+                                  fontSize: 9,
                                 ),
                               );
                             },
@@ -494,7 +500,7 @@ class _FlightTimeBarsState extends State<_FlightTimeBars> {
                         ),
                         gridData: FlGridData(
                           drawVerticalLine: false,
-                          horizontalInterval: _chartInterval(maxHours),
+                          horizontalInterval: chartInterval,
                           getDrawingHorizontalLine: (value) => const FlLine(
                             color: Color(0xFFD8DEE8),
                             strokeWidth: 1,
@@ -517,7 +523,7 @@ class _FlightTimeBarsState extends State<_FlightTimeBars> {
                           leftTitles: AxisTitles(
                             axisNameSize: _flightTimeLeftAxisNameSize,
                             axisNameWidget: const Text(
-                              'Stunden',
+                              'Flugzeit',
                               style: TextStyle(
                                 color: Color(0xFF64748B),
                                 fontSize: 11,
@@ -527,12 +533,13 @@ class _FlightTimeBarsState extends State<_FlightTimeBars> {
                             sideTitles: SideTitles(
                               showTitles: true,
                               reservedSize: _flightTimeLeftTitlesReservedSize,
-                              interval: _chartInterval(maxHours),
+                              interval: chartInterval,
                               getTitlesWidget: (value, meta) => Text(
-                                value.toStringAsFixed(value < 10 ? 1 : 0),
+                                formatFlightHours(value),
+                                textAlign: TextAlign.right,
                                 style: _numberTextStyle(
                                   color: const Color(0xFF64748B),
-                                  fontSize: 10,
+                                  fontSize: 9,
                                 ),
                               ),
                             ),
@@ -806,7 +813,7 @@ class _TopModelsTable extends StatelessWidget {
                             ),
                           ),
                           DataCell(
-                            Text('${entry.$2.hours.toStringAsFixed(1)} h'),
+                            Text(formatFlightMinutes(entry.$2.minutes)),
                           ),
                           DataCell(Text('${entry.$2.flights}')),
                         ],
@@ -1759,16 +1766,16 @@ int _weekNumber(DateTime date) {
 
 double _chartInterval(double maxHours) {
   if (maxHours <= 2) {
-    return 0.25;
-  }
-  if (maxHours <= 6) {
     return 0.5;
   }
-  if (maxHours <= 12) {
+  if (maxHours <= 6) {
     return 1;
   }
-  if (maxHours <= 24) {
+  if (maxHours <= 12) {
     return 2;
+  }
+  if (maxHours <= 24) {
+    return 4;
   }
   return 5;
 }

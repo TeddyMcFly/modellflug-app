@@ -15,6 +15,7 @@ import '../../core/widgets/app_scaffold.dart';
 import '../../shared/models/aircraft_model.dart';
 import '../../shared/providers/fleet_provider.dart';
 import '../../shared/services/flight_timer_tone_player.dart';
+import '../../shared/utils/flight_time_format.dart';
 import '../../shared/utils/media_source.dart';
 
 const _repairFilterKey = '__repair__';
@@ -2039,7 +2040,7 @@ class _FlightTimerDialogState extends State<_FlightTimerDialog> {
                           ),
                           const SizedBox(height: 7),
                           Text(
-                            '${widget.aircraft.flightHours.toStringAsFixed(1)} h gesamt',
+                            '${formatFlightHours(widget.aircraft.flightHours)} gesamt',
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: TextStyle(
@@ -3138,7 +3139,7 @@ class _AircraftInfoTable extends StatelessWidget {
       ('Servos', _fallback(aircraft.servos)),
       ('Kaufdatum', _purchaseDateLabel(aircraft, formatter)),
       ('Fluege', '${aircraft.totalFlights}'),
-      ('Flugzeit', '${aircraft.flightHours.toStringAsFixed(1)} h'),
+      ('Flugzeit', formatFlightHours(aircraft.flightHours)),
       ('Status', aircraft.status.label),
     ];
 
