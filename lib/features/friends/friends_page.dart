@@ -209,15 +209,6 @@ class _MemberListState extends State<_MemberList> {
                         'Aktiviere ihn in den Einstellungen, wenn andere Mitglieder dich anschreiben duerfen.',
                   ),
                 ],
-                if (chatLoadFailed) ...[
-                  const SizedBox(height: 12),
-                  const _InfoCard(
-                    icon: Icons.mark_chat_unread_rounded,
-                    title: 'Chat-Uebersicht wird neu verbunden',
-                    message:
-                        'Die Mitglieder bleiben nutzbar. Bitte die Seite gleich einmal aktualisieren.',
-                  ),
-                ],
                 const SizedBox(height: 12),
                 _FlightRadioPanel(
                   enabled: widget.currentUserReachable,
