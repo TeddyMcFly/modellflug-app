@@ -155,7 +155,10 @@ class _ModelPhotoOverviewState extends State<_ModelPhotoOverview> {
 
   @override
   Widget build(BuildContext context) {
-    final aircraft = widget.fleet.aircraft;
+    final aircraft = [
+      for (final aircraft in widget.fleet.aircraft)
+        if (aircraft.status != AircraftStatus.destroyed) aircraft,
+    ];
 
     return Card(
       child: Padding(
@@ -173,7 +176,7 @@ class _ModelPhotoOverviewState extends State<_ModelPhotoOverview> {
                 const SizedBox(width: 10),
                 Expanded(
                   child: Text(
-                    'Meine Modelle (${widget.fleet.aircraft.length})',
+                    'Meine Modelle (${aircraft.length})',
                     style: _dashboardHeadingStyle,
                   ),
                 ),
@@ -182,7 +185,7 @@ class _ModelPhotoOverviewState extends State<_ModelPhotoOverview> {
             const SizedBox(height: 10),
             if (aircraft.isEmpty)
               const Text(
-                'Noch keine Modelle angelegt.',
+                'Keine aktiven Modelle angelegt.',
                 style: TextStyle(
                   color: Color(0xFF64748B),
                   fontWeight: FontWeight.w700,
@@ -581,6 +584,15 @@ class _HomeAirfieldWebcamCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final settings = fleet.appSettings;
+    final webcamNames =
+        settings.webcams.isEmpty ? defaultWebcams : settings.webcams;
+    final webcamIndex = _firstWebcamIndexWithUrl(settings, webcamNames);
+    final webcamTitle = webcamNames[webcamIndex];
+    final webcamUrl = webcamIndex < settings.webcamUrls.length
+        ? settings.webcamUrls[webcamIndex].trim()
+        : null;
+
     return Card(
       clipBehavior: Clip.antiAlias,
       child: Column(
@@ -595,59 +607,10 @@ class _HomeAirfieldWebcamCard extends StatelessWidget {
                   aspectRatio: 4 / 3,
                   child: ClipRRect(
                     borderRadius: BorderRadius.circular(8),
-                    child: Stack(
-                      fit: StackFit.expand,
-                      children: [
-                        Image.asset(
-                          WebcamPage.livePlaceholderAsset,
-                          fit: BoxFit.cover,
-                        ),
-                        DecoratedBox(
-                          decoration: BoxDecoration(
-                            gradient: LinearGradient(
-                              begin: Alignment.topCenter,
-                              end: Alignment.bottomCenter,
-                              colors: [
-                                Colors.black.withValues(alpha: 0.02),
-                                Colors.black.withValues(alpha: 0.38),
-                              ],
-                            ),
-                          ),
-                        ),
-                        const Positioned(
-                          left: 12,
-                          top: 12,
-                          child: _DashboardLiveBadge(),
-                        ),
-                        Positioned(
-                          left: 14,
-                          right: 14,
-                          bottom: 12,
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                'Webcam ${fleet.pilotProfile.homeAirfield}',
-                                overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 18,
-                                  fontWeight: FontWeight.w900,
-                                ),
-                              ),
-                              const SizedBox(height: 4),
-                              const Text(
-                                'Bahnansicht - letztes Bild vor 18 Sekunden',
-                                overflow: TextOverflow.ellipsis,
-                                style: TextStyle(
-                                  color: Color(0xFFE2E8F0),
-                                  fontWeight: FontWeight.w700,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
+                    child: WebcamLivePreview(
+                      key: ValueKey('$webcamTitle|$webcamUrl'),
+                      title: webcamTitle,
+                      sourceUrl: webcamUrl,
                     ),
                   ),
                 ),
@@ -682,30 +645,14 @@ class _HomeAirfieldWebcamCard extends StatelessWidget {
   }
 }
 
-class _DashboardLiveBadge extends StatelessWidget {
-  const _DashboardLiveBadge();
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-      decoration: BoxDecoration(
-        color: const Color(0xFFDC2626),
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: const Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(Icons.circle, color: Colors.white, size: 9),
-          SizedBox(width: 7),
-          Text(
-            'LIVE',
-            style: TextStyle(color: Colors.white, fontWeight: FontWeight.w900),
-          ),
-        ],
-      ),
-    );
+int _firstWebcamIndexWithUrl(AppSettings settings, List<String> webcamNames) {
+  for (var index = 0; index < webcamNames.length; index++) {
+    if (index < settings.webcamUrls.length &&
+        settings.webcamUrls[index].trim().isNotEmpty) {
+      return index;
+    }
   }
+  return 0;
 }
 
 class _MetricCard extends StatelessWidget {

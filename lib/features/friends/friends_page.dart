@@ -180,6 +180,7 @@ class _MemberListState extends State<_MemberList> {
             final chatsByPeer = _directChatsByPeer(chats);
             final flightRoomChat = _flightRoomChatFrom(chats);
             final privateGroupChats = _privateGroupChatsFrom(chats);
+            final tableMembers = _membersSortedForTable(members, chatsByPeer);
             final reachableMembers = [
               for (final member in members)
                 if (member.reachableByChat && member.visibleInMemberList)
@@ -244,7 +245,7 @@ class _MemberListState extends State<_MemberList> {
                   )
                 else
                   _MembersTable(
-                    members: members,
+                    members: tableMembers,
                     chatsByPeer: chatsByPeer,
                     currentUser: widget.currentUser,
                     currentUserReachable: widget.currentUserReachable,
@@ -280,6 +281,35 @@ class _MemberListState extends State<_MemberList> {
       for (final chat in chats)
         if (chat.isPrivateGroup) chat,
     ];
+  }
+
+  List<MemberProfile> _membersSortedForTable(
+    List<MemberProfile> members,
+    Map<String, ChatSummary> chatsByPeer,
+  ) {
+    final originalOrder = {
+      for (final entry in members.asMap().entries) entry.value.uid: entry.key,
+    };
+    final sorted = [...members];
+    sorted.sort((a, b) {
+      final aChat = chatsByPeer[a.uid];
+      final bChat = chatsByPeer[b.uid];
+      final aUnread = aChat?.isUnreadFor(widget.currentUser.uid) ?? false;
+      final bUnread = bChat?.isUnreadFor(widget.currentUser.uid) ?? false;
+      if (aUnread != bUnread) {
+        return aUnread ? -1 : 1;
+      }
+      if (aUnread && bUnread) {
+        final aDate = aChat?.lastMessageAt ?? aChat?.updatedAt ?? DateTime(0);
+        final bDate = bChat?.lastMessageAt ?? bChat?.updatedAt ?? DateTime(0);
+        final byDate = bDate.compareTo(aDate);
+        if (byDate != 0) {
+          return byDate;
+        }
+      }
+      return (originalOrder[a.uid] ?? 0).compareTo(originalOrder[b.uid] ?? 0);
+    });
+    return sorted;
   }
 
   String _emptyMembersMessage(User currentUser) {
@@ -659,8 +689,6 @@ class _FlightRadioPanel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final unreadCount = chat?.unreadCountFor(currentUid) ?? 0;
-    final lastMessage = chat?.lastMessageFor(currentUid) ?? '';
-    final lastTime = chat?.lastMessageAt ?? chat?.updatedAt;
 
     return Card(
       color: Colors.white,
@@ -680,7 +708,7 @@ class _FlightRadioPanel extends StatelessWidget {
                       radius: 26,
                       backgroundColor: Color(0xFF0A84FF),
                       child: Icon(
-                        Icons.forum_rounded,
+                        Icons.groups_rounded,
                         color: Colors.white,
                         size: 27,
                       ),
@@ -700,7 +728,7 @@ class _FlightRadioPanel extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       const Text(
-                        'Flugfunk-Raum',
+                        'Gemeinschaftsraum',
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(
@@ -737,21 +765,13 @@ class _FlightRadioPanel extends StatelessWidget {
                 height: 1.35,
               ),
             ),
-            if (lastMessage.isNotEmpty) ...[
-              const SizedBox(height: 12),
-              _LastRoomMessage(
-                unread: unreadCount > 0,
-                message: lastMessage,
-                time: lastTime,
-              ),
-            ],
             const SizedBox(height: 14),
             Align(
               alignment: Alignment.centerLeft,
               child: FilledButton.icon(
                 onPressed: enabled ? onOpen : null,
-                icon: const Icon(Icons.forum_rounded),
-                label: const Text('Flugfunk oeffnen'),
+                icon: const Icon(Icons.groups_rounded),
+                label: const Text('Gemeinschaftsraum oeffnen'),
               ),
             ),
           ],
@@ -883,60 +903,6 @@ class _PrivateRoundPanel extends StatelessWidget {
               onOpen: () => onOpen(chat),
             ),
         ],
-      ),
-    );
-  }
-}
-
-class _LastRoomMessage extends StatelessWidget {
-  final bool unread;
-  final String message;
-  final DateTime? time;
-
-  const _LastRoomMessage({
-    required this.unread,
-    required this.message,
-    required this.time,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: const Color(0xFFF8FAFC),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: const Color(0xFFE2E8F0)),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(10),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              message,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                color:
-                    unread ? const Color(0xFF06172E) : const Color(0xFF475569),
-                fontSize: 12,
-                fontWeight: unread ? FontWeight.w900 : FontWeight.w700,
-              ),
-            ),
-            if (time != null) ...[
-              const SizedBox(height: 3),
-              Text(
-                _dateTimeLabel(time!),
-                style: const TextStyle(
-                  color: Color(0xFF94A3B8),
-                  fontSize: 10,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-            ],
-          ],
-        ),
       ),
     );
   }
@@ -1217,6 +1183,14 @@ class _CreateGroupDialogState extends State<_CreateGroupDialog> {
   }
 }
 
+enum _MemberTableSortColumn {
+  member,
+  club,
+  lastSeen,
+  lastChat,
+  flightRadio,
+}
+
 class _MembersTable extends StatefulWidget {
   final List<MemberProfile> members;
   final Map<String, ChatSummary> chatsByPeer;
@@ -1238,6 +1212,8 @@ class _MembersTable extends StatefulWidget {
 
 class _MembersTableState extends State<_MembersTable> {
   final ScrollController _horizontalController = ScrollController();
+  _MemberTableSortColumn? _sortColumn;
+  var _sortAscending = true;
 
   @override
   void dispose() {
@@ -1247,6 +1223,7 @@ class _MembersTableState extends State<_MembersTable> {
 
   @override
   Widget build(BuildContext context) {
+    final members = _sortedMembers();
     return LayoutBuilder(
       builder: (context, constraints) {
         final tableWidth =
@@ -1275,8 +1252,12 @@ class _MembersTableState extends State<_MembersTable> {
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        const _MembersTableHeader(),
-                        for (final member in widget.members)
+                        _MembersTableHeader(
+                          sortColumn: _sortColumn,
+                          sortAscending: _sortAscending,
+                          onSort: _sortBy,
+                        ),
+                        for (final member in members)
                           _MemberTableRow(
                             member: member,
                             chat: widget.chatsByPeer[member.uid],
@@ -1295,24 +1276,143 @@ class _MembersTableState extends State<_MembersTable> {
       },
     );
   }
+
+  void _sortBy(_MemberTableSortColumn column) {
+    setState(() {
+      if (_sortColumn == column) {
+        _sortAscending = !_sortAscending;
+        return;
+      }
+      _sortColumn = column;
+      _sortAscending = switch (column) {
+        _MemberTableSortColumn.member => true,
+        _MemberTableSortColumn.club => true,
+        _MemberTableSortColumn.lastSeen => false,
+        _MemberTableSortColumn.lastChat => false,
+        _MemberTableSortColumn.flightRadio => false,
+      };
+    });
+  }
+
+  List<MemberProfile> _sortedMembers() {
+    final column = _sortColumn;
+    if (column == null) {
+      return widget.members;
+    }
+
+    final originalOrder = {
+      for (final entry in widget.members.asMap().entries)
+        entry.value.uid: entry.key,
+    };
+    final sorted = [...widget.members];
+    sorted.sort((a, b) {
+      final result = _compareMembers(a, b, column);
+      if (result != 0) {
+        return _sortAscending ? result : -result;
+      }
+      return (originalOrder[a.uid] ?? 0).compareTo(originalOrder[b.uid] ?? 0);
+    });
+    return sorted;
+  }
+
+  int _compareMembers(
+    MemberProfile a,
+    MemberProfile b,
+    _MemberTableSortColumn column,
+  ) {
+    return switch (column) {
+      _MemberTableSortColumn.member => _compareText(
+          a.displayName,
+          b.displayName,
+        ),
+      _MemberTableSortColumn.club => _compareText(a.club, b.club),
+      _MemberTableSortColumn.lastSeen => _compareDates(a.lastSeen, b.lastSeen),
+      _MemberTableSortColumn.lastChat => _compareDates(
+          _chatDateFor(a.uid),
+          _chatDateFor(b.uid),
+        ),
+      _MemberTableSortColumn.flightRadio => _compareNumbers(
+          _flightRadioSortValue(a),
+          _flightRadioSortValue(b),
+        ),
+    };
+  }
+
+  DateTime? _chatDateFor(String uid) {
+    final chat = widget.chatsByPeer[uid];
+    return chat?.lastMessageAt ?? chat?.updatedAt;
+  }
+
+  int _flightRadioSortValue(MemberProfile member) {
+    final chat = widget.chatsByPeer[member.uid];
+    final unread = chat?.isUnreadFor(widget.currentUser.uid) ?? false;
+    final reachable = widget.currentUserReachable && member.reachableByChat;
+    if (unread) {
+      return 2;
+    }
+    return reachable ? 1 : 0;
+  }
 }
 
 class _MembersTableHeader extends StatelessWidget {
-  const _MembersTableHeader();
+  final _MemberTableSortColumn? sortColumn;
+  final bool sortAscending;
+  final ValueChanged<_MemberTableSortColumn> onSort;
+
+  const _MembersTableHeader({
+    required this.sortColumn,
+    required this.sortAscending,
+    required this.onSort,
+  });
 
   @override
   Widget build(BuildContext context) {
-    return const DecoratedBox(
-      decoration: BoxDecoration(color: Color(0xFFDCEBFF)),
+    return DecoratedBox(
+      decoration: const BoxDecoration(color: Color(0xFFDCEBFF)),
       child: SizedBox(
         height: 42,
         child: Row(
           children: [
-            _TableHeaderCell(label: 'Mitglied', flex: 3),
-            _TableHeaderCell(label: 'Verein', flex: 2),
-            _TableHeaderCell(label: 'Zuletzt aktiv', flex: 2),
-            _TableHeaderCell(label: 'Letzter Chat', flex: 3),
-            _TableHeaderCell(label: 'Flugfunk', flex: 2),
+            _TableHeaderCell(
+              label: 'Mitglied',
+              flex: 3,
+              column: _MemberTableSortColumn.member,
+              activeColumn: sortColumn,
+              ascending: sortAscending,
+              onSort: onSort,
+            ),
+            _TableHeaderCell(
+              label: 'Verein',
+              flex: 2,
+              column: _MemberTableSortColumn.club,
+              activeColumn: sortColumn,
+              ascending: sortAscending,
+              onSort: onSort,
+            ),
+            _TableHeaderCell(
+              label: 'Zuletzt aktiv',
+              flex: 2,
+              column: _MemberTableSortColumn.lastSeen,
+              activeColumn: sortColumn,
+              ascending: sortAscending,
+              onSort: onSort,
+            ),
+            _TableHeaderCell(
+              label: 'Letzter Chat',
+              flex: 3,
+              column: _MemberTableSortColumn.lastChat,
+              activeColumn: sortColumn,
+              ascending: sortAscending,
+              onSort: onSort,
+            ),
+            _TableHeaderCell(
+              label: 'Flugfunk',
+              flex: 2,
+              column: _MemberTableSortColumn.flightRadio,
+              activeColumn: sortColumn,
+              ascending: sortAscending,
+              onSort: onSort,
+            ),
           ],
         ),
       ),
@@ -1404,27 +1504,60 @@ class _MemberTableRow extends StatelessWidget {
 class _TableHeaderCell extends StatelessWidget {
   final String label;
   final int flex;
+  final _MemberTableSortColumn column;
+  final _MemberTableSortColumn? activeColumn;
+  final bool ascending;
+  final ValueChanged<_MemberTableSortColumn> onSort;
 
   const _TableHeaderCell({
     required this.label,
     required this.flex,
+    required this.column,
+    required this.activeColumn,
+    required this.ascending,
+    required this.onSort,
   });
 
   @override
   Widget build(BuildContext context) {
+    final active = activeColumn == column;
     return Expanded(
       flex: flex,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16),
-        child: Text(
-          label,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: const TextStyle(
-            color: Color(0xFF06172E),
-            fontSize: 13,
-            letterSpacing: 0,
-            fontWeight: FontWeight.w900,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: () => onSort(column),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: Row(
+              children: [
+                Flexible(
+                  child: Text(
+                    label,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: Color(0xFF06172E),
+                      fontSize: 13,
+                      letterSpacing: 0,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 4),
+                Icon(
+                  active
+                      ? ascending
+                          ? Icons.arrow_upward_rounded
+                          : Icons.arrow_downward_rounded
+                      : Icons.unfold_more_rounded,
+                  color: active
+                      ? const Color(0xFF0A84FF)
+                      : const Color(0xFF64748B),
+                  size: active ? 16 : 15,
+                ),
+              ],
+            ),
           ),
         ),
       ),
@@ -1761,7 +1894,7 @@ class _ChatRoomDialog extends StatefulWidget {
       currentDisplayName: currentDisplayName,
       currentPhotoSource: currentPhotoSource,
       kind: _ChatRoomKind.flightRoom,
-      title: 'Flugfunk-Raum',
+      title: 'Gemeinschaftsraum',
       members: members,
     );
   }
@@ -2631,6 +2764,35 @@ bool _hasProfilePhoto(User user, PilotProfile profile) {
 String _clubLabel(String club) {
   final clean = club.trim();
   return clean.isEmpty ? '-' : clean;
+}
+
+int _compareText(String first, String second) {
+  final left = first.trim().toLowerCase();
+  final right = second.trim().toLowerCase();
+  if (left.isEmpty && right.isNotEmpty) {
+    return 1;
+  }
+  if (left.isNotEmpty && right.isEmpty) {
+    return -1;
+  }
+  return left.compareTo(right);
+}
+
+int _compareDates(DateTime? first, DateTime? second) {
+  if (first == null && second == null) {
+    return 0;
+  }
+  if (first == null) {
+    return -1;
+  }
+  if (second == null) {
+    return 1;
+  }
+  return first.compareTo(second);
+}
+
+int _compareNumbers(num first, num second) {
+  return first.compareTo(second);
 }
 
 String _participantLabel(

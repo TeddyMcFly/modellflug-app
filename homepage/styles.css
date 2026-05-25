@@ -707,8 +707,19 @@ h3 {
 }
 
 .friends-visual {
-  display: grid;
-  gap: 12px;
+  padding: 0;
+  overflow: visible;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+}
+
+.friends-screen-image {
+  width: 100%;
+  height: auto;
+  display: block;
+  object-fit: contain;
 }
 
 .friend-row {
@@ -862,6 +873,86 @@ h3 {
   font-weight: 650;
 }
 
+.legal-main {
+  min-height: calc(100vh - 140px);
+  padding: 132px 40px 88px;
+}
+
+.legal-hero,
+.legal-card {
+  width: min(920px, 100%);
+  margin: 0 auto;
+}
+
+.legal-hero {
+  color: var(--ink);
+}
+
+.legal-hero h1 {
+  max-width: 780px;
+  margin-top: 10px;
+}
+
+.legal-hero p:not(.eyebrow) {
+  max-width: 760px;
+  margin: 18px 0 0;
+  color: var(--muted);
+  font-size: 18px;
+  font-weight: 650;
+}
+
+.legal-card {
+  margin-top: 34px;
+  padding: 34px;
+  border-top: 4px solid var(--blue);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.84);
+  border-right: 1px solid rgba(255, 255, 255, 0.76);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.76);
+  border-left: 1px solid rgba(255, 255, 255, 0.76);
+  box-shadow: var(--glass-shadow);
+  backdrop-filter: blur(18px) saturate(1.12);
+  -webkit-backdrop-filter: blur(18px) saturate(1.12);
+}
+
+.legal-card h2 {
+  margin-top: 30px;
+  font-size: 24px;
+}
+
+.legal-card h2:first-child,
+.legal-note + h2 {
+  margin-top: 0;
+}
+
+.legal-card p,
+.legal-card address {
+  margin: 10px 0 0;
+  color: var(--muted);
+  font-size: 16px;
+  font-style: normal;
+  font-weight: 650;
+}
+
+.legal-card a {
+  color: var(--blue-dark);
+  font-weight: 850;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.legal-note {
+  padding: 14px 16px;
+  border-radius: 8px;
+  color: #3f3013;
+  background: rgba(255, 232, 185, 0.82);
+  border: 1px solid rgba(204, 122, 26, 0.24);
+}
+
+.contact-card {
+  max-width: 720px;
+}
+
 .site-footer {
   display: flex;
   justify-content: space-between;
@@ -933,6 +1024,7 @@ h3 {
   .section,
   .showcase-band,
   .model-details-band,
+  .legal-main,
   .site-footer {
     padding-left: 22px;
     padding-right: 22px;
@@ -981,6 +1073,10 @@ h3 {
 }
 
 @media (max-width: 620px) {
+  .legal-card {
+    padding: 24px 20px;
+  }
+
   .hero-actions {
     flex-direction: column;
     align-items: stretch;

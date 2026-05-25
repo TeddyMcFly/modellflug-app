@@ -169,7 +169,7 @@ class MemberChatService {
     return _openRoom(
       chatId: flightRoomChatId,
       type: 'flightRoom',
-      title: 'Flugfunk-Raum',
+      title: 'Gemeinschaftsraum',
       currentUser: currentUser,
       currentDisplayName: currentDisplayName,
       currentPhotoSource: currentPhotoSource,
@@ -523,7 +523,7 @@ class ChatSummary {
 
   String titleFor(String currentUid) {
     if (isFlightRoom) {
-      return title.isNotEmpty ? title : 'Flugfunk-Raum';
+      return 'Gemeinschaftsraum';
     }
     if (isDirect) {
       final peerUid = peerUidFor(currentUid);

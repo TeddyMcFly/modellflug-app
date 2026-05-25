@@ -9,6 +9,7 @@ import '../../shared/models/aircraft_model.dart';
 import '../../shared/providers/app_info_provider.dart';
 import '../../shared/providers/fleet_provider.dart';
 import '../../shared/services/auth_service.dart';
+import '../../shared/services/member_chat_service.dart';
 import '../../shared/services/open_meteo_service.dart';
 import '../../shared/utils/media_source.dart';
 
@@ -17,6 +18,15 @@ const _accentColor = Color(0xFF0A84FF);
 const _activeNavColor = _accentColor;
 const _pageBackgroundColor = Color(0xFFF3F5F8);
 const _navigationHeaderLogoAsset = 'assets/icons/navigation_header_logo.png';
+
+final _headerChatSummariesProvider =
+    StreamProvider.autoDispose.family<List<ChatSummary>, String>((ref, uid) {
+  final service = ref.watch(memberChatServiceProvider);
+  if (service == null) {
+    return Stream.value(const <ChatSummary>[]);
+  }
+  return service.watchChatSummaries(uid);
+});
 
 class AppScaffold extends ConsumerWidget {
   final String title;
@@ -41,10 +51,11 @@ class AppScaffold extends ConsumerWidget {
     final routeState = GoRouterState.of(context);
     final location = routeState.matchedLocation;
     final fleet = ref.watch(fleetProvider);
-    final userEmail = ref.watch(authStateProvider).maybeWhen(
-          data: (user) => user?.email,
+    final authUser = ref.watch(authStateProvider).maybeWhen(
+          data: (user) => user,
           orElse: () => null,
         );
+    final userEmail = authUser?.email;
     final pilotProfile = fleet.pilotProfile;
     final weatherLocation = headerWeatherLocation ?? pilotProfile.homeAirfield;
     final headerWeather = ref.watch(
@@ -55,10 +66,17 @@ class AppScaffold extends ConsumerWidget {
         ),
       ),
     );
+    final chatNotifications = authUser == null
+        ? const <_HeaderNotification>[]
+        : _chatNotifications(
+            ref.watch(_headerChatSummariesProvider(authUser.uid)),
+            authUser.uid,
+          );
     final notifications = _visibleHeaderNotifications(
       fleet,
       headerWeather,
       weatherLocation,
+      chatNotifications,
     );
 
     return Scaffold(
@@ -390,8 +408,10 @@ List<_HeaderNotification> _visibleHeaderNotifications(
   FleetState fleet,
   AsyncValue<OpenMeteoWeather> headerWeather,
   String weatherLocation,
+  List<_HeaderNotification> chatNotifications,
 ) {
   final notifications = [
+    ...chatNotifications,
     if (fleet.appSettings.notifyRepairs) ..._repairNotifications(fleet),
     if (fleet.appSettings.notifyBatteryLimits)
       ..._batteryLimitNotifications(fleet),
@@ -404,6 +424,75 @@ List<_HeaderNotification> _visibleHeaderNotifications(
     for (final notification in notifications)
       if (!_dismissedNotificationIds.contains(notification.id)) notification,
   ];
+}
+
+List<_HeaderNotification> _chatNotifications(
+  AsyncValue<List<ChatSummary>> chatSummaries,
+  String currentUid,
+) {
+  return chatSummaries.maybeWhen(
+    data: (chats) {
+      final unreadChats = [
+        for (final chat in chats)
+          if (chat.isUnreadFor(currentUid)) chat,
+      ];
+      unreadChats.sort((a, b) {
+        final aDate = a.lastMessageAt ?? a.updatedAt ?? DateTime(0);
+        final bDate = b.lastMessageAt ?? b.updatedAt ?? DateTime(0);
+        return bDate.compareTo(aDate);
+      });
+
+      return [
+        for (final chat in unreadChats)
+          (
+            id: _chatNotificationId(chat, currentUid),
+            icon: Icons.mark_chat_unread_rounded,
+            title: _chatNotificationTitle(chat, currentUid),
+            text: _chatNotificationText(chat, currentUid),
+            time: _chatNotificationTime(chat),
+          ),
+      ];
+    },
+    orElse: () => const <_HeaderNotification>[],
+  );
+}
+
+String _chatNotificationId(ChatSummary chat, String currentUid) {
+  final date = chat.lastMessageAt ?? chat.updatedAt;
+  final token = date?.toIso8601String() ?? chat.lastMessageFor(currentUid);
+  return 'chat-${chat.id}-${chat.unreadCountFor(currentUid)}-$token';
+}
+
+String _chatNotificationTitle(ChatSummary chat, String currentUid) {
+  if (chat.isDirect) {
+    return '${_chatSenderName(chat)} hat geantwortet';
+  }
+  return 'Neue Nachricht in ${chat.titleFor(currentUid)}';
+}
+
+String _chatNotificationText(ChatSummary chat, String currentUid) {
+  final room = chat.titleFor(currentUid);
+  final message = chat.lastMessageFor(currentUid).trim();
+  if (message.isEmpty) {
+    return 'In $room wartet eine neue Chatnachricht.';
+  }
+  return '$room: $message';
+}
+
+String _chatNotificationTime(ChatSummary chat) {
+  final date = chat.lastMessageAt ?? chat.updatedAt;
+  if (date == null) {
+    return 'Chat';
+  }
+  return DateFormat('HH:mm').format(date.toLocal());
+}
+
+String _chatSenderName(ChatSummary chat) {
+  final name = chat.participantNames[chat.lastSenderId]?.trim();
+  if (name != null && name.isNotEmpty) {
+    return name;
+  }
+  return 'Jemand';
 }
 
 List<_HeaderNotification> _repairNotifications(FleetState fleet) {

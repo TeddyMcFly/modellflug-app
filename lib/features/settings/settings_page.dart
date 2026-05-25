@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:image/image.dart' as img;
 import 'package:image_picker/image_picker.dart';
 
 import '../../core/widgets/app_scaffold.dart';
@@ -1005,7 +1006,7 @@ class _PilotProfileCardState extends State<_PilotProfileCard> {
               ),
               const SizedBox(height: 18),
               SizedBox(
-                width: 798,
+                width: 560,
                 child: _InsuranceDocumentBox(
                   fileName: _insuranceDocumentName,
                   dataUri: _insuranceDocumentDataUri,
@@ -1064,14 +1065,40 @@ class _PilotProfileCardState extends State<_PilotProfileCard> {
       return;
     }
 
-    final bytes = await pickedImage.readAsBytes();
-    final mimeType = _mimeTypeForName(pickedImage.name);
-    final thumbnailDataUri = createImageThumbnailDataUri(bytes);
+    final editedPhoto = _prepareProfilePhoto(
+      await pickedImage.readAsBytes(),
+      _mimeTypeForName(pickedImage.name),
+    );
+
     setState(() {
-      _photoDataUri = 'data:$mimeType;base64,${base64Encode(bytes)}';
-      _photoThumbnailDataUri = thumbnailDataUri;
+      _photoDataUri = editedPhoto.dataUri;
+      _photoThumbnailDataUri = editedPhoto.thumbnailDataUri;
       _updateUnsavedProfileFlag();
     });
+  }
+
+  _EditedPhoto _prepareProfilePhoto(Uint8List bytes, String mimeType) {
+    try {
+      final decoded = img.decodeImage(bytes);
+      if (decoded != null) {
+        final source = img.bakeOrientation(decoded);
+        final compactPhoto = _resizeImageToMaxEdge(source, 1200);
+        final encoded =
+            Uint8List.fromList(img.encodeJpg(compactPhoto, quality: 84));
+        return _EditedPhoto(
+          dataUri: 'data:image/jpeg;base64,${base64Encode(encoded)}',
+          thumbnailDataUri: createImageThumbnailDataUri(encoded),
+        );
+      }
+    } catch (_) {
+      // Falls ein ungewoehnliches Bildformat nicht lesbar ist, bleibt die Datei unveraendert.
+    }
+
+    final encoded = base64Encode(bytes);
+    return _EditedPhoto(
+      dataUri: 'data:$mimeType;base64,$encoded',
+      thumbnailDataUri: createImageThumbnailDataUri(bytes),
+    );
   }
 
   Future<void> _pickInsuranceDocument() async {
@@ -1093,10 +1120,57 @@ class _PilotProfileCardState extends State<_PilotProfileCard> {
 
     setState(() {
       _insuranceDocumentName = file.name;
-      _insuranceDocumentDataUri =
-          'data:${_mimeTypeForName(file.name)};base64,${base64Encode(bytes)}';
+      _insuranceDocumentDataUri = _createCompactDocumentDataUri(
+        fileName: file.name,
+        bytes: bytes,
+      );
       _updateUnsavedProfileFlag();
     });
+  }
+
+  String _createCompactDocumentDataUri({
+    required String fileName,
+    required Uint8List bytes,
+  }) {
+    final mimeType = _mimeTypeForName(fileName);
+    if (!mimeType.startsWith('image/')) {
+      return 'data:$mimeType;base64,${base64Encode(bytes)}';
+    }
+
+    try {
+      final decoded = img.decodeImage(bytes);
+      if (decoded == null) {
+        return 'data:$mimeType;base64,${base64Encode(bytes)}';
+      }
+
+      final compact = _resizeImageToMaxEdge(img.bakeOrientation(decoded), 1200);
+      final encoded = img.encodeJpg(compact, quality: 82);
+      return 'data:image/jpeg;base64,${base64Encode(encoded)}';
+    } catch (_) {
+      return 'data:$mimeType;base64,${base64Encode(bytes)}';
+    }
+  }
+
+  img.Image _resizeImageToMaxEdge(img.Image source, int maxEdge) {
+    final longestEdge =
+        source.width > source.height ? source.width : source.height;
+    if (longestEdge <= maxEdge) {
+      return source;
+    }
+
+    if (source.width >= source.height) {
+      return img.copyResize(
+        source,
+        width: maxEdge,
+        interpolation: img.Interpolation.average,
+      );
+    }
+
+    return img.copyResize(
+      source,
+      height: maxEdge,
+      interpolation: img.Interpolation.average,
+    );
   }
 
   void _syncTransmitterControllers(List<String> transmitters) {
@@ -1160,10 +1234,11 @@ class _PilotProfileCardState extends State<_PilotProfileCard> {
       return;
     }
 
-    final action = await showModalBottomSheet<_PhotoAction>(
+    final action = await showDialog<_PhotoAction>(
       context: context,
-      builder: (context) => SafeArea(
-        child: Column(
+      builder: (context) => AlertDialog(
+        title: const Text('Foto laden'),
+        content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             ListTile(
@@ -1180,6 +1255,12 @@ class _PilotProfileCardState extends State<_PilotProfileCard> {
               ),
           ],
         ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Abbrechen'),
+          ),
+        ],
       ),
     );
 
@@ -1270,6 +1351,16 @@ class _PilotProfileCardState extends State<_PilotProfileCard> {
 
 enum _PhotoAction { pick, remove }
 
+class _EditedPhoto {
+  final String dataUri;
+  final String? thumbnailDataUri;
+
+  const _EditedPhoto({
+    required this.dataUri,
+    required this.thumbnailDataUri,
+  });
+}
+
 class _PilotPhoto extends StatelessWidget {
   final String? photoDataUri;
   final bool editing;
@@ -1306,11 +1397,14 @@ class _PilotPhoto extends StatelessWidget {
                               size: 82,
                             ),
                           )
-                        : Image(
-                            image: browserVisibleMediaImageProvider(
-                              photoDataUri!,
+                        : ColoredBox(
+                            color: const Color(0xFFEFF6FF),
+                            child: Image(
+                              image: browserVisibleMediaImageProvider(
+                                photoDataUri!,
+                              ),
+                              fit: BoxFit.contain,
                             ),
-                            fit: BoxFit.cover,
                           ),
                   ),
                 ),
@@ -1597,11 +1691,14 @@ class _InsuranceDocumentBox extends StatelessWidget {
               const SizedBox(height: 12),
               Center(
                 child: ConstrainedBox(
-                  constraints: const BoxConstraints(maxHeight: 460),
+                  constraints: const BoxConstraints(
+                    maxWidth: 320,
+                    maxHeight: 220,
+                  ),
                   child: DecoratedBox(
                     decoration: BoxDecoration(
                       borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: Colors.black, width: 11),
+                      border: Border.all(color: Colors.black, width: 6),
                     ),
                     child: ClipRRect(
                       borderRadius: BorderRadius.circular(7),

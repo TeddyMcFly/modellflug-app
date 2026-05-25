@@ -27,6 +27,114 @@ class WebcamPage extends ConsumerStatefulWidget {
   ConsumerState<WebcamPage> createState() => _WebcamPageState();
 }
 
+class WebcamLivePreview extends StatelessWidget {
+  final String title;
+  final String? sourceUrl;
+  final int refreshSerial;
+
+  const WebcamLivePreview({
+    super.key,
+    required this.title,
+    required this.sourceUrl,
+    this.refreshSerial = 0,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final settingsUrl = _normalizedWebcamUrl(sourceUrl);
+    final displayUrl =
+        settingsUrl == null ? null : _displayWebcamUrl(settingsUrl);
+    final hasUrl = displayUrl != null;
+    final isDirectImage = displayUrl != null && _isDirectImageFeed(displayUrl);
+    final statusText =
+        hasUrl ? 'Quelle aus Einstellungen' : 'Keine Webadresse hinterlegt';
+
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        if (displayUrl == null)
+          const _CameraFeedStatus(
+            icon: Icons.link_off_rounded,
+            message: 'Keine Webadresse hinterlegt',
+          )
+        else if (_isDirectVideoFeed(displayUrl))
+          _VideoCameraFeed(
+            key: ValueKey(displayUrl),
+            url: displayUrl,
+          )
+        else if (_isDirectImageFeed(displayUrl))
+          _NetworkCameraImage(
+            key: ValueKey(displayUrl),
+            url: displayUrl,
+            externalRefreshSerial: refreshSerial,
+          )
+        else
+          WebcamEmbedView(
+            key: ValueKey(displayUrl),
+            url: displayUrl,
+            refreshSerial: refreshSerial,
+          ),
+        Container(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              colors: [
+                Colors.black.withValues(alpha: 0.05),
+                Colors.black.withValues(alpha: 0.35),
+              ],
+            ),
+          ),
+        ),
+        const Positioned(
+          left: 12,
+          top: 12,
+          child: _LiveBadge(),
+        ),
+        if (isDirectImage)
+          Positioned(
+            left: 12,
+            top: 58,
+            child: _CameraTitleBadge(
+              title: title,
+              statusText: statusText,
+            ),
+          )
+        else
+          Positioned(
+            left: 14,
+            right: 14,
+            bottom: 12,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  title,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 18,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  statusText,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: Color(0xFFE2E8F0),
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ],
+            ),
+          ),
+      ],
+    );
+  }
+}
+
 class _WebcamPageState extends ConsumerState<WebcamPage> {
   late String _selectedWebcam = defaultWebcams.first;
   late String _selectedForecastLocation = 'Flugplatz';
