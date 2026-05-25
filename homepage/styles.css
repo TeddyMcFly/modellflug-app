@@ -543,13 +543,52 @@ h3 {
   justify-content: center;
 }
 
+.flight-start-frame {
+  position: relative;
+  width: min(80%, 502px);
+  line-height: 0;
+}
+
+.flight-start-frame::after {
+  content: "";
+  position: absolute;
+  left: 15.35%;
+  top: 64.27%;
+  width: 10.5%;
+  aspect-ratio: 1;
+  border-radius: 50%;
+  pointer-events: none;
+  background:
+    radial-gradient(circle, rgba(245, 255, 245, 0.98) 0 10%, rgba(78, 255, 139, 0.96) 11% 34%, rgba(6, 232, 102, 0.52) 35% 58%, rgba(6, 214, 93, 0) 70%);
+  box-shadow:
+    0 0 12px rgba(65, 255, 130, 1),
+    0 0 30px rgba(45, 255, 116, 0.82),
+    0 0 48px rgba(45, 255, 116, 0.44);
+  filter: saturate(1.25);
+  transform: translate(-50%, -50%);
+  animation: flight-led-blink 1.2s ease-in-out infinite;
+}
+
 .flight-start-image {
-  width: 80%;
+  width: 100%;
   height: auto;
-  max-height: 680px;
   border-radius: 24px;
   clip-path: inset(0 round 24px);
   object-fit: contain;
+}
+
+@keyframes flight-led-blink {
+  0%,
+  100% {
+    opacity: 0.38;
+    transform: translate(-50%, -50%) scale(0.9);
+  }
+
+  45%,
+  62% {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1.04);
+  }
 }
 
 .stats-screen-visual {
@@ -724,6 +763,19 @@ h3 {
 }
 
 .friends-screen-image {
+  width: 100%;
+  height: auto;
+  display: block;
+  object-fit: contain;
+}
+
+.battery-visual {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.battery-screen-image {
   width: 100%;
   height: auto;
   display: block;
@@ -1061,7 +1113,7 @@ h3 {
     grid-template-columns: 1fr;
   }
 
-  .flight-start-image {
+  .flight-start-frame {
     width: min(420px, 100%);
   }
 

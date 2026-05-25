@@ -1518,7 +1518,11 @@ class _BatteryDialogState extends State<_BatteryDialog> {
                     ),
                   ),
                   _TextField(controller: _label, label: 'Bezeichnung'),
-                  _TextField(controller: _manufacturer, label: 'Hersteller'),
+                  _TextField(
+                    controller: _manufacturer,
+                    label: 'Hersteller',
+                    isRequired: false,
+                  ),
                   _TextField(controller: _chemistry, label: 'Chemie'),
                   _TextField(controller: _cells, label: 'Zellen'),
                   _TextField(controller: _capacity, label: 'Kapazitaet mAh'),

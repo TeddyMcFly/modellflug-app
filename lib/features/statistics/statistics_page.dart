@@ -1414,19 +1414,46 @@ class _BatteryCycleBarRow extends StatelessWidget {
     return Row(
       children: [
         SizedBox(
-          width: 118,
+          width: 152,
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
-                stats.label,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  color: Color(0xFF06172E),
-                  fontSize: 12,
-                  fontWeight: FontWeight.w900,
-                ),
+              Row(
+                children: [
+                  Container(
+                    width: 44,
+                    padding: const EdgeInsets.symmetric(vertical: 2),
+                    alignment: Alignment.center,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFE8F3FF),
+                      borderRadius: BorderRadius.circular(6),
+                      border: Border.all(color: const Color(0xFFB8D9FF)),
+                    ),
+                    child: Text(
+                      stats.inventoryLabel,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: _numberTextStyle(
+                        color: const Color(0xFF0A5FB8),
+                        fontSize: 10,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 7),
+                  Expanded(
+                    child: Text(
+                      stats.label,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: Color(0xFF06172E),
+                        fontSize: 12,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                  ),
+                ],
               ),
               Text(
                 stats.typeLabel,
@@ -1526,17 +1553,22 @@ class _BatteryTypeStats {
 }
 
 class _BatteryCycleStats {
+  final int inventoryNumber;
   final String label;
   final String typeLabel;
   final int cycles;
   final int maxCycles;
 
   const _BatteryCycleStats({
+    required this.inventoryNumber,
     required this.label,
     required this.typeLabel,
     required this.cycles,
     required this.maxCycles,
   });
+
+  String get inventoryLabel =>
+      inventoryNumber > 0 ? 'Nr. $inventoryNumber' : 'Nr. -';
 
   double get ratio => maxCycles <= 0 ? 0 : cycles / maxCycles;
 }
@@ -1569,7 +1601,8 @@ List<_BatteryCycleStats> _buildBatteryCycleStats(
   final stats = [
     for (final battery in batteries)
       _BatteryCycleStats(
-        label: _batteryDisplayLabel(battery),
+        inventoryNumber: battery.inventoryNumber,
+        label: battery.label,
         typeLabel: _batteryTypeLabel(battery),
         cycles: battery.cycles,
         maxCycles: maxCycles,
@@ -1579,17 +1612,14 @@ List<_BatteryCycleStats> _buildBatteryCycleStats(
       if (ratioCompare != 0) {
         return ratioCompare;
       }
-      return b.cycles.compareTo(a.cycles);
+      final cycleCompare = b.cycles.compareTo(a.cycles);
+      if (cycleCompare != 0) {
+        return cycleCompare;
+      }
+      return a.inventoryNumber.compareTo(b.inventoryNumber);
     });
 
   return stats;
-}
-
-String _batteryDisplayLabel(BatteryPack battery) {
-  if (battery.inventoryNumber > 0) {
-    return 'Akku ${battery.inventoryNumber}: ${battery.label}';
-  }
-  return battery.label;
 }
 
 String _batteryTypeLabel(BatteryPack battery) {
