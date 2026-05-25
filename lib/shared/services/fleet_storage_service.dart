@@ -31,10 +31,16 @@ class FleetStorageService {
       aircraft.add(await _moveAircraftPhotos(user.uid, item));
     }
 
+    final batteries = <BatteryPack>[];
+    for (final item in state.batteries) {
+      batteries.add(await _moveBatteryPhoto(user.uid, item));
+    }
+
     final pilotProfile = await _movePilotFiles(user.uid, state.pilotProfile);
 
     return state.copyWith(
       aircraft: aircraft,
+      batteries: batteries,
       pilotProfile: pilotProfile,
     );
   }
@@ -81,6 +87,41 @@ class FleetStorageService {
       photoDataUris: const [],
       photoStoragePaths: storagePaths,
       photoDownloadUrls: downloadUrls,
+    );
+  }
+
+  Future<BatteryPack> _moveBatteryPhoto(
+    String uid,
+    BatteryPack battery,
+  ) async {
+    final source = battery.photoSource;
+    if (source == null || source.isEmpty) {
+      return battery.copyWith(
+        photoDataUri: null,
+        photoThumbnailDataUri: null,
+        photoStoragePath: null,
+        photoDownloadUrl: null,
+      );
+    }
+
+    if (_isDataUri(source)) {
+      final uploaded = await _uploadDataUri(
+        source,
+        pathPrefix: 'users/$uid/batteries/${battery.id}/photo',
+        fileNameBase: 'battery_photo',
+      );
+      return battery.copyWith(
+        photoDataUri: null,
+        photoThumbnailDataUri: battery.photoThumbnailDataUri ??
+            createImageThumbnailDataUriFromDataUri(source),
+        photoStoragePath: uploaded.storagePath,
+        photoDownloadUrl: uploaded.downloadUrl,
+      );
+    }
+
+    return battery.copyWith(
+      photoDataUri: null,
+      photoDownloadUrl: source,
     );
   }
 

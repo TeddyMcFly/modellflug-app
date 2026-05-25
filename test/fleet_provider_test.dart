@@ -41,4 +41,38 @@ void main() {
     expect(updatedBattery.cycles, initialBattery.cycles + 1);
     expect(updatedBattery.lastUsed, flightDate);
   });
+
+  test('battery photo fields survive json round trip', () {
+    const photoDataUri = 'data:image/jpeg;base64,akku-foto';
+    const thumbnailDataUri = 'data:image/jpeg;base64,akku-vorschau';
+    const downloadUrl = 'https://example.com/akku.jpg';
+    final battery = BatteryPack(
+      id: 'test-akku',
+      inventoryNumber: 9,
+      label: 'Testakku',
+      chemistry: 'LiPo',
+      cells: 4,
+      capacityMah: 2200,
+      chargePercent: 45,
+      cycles: 3,
+      status: BatteryStatus.storage,
+      purchaseDate: DateTime(2026, 5, 25),
+      lastUsed: DateTime(2026, 5, 25),
+      assignedAircraftId: '',
+      notes: 'Test',
+      photoDataUri: photoDataUri,
+      photoThumbnailDataUri: thumbnailDataUri,
+      photoStoragePath: 'users/test/batteries/test-akku/photo/battery.jpg',
+      photoDownloadUrl: downloadUrl,
+    );
+
+    final restored = BatteryPack.fromJson(battery.toJson());
+
+    expect(restored.photoDataUri, photoDataUri);
+    expect(restored.photoThumbnailDataUri, thumbnailDataUri);
+    expect(restored.photoStoragePath, battery.photoStoragePath);
+    expect(restored.photoDownloadUrl, downloadUrl);
+    expect(restored.photoSource, downloadUrl);
+    expect(restored.photoPreviewSource, thumbnailDataUri);
+  });
 }

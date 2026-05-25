@@ -970,7 +970,10 @@ class BatteryPack {
   final String chemistry;
   final int cells;
   final int capacityMah;
-  final int cRate;
+  final String cRate;
+  final String weightWithCable;
+  final String dimensionsLxBxH;
+  final String chargeRateRecommendedMax;
   final int chargePercent;
   final int cycles;
   final BatteryStatus status;
@@ -979,6 +982,10 @@ class BatteryPack {
   final String assignedAircraftId;
   final List<String> assignedAircraftIds;
   final String notes;
+  final String? photoDataUri;
+  final String? photoThumbnailDataUri;
+  final String? photoStoragePath;
+  final String? photoDownloadUrl;
 
   const BatteryPack({
     required this.id,
@@ -988,7 +995,10 @@ class BatteryPack {
     required this.chemistry,
     required this.cells,
     required this.capacityMah,
-    this.cRate = 30,
+    this.cRate = '30',
+    this.weightWithCable = '',
+    this.dimensionsLxBxH = '',
+    this.chargeRateRecommendedMax = '',
     required this.chargePercent,
     required this.cycles,
     required this.status,
@@ -997,6 +1007,10 @@ class BatteryPack {
     required this.assignedAircraftId,
     this.assignedAircraftIds = const [],
     required this.notes,
+    this.photoDataUri,
+    this.photoThumbnailDataUri,
+    this.photoStoragePath,
+    this.photoDownloadUrl,
   });
 
   List<String> get aircraftIds {
@@ -1004,6 +1018,34 @@ class BatteryPack {
       return assignedAircraftIds;
     }
     return assignedAircraftId.isEmpty ? const [] : [assignedAircraftId];
+  }
+
+  String get dischargeRateLabel {
+    final value = cRate.trim();
+    if (value.isEmpty) {
+      return '-';
+    }
+    return value.toLowerCase().contains('c') ? value : '${value}C';
+  }
+
+  String? get photoSource {
+    final downloadUrl = photoDownloadUrl?.trim();
+    if (downloadUrl != null && downloadUrl.isNotEmpty) {
+      return downloadUrl;
+    }
+    final dataUri = photoDataUri?.trim();
+    if (dataUri != null && dataUri.isNotEmpty) {
+      return dataUri;
+    }
+    return null;
+  }
+
+  String? get photoPreviewSource {
+    final thumbnail = photoThumbnailDataUri?.trim();
+    if (thumbnail != null && thumbnail.isNotEmpty) {
+      return thumbnail;
+    }
+    return photoSource;
   }
 
   BatteryPack copyWith({
@@ -1014,7 +1056,10 @@ class BatteryPack {
     String? chemistry,
     int? cells,
     int? capacityMah,
-    int? cRate,
+    String? cRate,
+    String? weightWithCable,
+    String? dimensionsLxBxH,
+    String? chargeRateRecommendedMax,
     int? chargePercent,
     int? cycles,
     BatteryStatus? status,
@@ -1023,6 +1068,10 @@ class BatteryPack {
     String? assignedAircraftId,
     List<String>? assignedAircraftIds,
     String? notes,
+    Object? photoDataUri = _unset,
+    Object? photoThumbnailDataUri = _unset,
+    Object? photoStoragePath = _unset,
+    Object? photoDownloadUrl = _unset,
   }) {
     return BatteryPack(
       id: id ?? this.id,
@@ -1033,6 +1082,10 @@ class BatteryPack {
       cells: cells ?? this.cells,
       capacityMah: capacityMah ?? this.capacityMah,
       cRate: cRate ?? this.cRate,
+      weightWithCable: weightWithCable ?? this.weightWithCable,
+      dimensionsLxBxH: dimensionsLxBxH ?? this.dimensionsLxBxH,
+      chargeRateRecommendedMax:
+          chargeRateRecommendedMax ?? this.chargeRateRecommendedMax,
       chargePercent: chargePercent ?? this.chargePercent,
       cycles: cycles ?? this.cycles,
       status: status ?? this.status,
@@ -1041,6 +1094,18 @@ class BatteryPack {
       assignedAircraftId: assignedAircraftId ?? this.assignedAircraftId,
       assignedAircraftIds: assignedAircraftIds ?? this.assignedAircraftIds,
       notes: notes ?? this.notes,
+      photoDataUri: identical(photoDataUri, _unset)
+          ? this.photoDataUri
+          : photoDataUri as String?,
+      photoThumbnailDataUri: identical(photoThumbnailDataUri, _unset)
+          ? this.photoThumbnailDataUri
+          : photoThumbnailDataUri as String?,
+      photoStoragePath: identical(photoStoragePath, _unset)
+          ? this.photoStoragePath
+          : photoStoragePath as String?,
+      photoDownloadUrl: identical(photoDownloadUrl, _unset)
+          ? this.photoDownloadUrl
+          : photoDownloadUrl as String?,
     );
   }
 
@@ -1053,7 +1118,11 @@ class BatteryPack {
       chemistry: json['chemistry'] as String,
       cells: json['cells'] as int,
       capacityMah: json['capacityMah'] as int,
-      cRate: json['cRate'] as int? ?? 30,
+      cRate: _textFromJson(json['cRate'], '30'),
+      weightWithCable: json['weightWithCable'] as String? ?? '',
+      dimensionsLxBxH: json['dimensionsLxBxH'] as String? ?? '',
+      chargeRateRecommendedMax:
+          json['chargeRateRecommendedMax'] as String? ?? '',
       chargePercent: json['chargePercent'] as int,
       cycles: json['cycles'] as int,
       status: _batteryStatusFromJson(json['status'] as String?),
@@ -1067,6 +1136,10 @@ class BatteryPack {
           item as String,
       ],
       notes: json['notes'] as String,
+      photoDataUri: json['photoDataUri'] as String?,
+      photoThumbnailDataUri: json['photoThumbnailDataUri'] as String?,
+      photoStoragePath: json['photoStoragePath'] as String?,
+      photoDownloadUrl: json['photoDownloadUrl'] as String?,
     );
   }
 
@@ -1080,6 +1153,9 @@ class BatteryPack {
       'cells': cells,
       'capacityMah': capacityMah,
       'cRate': cRate,
+      'weightWithCable': weightWithCable,
+      'dimensionsLxBxH': dimensionsLxBxH,
+      'chargeRateRecommendedMax': chargeRateRecommendedMax,
       'chargePercent': chargePercent,
       'cycles': cycles,
       'status': status.name,
@@ -1088,8 +1164,19 @@ class BatteryPack {
       'assignedAircraftId': assignedAircraftId,
       'assignedAircraftIds': aircraftIds,
       'notes': notes,
+      'photoDataUri': photoDataUri,
+      'photoThumbnailDataUri': photoThumbnailDataUri,
+      'photoStoragePath': photoStoragePath,
+      'photoDownloadUrl': photoDownloadUrl,
     };
   }
+}
+
+String _textFromJson(Object? value, String fallback) {
+  if (value == null) {
+    return fallback;
+  }
+  return value.toString();
 }
 
 BatteryStatus _batteryStatusFromJson(String? value) {

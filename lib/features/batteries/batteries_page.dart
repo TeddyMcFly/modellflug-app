@@ -1,13 +1,26 @@
+import 'dart:convert';
+import 'dart:math' as math;
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:image/image.dart' as img;
+import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
 import 'package:uuid/uuid.dart';
 
 import '../../core/widgets/app_scaffold.dart';
 import '../../shared/models/aircraft_model.dart';
 import '../../shared/providers/fleet_provider.dart';
+import '../../shared/utils/image_drop_zone.dart';
+import '../../shared/utils/image_thumbnail.dart';
+import '../../shared/utils/media_source.dart';
 
 const _tabAccentColor = Colors.white;
+const _batteryPhotoMaxDimension = 1200;
+const _batteryPhotoJpegQuality = 76;
+const _batteryPhotoFallbackMaxBytes = 1024 * 1024;
+const _defaultBatteryPreviewAsset = 'assets/icons/battery.png';
 
 class BatteriesPage extends ConsumerWidget {
   const BatteriesPage({super.key});
@@ -71,6 +84,8 @@ class BatteriesPage extends ConsumerWidget {
             notifier.updateBattery(nextBattery);
           }
         },
+        onDuplicate: (copiedBattery) =>
+            ref.read(fleetProvider.notifier).addBattery(copiedBattery),
       ),
     );
   }
@@ -128,27 +143,30 @@ class _BatteryInventoryTabsState extends State<_BatteryInventoryTabs> {
           selectedIndex: _selectedIndex,
           onSelected: (index) => setState(() => _selectedIndex = index),
         ),
-        Card(
-          margin: EdgeInsets.zero,
-          shape: const RoundedRectangleBorder(
-            borderRadius: BorderRadius.only(
-              topRight: Radius.circular(8),
-              bottomLeft: Radius.circular(8),
-              bottomRight: Radius.circular(8),
+        SizedBox(
+          width: double.infinity,
+          child: Card(
+            margin: EdgeInsets.zero,
+            shape: const RoundedRectangleBorder(
+              borderRadius: BorderRadius.only(
+                topRight: Radius.circular(8),
+                bottomLeft: Radius.circular(8),
+                bottomRight: Radius.circular(8),
+              ),
             ),
-          ),
-          child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: filteredBatteries.isEmpty
-                ? _EmptyBatteryTab(label: selectedType)
-                : _BatteryGrid(
-                    batteries: filteredBatteries,
-                    aircraftById: widget.aircraftById,
-                    cycleWarningThreshold: widget.cycleWarningThreshold,
-                    onEdit: widget.onEdit,
-                    onStatusChanged: widget.onStatusChanged,
-                    onDelete: widget.onDelete,
-                  ),
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: filteredBatteries.isEmpty
+                  ? _EmptyBatteryTab(label: selectedType)
+                  : _BatteryGrid(
+                      batteries: filteredBatteries,
+                      aircraftById: widget.aircraftById,
+                      cycleWarningThreshold: widget.cycleWarningThreshold,
+                      onEdit: widget.onEdit,
+                      onStatusChanged: widget.onStatusChanged,
+                      onDelete: widget.onDelete,
+                    ),
+            ),
           ),
         ),
       ],
@@ -328,39 +346,39 @@ class _BatteryGrid extends StatelessWidget {
   Widget build(BuildContext context) {
     return LayoutBuilder(
       builder: (context, constraints) {
-        final columns = constraints.maxWidth >= 1340
-            ? 5
-            : constraints.maxWidth >= 1080
-                ? 4
-                : constraints.maxWidth >= 800
-                    ? 3
-                    : 1;
+        const gridSpacing = 12.0;
+        const maxCardWidth = 351.0;
+        const maxCardHeight = 416.0;
+        final cardWidth =
+            constraints.maxWidth >= (maxCardWidth * 2) + gridSpacing
+                ? maxCardWidth
+                : constraints.maxWidth;
+        final desiredHeight = cardWidth >= maxCardWidth
+            ? maxCardHeight
+            : cardWidth.clamp(350.0, maxCardHeight).toDouble();
 
-        return GridView.builder(
-          itemCount: batteries.length,
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-            crossAxisCount: columns,
-            crossAxisSpacing: 10,
-            mainAxisSpacing: 10,
-            childAspectRatio: columns == 1 ? 2.22 : 0.94,
-          ),
-          itemBuilder: (context, index) {
-            final battery = batteries[index];
-            final aircraftNames = battery.aircraftIds
-                .map((id) => aircraftById[id]?.name)
-                .whereType<String>()
-                .toList();
-            return _BatteryCard(
-              battery: battery,
-              aircraftNames: aircraftNames,
-              cycleWarningThreshold: cycleWarningThreshold,
-              onEdit: () => onEdit(battery),
-              onStatusChanged: (status) => onStatusChanged(battery.id, status),
-              onDelete: () => onDelete(battery.id),
-            );
-          },
+        return Wrap(
+          spacing: gridSpacing,
+          runSpacing: gridSpacing,
+          children: [
+            for (final battery in batteries)
+              SizedBox(
+                width: cardWidth,
+                height: desiredHeight,
+                child: _BatteryCard(
+                  battery: battery,
+                  aircraftNames: battery.aircraftIds
+                      .map((id) => aircraftById[id]?.name)
+                      .whereType<String>()
+                      .toList(),
+                  cycleWarningThreshold: cycleWarningThreshold,
+                  onEdit: () => onEdit(battery),
+                  onStatusChanged: (status) =>
+                      onStatusChanged(battery.id, status),
+                  onDelete: () => onDelete(battery.id),
+                ),
+              ),
+          ],
         );
       },
     );
@@ -436,14 +454,18 @@ class _BatterySummary extends StatelessWidget {
       spacing: 8,
       runSpacing: 8,
       children: [
-        _SummaryTile(
-          icon: Icons.battery_full_rounded,
-          label: 'Akku-Anzahl',
-          value: '${fleet.batteries.length}',
-          color: const Color(0xFF2563EB),
+        _StatusInfoTile(
+          statusLabel: 'Akku-Anzahl total',
+          batteries: fleet.batteries,
+          emptyMessage: 'Keine Akkus vorhanden.',
+          child: _SummaryTile(
+            icon: Icons.battery_full_rounded,
+            label: 'Akku-Anzahl total',
+            value: '${fleet.batteries.length}',
+            color: const Color(0xFF2563EB),
+          ),
         ),
-        _StatusInfoHover(
-          info: _BatteryStatusInfo.flightReady,
+        _StatusInfoTile(
           statusLabel: 'Flug-ready',
           batteries: flightReadyBatteries,
           child: _SummaryTile(
@@ -453,8 +475,7 @@ class _BatterySummary extends StatelessWidget {
             color: const Color(0xFF16A34A),
           ),
         ),
-        _StatusInfoHover(
-          info: _BatteryStatusInfo.storage,
+        _StatusInfoTile(
           statusLabel: 'Lagerspannung',
           batteries: storageBatteries,
           child: _SummaryTile(
@@ -464,8 +485,7 @@ class _BatterySummary extends StatelessWidget {
             color: const Color(0xFF2563EB),
           ),
         ),
-        _StatusInfoHover(
-          info: _BatteryStatusInfo.discharged,
+        _StatusInfoTile(
           statusLabel: 'Leer geflogen',
           batteries: dischargedBatteries,
           child: _SummaryTile(
@@ -475,8 +495,7 @@ class _BatterySummary extends StatelessWidget {
             color: const Color(0xFFEAB308),
           ),
         ),
-        _StatusInfoHover(
-          info: _BatteryStatusInfo.service,
+        _StatusInfoTile(
           statusLabel: 'Pruefen',
           batteries: serviceBatteries,
           child: _SummaryTile(
@@ -491,91 +510,34 @@ class _BatterySummary extends StatelessWidget {
   }
 }
 
-class _StatusInfoHover extends StatefulWidget {
-  final _BatteryStatusInfo info;
+class _StatusInfoTile extends StatelessWidget {
   final String statusLabel;
   final List<BatteryPack> batteries;
+  final String emptyMessage;
   final Widget child;
 
-  const _StatusInfoHover({
-    required this.info,
+  const _StatusInfoTile({
     required this.statusLabel,
     required this.batteries,
     required this.child,
+    this.emptyMessage = 'Keine Akkus mit diesem Status vorhanden.',
   });
 
   @override
-  State<_StatusInfoHover> createState() => _StatusInfoHoverState();
-}
-
-class _StatusInfoHoverState extends State<_StatusInfoHover> {
-  final LayerLink _layerLink = LayerLink();
-  OverlayEntry? _overlayEntry;
-
-  @override
-  void dispose() {
-    _hideOverlay();
-    super.dispose();
-  }
-
-  @override
   Widget build(BuildContext context) {
-    return CompositedTransformTarget(
-      link: _layerLink,
-      child: MouseRegion(
-        cursor: SystemMouseCursors.help,
-        onEnter: (_) => _showOverlay(),
-        onExit: (_) => _hideOverlay(),
-        child: GestureDetector(
-          behavior: HitTestBehavior.opaque,
-          onTap: () {
-            _hideOverlay();
-            _showAffectedBatteriesDialog(
-              context,
-              statusLabel: widget.statusLabel,
-              batteries: widget.batteries,
-            );
-          },
-          child: widget.child,
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: () => _showAffectedBatteriesDialog(
+          context,
+          statusLabel: statusLabel,
+          batteries: batteries,
+          emptyMessage: emptyMessage,
         ),
+        child: child,
       ),
     );
-  }
-
-  void _showOverlay() {
-    if (_overlayEntry != null) {
-      return;
-    }
-
-    _overlayEntry = OverlayEntry(
-      builder: (context) => Positioned.fill(
-        child: IgnorePointer(
-          child: CompositedTransformFollower(
-            link: _layerLink,
-            showWhenUnlinked: false,
-            targetAnchor: Alignment.bottomCenter,
-            followerAnchor: Alignment.topCenter,
-            offset: const Offset(0, 8),
-            child: Material(
-              color: Colors.transparent,
-              child: UnconstrainedBox(
-                alignment: Alignment.topCenter,
-                child: SizedBox(
-                  width: 160,
-                  child: _BatteryStatusPopup(info: widget.info),
-                ),
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-    Overlay.of(context).insert(_overlayEntry!);
-  }
-
-  void _hideOverlay() {
-    _overlayEntry?.remove();
-    _overlayEntry = null;
   }
 }
 
@@ -583,6 +545,7 @@ Future<void> _showAffectedBatteriesDialog(
   BuildContext context, {
   required String statusLabel,
   required List<BatteryPack> batteries,
+  required String emptyMessage,
 }) async {
   await showDialog<void>(
     context: context,
@@ -592,25 +555,32 @@ Future<void> _showAffectedBatteriesDialog(
         content: SizedBox(
           width: 420,
           child: batteries.isEmpty
-              ? const Padding(
-                  padding: EdgeInsets.symmetric(vertical: 16),
+              ? Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 16),
                   child: Text(
-                    'Keine Akkus mit diesem Status vorhanden.',
-                    style: TextStyle(
+                    emptyMessage,
+                    style: const TextStyle(
                       color: Color(0xFF64748B),
                       fontWeight: FontWeight.w700,
                     ),
                   ),
                 )
-              : Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    for (var index = 0; index < batteries.length; index++) ...[
-                      _AffectedBatteryTile(battery: batteries[index]),
-                      if (index < batteries.length - 1)
-                        const Divider(height: 18),
-                    ],
-                  ],
+              : ConstrainedBox(
+                  constraints: const BoxConstraints(maxHeight: 520),
+                  child: SingleChildScrollView(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        for (var index = 0;
+                            index < batteries.length;
+                            index++) ...[
+                          _AffectedBatteryTile(battery: batteries[index]),
+                          if (index < batteries.length - 1)
+                            const Divider(height: 18),
+                        ],
+                      ],
+                    ),
+                  ),
                 ),
         ),
         actions: [
@@ -653,16 +623,25 @@ class _AffectedBatteryTile extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                battery.label,
+                'Akku-Nr. ${battery.inventoryNumber}',
                 overflow: TextOverflow.ellipsis,
                 style: const TextStyle(
                   color: Color(0xFF06172E),
-                  fontSize: 14,
+                  fontSize: 16,
                   fontWeight: FontWeight.w900,
                 ),
               ),
               Text(
-                '${battery.cells}S ${battery.capacityMah} mAh - ${battery.cRate}C',
+                battery.label,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  color: Color(0xFF334155),
+                  fontSize: 13,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              Text(
+                '${battery.cells}S ${battery.capacityMah} mAh - ${battery.dischargeRateLabel}',
                 overflow: TextOverflow.ellipsis,
                 style: const TextStyle(
                   color: Color(0xFF64748B),
@@ -682,60 +661,6 @@ class _AffectedBatteryTile extends StatelessWidget {
           ),
         ),
       ],
-    );
-  }
-}
-
-class _BatteryStatusInfo {
-  final String assetPath;
-  final Color color;
-
-  const _BatteryStatusInfo({
-    required this.assetPath,
-    required this.color,
-  });
-
-  static const flightReady = _BatteryStatusInfo(
-    assetPath: 'assets/icons/battery_status_full.jpg',
-    color: Color(0xFF16A34A),
-  );
-
-  static const storage = _BatteryStatusInfo(
-    assetPath: 'assets/icons/battery_status_storage.jpg',
-    color: Color(0xFF2563EB),
-  );
-
-  static const discharged = _BatteryStatusInfo(
-    assetPath: 'assets/icons/battery_status_discharged.jpg',
-    color: Color(0xFFEAB308),
-  );
-
-  static const service = _BatteryStatusInfo(
-    assetPath: 'assets/icons/battery_status_service.jpg',
-    color: Color(0xFFDC2626),
-  );
-}
-
-class _BatteryStatusPopup extends StatelessWidget {
-  final _BatteryStatusInfo info;
-
-  const _BatteryStatusPopup({required this.info});
-
-  @override
-  Widget build(BuildContext context) {
-    return Card(
-      color: Colors.black,
-      elevation: 10,
-      clipBehavior: Clip.antiAlias,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(10),
-        side: BorderSide(color: info.color.withValues(alpha: 0.85), width: 1.2),
-      ),
-      child: Image.asset(
-        info.assetPath,
-        width: 210,
-        fit: BoxFit.contain,
-      ),
     );
   }
 }
@@ -819,6 +744,231 @@ String _statusIconAssetFor(BatteryStatus status) {
   };
 }
 
+class _BatteryVisualPreview extends StatelessWidget {
+  final BatteryPack battery;
+  final Color borderColor;
+
+  const _BatteryVisualPreview({
+    required this.battery,
+    required this.borderColor,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final photoSource = battery.photoSource;
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        const previewHeight = 142.0;
+
+        return Container(
+          width: double.infinity,
+          height: previewHeight,
+          decoration: BoxDecoration(
+            color: Colors.black,
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: borderColor),
+          ),
+          clipBehavior: Clip.antiAlias,
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              photoSource == null
+                  ? Image.asset(
+                      _defaultBatteryPreviewAsset,
+                      fit: BoxFit.contain,
+                    )
+                  : Image(
+                      image: mediaImageProvider(photoSource),
+                      fit: BoxFit.cover,
+                      errorBuilder: (context, error, stackTrace) => Image.asset(
+                        _defaultBatteryPreviewAsset,
+                        fit: BoxFit.contain,
+                      ),
+                    ),
+              Positioned(
+                left: 8,
+                top: 8,
+                child: Container(
+                  constraints: const BoxConstraints(
+                    minWidth: 32,
+                    minHeight: 32,
+                  ),
+                  alignment: Alignment.center,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 5,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.black.withValues(alpha: 0.72),
+                    borderRadius: BorderRadius.circular(999),
+                    border: Border.all(
+                      color: Colors.white.withValues(alpha: 0.75),
+                    ),
+                  ),
+                  child: Text(
+                    battery.inventoryNumber.toString(),
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 15,
+                      fontWeight: FontWeight.w900,
+                      height: 1,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _BatteryStatusPreview extends StatelessWidget {
+  final BatteryStatus status;
+  final Color borderColor;
+
+  const _BatteryStatusPreview({
+    required this.status,
+    required this.borderColor,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 42,
+      height: 66,
+      padding: const EdgeInsets.all(3),
+      decoration: BoxDecoration(
+        color: Colors.black,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: borderColor),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Image.asset(
+        _statusIconAssetFor(status),
+        fit: BoxFit.contain,
+      ),
+    );
+  }
+}
+
+class _BatteryActionsMenu extends StatelessWidget {
+  final VoidCallback onEdit;
+  final ValueChanged<BatteryStatus> onStatusChanged;
+  final VoidCallback onDelete;
+
+  const _BatteryActionsMenu({
+    required this.onEdit,
+    required this.onStatusChanged,
+    required this.onDelete,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return PopupMenuButton<Object>(
+      tooltip: 'Akkuaktionen',
+      icon: const Icon(Icons.more_vert_rounded),
+      padding: EdgeInsets.zero,
+      constraints: const BoxConstraints(minWidth: 40, minHeight: 40),
+      onSelected: (value) {
+        if (value == 'edit') {
+          onEdit();
+        } else if (value == 'delete') {
+          onDelete();
+        } else if (value is BatteryStatus) {
+          onStatusChanged(value);
+        }
+      },
+      itemBuilder: (context) => [
+        const PopupMenuItem(
+          value: 'edit',
+          child: Row(
+            children: [
+              Icon(Icons.edit_rounded),
+              SizedBox(width: 10),
+              Text('Bearbeiten'),
+            ],
+          ),
+        ),
+        const PopupMenuDivider(),
+        for (final status in BatteryStatus.values)
+          PopupMenuItem(value: status, child: Text(status.label)),
+        const PopupMenuDivider(),
+        const PopupMenuItem(
+          value: 'delete',
+          child: Row(
+            children: [
+              Icon(Icons.delete_outline_rounded),
+              SizedBox(width: 10),
+              Text('Loeschen'),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _BatteryTechnicalDetails extends StatelessWidget {
+  final BatteryPack battery;
+  final String weightLabel;
+
+  const _BatteryTechnicalDetails({
+    required this.battery,
+    required this.weightLabel,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final mainDetails = [
+      '${battery.cells}S',
+      '${battery.capacityMah} mAh',
+      battery.dischargeRateLabel,
+    ].join(' - ');
+    final secondaryDetails = [
+      if (battery.manufacturer.isNotEmpty) battery.manufacturer,
+      battery.chemistry,
+      if (weightLabel.isNotEmpty) 'Gewicht $weightLabel',
+    ].join(' - ');
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          battery.label,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: const TextStyle(
+            fontSize: 16,
+            fontWeight: FontWeight.w900,
+          ),
+        ),
+        const SizedBox(height: 2),
+        Text(
+          mainDetails,
+          overflow: TextOverflow.ellipsis,
+          style: const TextStyle(
+            color: Color(0xFF64748B),
+            fontSize: 12,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        Text(
+          secondaryDetails,
+          overflow: TextOverflow.ellipsis,
+          style: const TextStyle(
+            color: Color(0xFF64748B),
+            fontSize: 12,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
 class _BatteryCard extends StatelessWidget {
   final BatteryPack battery;
   final List<String> aircraftNames;
@@ -848,6 +998,7 @@ class _BatteryCard extends StatelessWidget {
       const Color(0xFFDC2626),
       cycleRatio,
     )!;
+    final weightLabel = _weightLabel(battery);
 
     return Card(
       color: backgroundColor,
@@ -857,142 +1008,36 @@ class _BatteryCard extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Container(
-                  width: 44,
-                  height: 44,
-                  alignment: Alignment.center,
-                  decoration: BoxDecoration(
-                    color: color.withValues(alpha: 0.28),
-                    shape: BoxShape.circle,
-                    border: Border.all(
-                      color: color.withValues(alpha: 0.48),
-                      width: 1.2,
-                    ),
-                    boxShadow: [
-                      BoxShadow(
-                        color: color.withValues(alpha: 0.16),
-                        blurRadius: 8,
-                        offset: const Offset(0, 3),
-                      ),
-                    ],
-                  ),
-                  child: Text(
-                    battery.inventoryNumber.toString(),
-                    style: TextStyle(
-                      color: color,
-                      fontSize: 22,
-                      fontWeight: FontWeight.w900,
-                      height: 1,
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 9),
-                Container(
-                  width: 38,
-                  height: 62,
-                  padding: const EdgeInsets.all(3),
-                  decoration: BoxDecoration(
-                    color: Colors.black,
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: color.withValues(alpha: 0.55)),
-                  ),
-                  clipBehavior: Clip.antiAlias,
-                  child: Image.asset(
-                    _statusIconAsset(battery.status),
-                    fit: BoxFit.contain,
-                  ),
-                ),
-                const SizedBox(width: 12),
                 Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        battery.label,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.w900,
-                        ),
-                      ),
-                      Text(
-                        '${battery.cells}S ${battery.capacityMah} mAh - ${battery.cRate}C',
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          color: Color(0xFF64748B),
-                          fontSize: 12,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                      Text(
-                        battery.manufacturer.isNotEmpty
-                            ? battery.manufacturer
-                            : battery.chemistry,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          color: Color(0xFF64748B),
-                          fontSize: 12,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                      if (battery.manufacturer.isNotEmpty)
-                        Text(
-                          battery.chemistry,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                            color: Color(0xFF64748B),
-                            fontSize: 12,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        )
-                      else
-                        const SizedBox.shrink(),
-                    ],
+                  child: _BatteryTechnicalDetails(
+                    battery: battery,
+                    weightLabel: weightLabel,
                   ),
                 ),
-                PopupMenuButton<Object>(
-                  tooltip: 'Akkuaktionen',
-                  icon: const Icon(Icons.more_horiz_rounded),
-                  onSelected: (value) {
-                    if (value == 'edit') {
-                      onEdit();
-                    } else if (value == 'delete') {
-                      onDelete();
-                    } else if (value is BatteryStatus) {
-                      onStatusChanged(value);
-                    }
-                  },
-                  itemBuilder: (context) => [
-                    const PopupMenuItem(
-                      value: 'edit',
-                      child: Row(
-                        children: [
-                          Icon(Icons.edit_rounded),
-                          SizedBox(width: 10),
-                          Text('Bearbeiten'),
-                        ],
-                      ),
-                    ),
-                    const PopupMenuDivider(),
-                    for (final status in BatteryStatus.values)
-                      PopupMenuItem(value: status, child: Text(status.label)),
-                    const PopupMenuDivider(),
-                    const PopupMenuItem(
-                      value: 'delete',
-                      child: Row(
-                        children: [
-                          Icon(Icons.delete_outline_rounded),
-                          SizedBox(width: 10),
-                          Text('Loeschen'),
-                        ],
-                      ),
-                    ),
-                  ],
+                const SizedBox(width: 10),
+                _BatteryStatusPreview(
+                  status: battery.status,
+                  borderColor: color.withValues(alpha: 0.65),
+                ),
+                const SizedBox(width: 4),
+                Align(
+                  alignment: Alignment.topRight,
+                  child: _BatteryActionsMenu(
+                    onEdit: onEdit,
+                    onStatusChanged: onStatusChanged,
+                    onDelete: onDelete,
+                  ),
                 ),
               ],
             ),
-            const SizedBox(height: 8),
+            const SizedBox(height: 10),
+            _BatteryVisualPreview(
+              battery: battery,
+              borderColor: color.withValues(alpha: 0.55),
+            ),
+            const SizedBox(height: 10),
             _AssignedAircraftRow(aircraftNames: aircraftNames),
             const SizedBox(height: 8),
             _CycleStatusBar(
@@ -1010,17 +1055,6 @@ class _BatteryCard extends StatelessWidget {
                 color: cycleColor,
                 fontSize: 12,
                 fontWeight: FontWeight.w900,
-              ),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              battery.notes,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(
-                color: Color(0xFF475569),
-                fontSize: 12,
-                height: 1.25,
               ),
             ),
             const Spacer(),
@@ -1125,8 +1159,16 @@ class _BatteryCard extends StatelessWidget {
     };
   }
 
-  String _statusIconAsset(BatteryStatus status) {
-    return _statusIconAssetFor(status);
+  String _weightLabel(BatteryPack battery) {
+    final value = battery.weightWithCable.trim();
+    if (value.isEmpty) {
+      return '';
+    }
+    final lower = value.toLowerCase();
+    if (lower.contains('g') || lower.contains('kg')) {
+      return value;
+    }
+    return '$value g';
   }
 }
 
@@ -1157,7 +1199,7 @@ class _AssignedAircraftRowState extends State<_AssignedAircraftRow> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         const Text(
-          'Modelle',
+          'Einsatz bei...',
           style: TextStyle(
             color: Color(0xFF64748B),
             fontSize: 10,
@@ -1333,12 +1375,14 @@ class _BatteryDialog extends StatefulWidget {
   final BatteryPack? battery;
   final int suggestedInventoryNumber;
   final ValueChanged<BatteryPack> onSubmit;
+  final ValueChanged<BatteryPack> onDuplicate;
 
   const _BatteryDialog({
     required this.aircraft,
     this.battery,
     required this.suggestedInventoryNumber,
     required this.onSubmit,
+    required this.onDuplicate,
   });
 
   @override
@@ -1347,17 +1391,24 @@ class _BatteryDialog extends StatefulWidget {
 
 class _BatteryDialogState extends State<_BatteryDialog> {
   final _formKey = GlobalKey<FormState>();
+  final _imagePicker = ImagePicker();
   late final TextEditingController _label;
   late final TextEditingController _manufacturer;
   late final TextEditingController _chemistry;
   late final TextEditingController _cells;
   late final TextEditingController _capacity;
   late final TextEditingController _cRate;
+  late final TextEditingController _weightWithCable;
+  late final TextEditingController _dimensionsLxBxH;
+  late final TextEditingController _chargeRateRecommendedMax;
   late final TextEditingController _cycles;
   late final TextEditingController _purchaseDate;
   late final TextEditingController _notes;
   late BatteryStatus _status;
   late Set<String> _aircraftIds;
+  String? _photoSource;
+  String? _photoThumbnailDataUri;
+  String? _photoStoragePath;
 
   @override
   void initState() {
@@ -1368,7 +1419,16 @@ class _BatteryDialogState extends State<_BatteryDialog> {
     _chemistry = TextEditingController(text: battery?.chemistry ?? 'LiPo');
     _cells = TextEditingController(text: '${battery?.cells ?? 4}');
     _capacity = TextEditingController(text: '${battery?.capacityMah ?? 2200}');
-    _cRate = TextEditingController(text: '${battery?.cRate ?? 30}');
+    _cRate = TextEditingController(text: battery?.cRate ?? '30');
+    _weightWithCable = TextEditingController(
+      text: battery?.weightWithCable ?? '',
+    );
+    _dimensionsLxBxH = TextEditingController(
+      text: battery?.dimensionsLxBxH ?? '',
+    );
+    _chargeRateRecommendedMax = TextEditingController(
+      text: battery?.chargeRateRecommendedMax ?? '',
+    );
     _cycles = TextEditingController(text: '${battery?.cycles ?? 0}');
     _purchaseDate = TextEditingController(
       text: DateFormat('dd.MM.yyyy').format(
@@ -1378,6 +1438,9 @@ class _BatteryDialogState extends State<_BatteryDialog> {
     _notes = TextEditingController(text: battery?.notes ?? '');
     _status = battery?.status ?? BatteryStatus.storage;
     _aircraftIds = {...?battery?.aircraftIds};
+    _photoSource = battery?.photoSource;
+    _photoThumbnailDataUri = battery?.photoThumbnailDataUri;
+    _photoStoragePath = battery?.photoStoragePath;
   }
 
   @override
@@ -1388,6 +1451,9 @@ class _BatteryDialogState extends State<_BatteryDialog> {
     _cells.dispose();
     _capacity.dispose();
     _cRate.dispose();
+    _weightWithCable.dispose();
+    _dimensionsLxBxH.dispose();
+    _chargeRateRecommendedMax.dispose();
     _cycles.dispose();
     _purchaseDate.dispose();
     _notes.dispose();
@@ -1398,6 +1464,13 @@ class _BatteryDialogState extends State<_BatteryDialog> {
   Widget build(BuildContext context) {
     final inventoryNumber =
         widget.battery?.inventoryNumber ?? widget.suggestedInventoryNumber;
+    final selectableAircraft = widget.aircraft
+        .where(
+          (aircraft) =>
+              aircraft.status != AircraftStatus.destroyed ||
+              _aircraftIds.contains(aircraft.id),
+        )
+        .toList();
 
     return AlertDialog(
       alignment: Alignment.topCenter,
@@ -1435,12 +1508,39 @@ class _BatteryDialogState extends State<_BatteryDialog> {
                       ),
                     ),
                   ),
+                  SizedBox(
+                    width: 532,
+                    child: _BatteryPhotoPickerPanel(
+                      photoSource: _photoSource,
+                      onPick: _pickPhoto,
+                      onDrop: _acceptDroppedPhoto,
+                      onRemove: _removePhoto,
+                    ),
+                  ),
                   _TextField(controller: _label, label: 'Bezeichnung'),
                   _TextField(controller: _manufacturer, label: 'Hersteller'),
                   _TextField(controller: _chemistry, label: 'Chemie'),
                   _TextField(controller: _cells, label: 'Zellen'),
                   _TextField(controller: _capacity, label: 'Kapazitaet mAh'),
-                  _TextField(controller: _cRate, label: 'C-Rate'),
+                  _TextField(
+                    controller: _cRate,
+                    label: 'Entladerate Dauer/Kurzzeitig',
+                  ),
+                  _TextField(
+                    controller: _weightWithCable,
+                    label: 'Gewicht inkl. Kabel/Stecker',
+                    isRequired: false,
+                  ),
+                  _TextField(
+                    controller: _dimensionsLxBxH,
+                    label: 'Abmessungen (LxBxH)',
+                    isRequired: false,
+                  ),
+                  _TextField(
+                    controller: _chargeRateRecommendedMax,
+                    label: 'Laderate empf/max',
+                    isRequired: false,
+                  ),
                   _TextField(controller: _cycles, label: 'Zyklen'),
                   _TextField(controller: _purchaseDate, label: 'Kaufdatum'),
                   SizedBox(
@@ -1462,8 +1562,9 @@ class _BatteryDialogState extends State<_BatteryDialog> {
                   SizedBox(
                     width: 532,
                     child: _AircraftMultiSelect(
-                      aircraft: widget.aircraft,
+                      aircraft: selectableAircraft,
                       selectedIds: _aircraftIds,
+                      emptyMessage: 'Keine aktiven Modelle vorhanden',
                       onChanged: (ids) => setState(() => _aircraftIds = ids),
                     ),
                   ),
@@ -1487,6 +1588,12 @@ class _BatteryDialogState extends State<_BatteryDialog> {
           onPressed: () => Navigator.of(context).pop(),
           child: const Text('Abbrechen'),
         ),
+        if (widget.battery != null)
+          OutlinedButton.icon(
+            onPressed: _duplicate,
+            icon: const Icon(Icons.content_copy_rounded),
+            label: const Text('Kopie mit neuer Nr. anlegen'),
+          ),
         FilledButton(
           onPressed: _submit,
           child: const Text('Speichern'),
@@ -1501,29 +1608,142 @@ class _BatteryDialogState extends State<_BatteryDialog> {
     }
 
     widget.onSubmit(
-      BatteryPack(
+      _batteryFromForm(
         id: widget.battery?.id ?? const Uuid().v4(),
         inventoryNumber:
             widget.battery?.inventoryNumber ?? widget.suggestedInventoryNumber,
-        label: _label.text.trim(),
-        manufacturer: _manufacturer.text.trim(),
-        chemistry: _chemistry.text.trim(),
-        cells: int.parse(_cells.text),
-        capacityMah: int.parse(_capacity.text),
-        cRate: int.parse(_cRate.text),
-        chargePercent: _chargePercentForStatus(_status),
-        cycles: int.parse(_cycles.text),
-        status: _status,
-        purchaseDate: _parseDate(_purchaseDate.text),
         lastUsed: widget.battery?.lastUsed ?? DateTime.now(),
-        assignedAircraftId: _aircraftIds.isEmpty ? '' : _aircraftIds.first,
-        assignedAircraftIds: _aircraftIds.toList(),
-        notes: _notes.text.trim().isEmpty
-            ? 'Noch keine Akkunotizen hinterlegt.'
-            : _notes.text.trim(),
       ),
     );
     Navigator.of(context).pop();
+  }
+
+  void _duplicate() {
+    if (!_formKey.currentState!.validate()) {
+      return;
+    }
+
+    widget.onDuplicate(
+      _batteryFromForm(
+        id: const Uuid().v4(),
+        inventoryNumber: widget.suggestedInventoryNumber,
+        lastUsed: DateTime.now(),
+      ),
+    );
+    Navigator.of(context).pop();
+  }
+
+  BatteryPack _batteryFromForm({
+    required String id,
+    required int inventoryNumber,
+    required DateTime lastUsed,
+  }) {
+    final photoSource = _photoSource?.trim();
+    final hasPhoto = photoSource != null && photoSource.isNotEmpty;
+    final embeddedPhoto = hasPhoto && photoSource.startsWith('data:');
+
+    return BatteryPack(
+      id: id,
+      inventoryNumber: inventoryNumber,
+      label: _label.text.trim(),
+      manufacturer: _manufacturer.text.trim(),
+      chemistry: _chemistry.text.trim(),
+      cells: int.parse(_cells.text),
+      capacityMah: int.parse(_capacity.text),
+      cRate: _cRate.text.trim(),
+      weightWithCable: _weightWithCable.text.trim(),
+      dimensionsLxBxH: _dimensionsLxBxH.text.trim(),
+      chargeRateRecommendedMax: _chargeRateRecommendedMax.text.trim(),
+      chargePercent: _chargePercentForStatus(_status),
+      cycles: int.parse(_cycles.text),
+      status: _status,
+      purchaseDate: _parseDate(_purchaseDate.text),
+      lastUsed: lastUsed,
+      assignedAircraftId: _aircraftIds.isEmpty ? '' : _aircraftIds.first,
+      assignedAircraftIds: _aircraftIds.toList(),
+      notes: _notes.text.trim().isEmpty
+          ? 'Noch keine Akkunotizen hinterlegt.'
+          : _notes.text.trim(),
+      photoDataUri: embeddedPhoto ? photoSource : null,
+      photoThumbnailDataUri: hasPhoto ? _photoThumbnailDataUri : null,
+      photoStoragePath: !embeddedPhoto && hasPhoto ? _photoStoragePath : null,
+      photoDownloadUrl: !embeddedPhoto && hasPhoto ? photoSource : null,
+    );
+  }
+
+  Future<void> _pickPhoto() async {
+    final pickedImage = await _imagePicker.pickImage(
+      source: ImageSource.gallery,
+      imageQuality: _batteryPhotoJpegQuality,
+      maxWidth: _batteryPhotoMaxDimension.toDouble(),
+      maxHeight: _batteryPhotoMaxDimension.toDouble(),
+    );
+    if (pickedImage == null) {
+      return;
+    }
+
+    try {
+      final bytes = await pickedImage.readAsBytes();
+      await _storePhoto(bytes, pickedImage.name);
+    } catch (_) {
+      if (mounted) {
+        await _showInputError(
+          'Das Foto konnte leider nicht geladen werden. Bitte versuche ein anderes Bild.',
+        );
+      }
+    }
+  }
+
+  Future<void> _acceptDroppedPhoto(DroppedImageFile file) async {
+    await _storePhoto(file.bytes, file.name);
+  }
+
+  Future<void> _storePhoto(Uint8List bytes, String fileName) async {
+    final dataUri = _optimizedBatteryPhotoDataUri(bytes, fileName);
+    if (dataUri == null) {
+      if (mounted) {
+        await _showInputError(
+          'Das Foto war zu gross und konnte nicht passend verkleinert werden.',
+        );
+      }
+      return;
+    }
+
+    final thumbnailDataUri =
+        createImageThumbnailDataUriFromDataUri(dataUri, maxSize: 128) ??
+            createImageThumbnailDataUri(bytes, maxSize: 128);
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _photoSource = dataUri;
+      _photoThumbnailDataUri = thumbnailDataUri;
+      _photoStoragePath = null;
+    });
+  }
+
+  void _removePhoto() {
+    setState(() {
+      _photoSource = null;
+      _photoThumbnailDataUri = null;
+      _photoStoragePath = null;
+    });
+  }
+
+  Future<void> _showInputError(String message) {
+    return showDialog<void>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Foto pruefen'),
+        content: Text(message),
+        actions: [
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('OK'),
+          ),
+        ],
+      ),
+    );
   }
 
   DateTime _parseDate(String value) {
@@ -1544,29 +1764,164 @@ class _BatteryDialogState extends State<_BatteryDialog> {
   }
 }
 
+class _BatteryPhotoPickerPanel extends StatefulWidget {
+  final String? photoSource;
+  final VoidCallback onPick;
+  final ValueChanged<DroppedImageFile> onDrop;
+  final VoidCallback onRemove;
+
+  const _BatteryPhotoPickerPanel({
+    required this.photoSource,
+    required this.onPick,
+    required this.onDrop,
+    required this.onRemove,
+  });
+
+  @override
+  State<_BatteryPhotoPickerPanel> createState() =>
+      _BatteryPhotoPickerPanelState();
+}
+
+class _BatteryPhotoPickerPanelState extends State<_BatteryPhotoPickerPanel> {
+  bool _isDragActive = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final source = widget.photoSource?.trim();
+    final hasPhoto = source != null && source.isNotEmpty;
+
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF8FAFC),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: const Color(0xFFE2E8F0)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 86,
+            height: 64,
+            decoration: BoxDecoration(
+              color: const Color(0xFFEFF6FF),
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(
+                color: _isDragActive
+                    ? const Color(0xFF0A84FF)
+                    : const Color(0xFFD8E8FF),
+                width: _isDragActive ? 2 : 1,
+              ),
+              boxShadow: _isDragActive
+                  ? const [
+                      BoxShadow(
+                        color: Color(0x330A84FF),
+                        blurRadius: 10,
+                        offset: Offset(0, 3),
+                      ),
+                    ]
+                  : null,
+            ),
+            clipBehavior: Clip.antiAlias,
+            child: ImageDropZone(
+              onImageDropped: widget.onDrop,
+              onDragActiveChanged: (active) {
+                if (_isDragActive == active) {
+                  return;
+                }
+                setState(() => _isDragActive = active);
+              },
+              child: hasPhoto
+                  ? Image(
+                      image: mediaImageProvider(source),
+                      fit: BoxFit.cover,
+                      errorBuilder: (context, error, stackTrace) => const Icon(
+                        Icons.battery_charging_full_rounded,
+                        color: Color(0xFF0A84FF),
+                      ),
+                    )
+                  : Image.asset(
+                      _defaultBatteryPreviewAsset,
+                      fit: BoxFit.cover,
+                    ),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Akkufoto',
+                  style: TextStyle(
+                    color: Color(0xFF06172E),
+                    fontSize: 15,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+                const SizedBox(height: 5),
+                Text(
+                  hasPhoto
+                      ? 'Foto ist hinterlegt.'
+                      : 'Noch kein Akkufoto hinterlegt.',
+                  style: const TextStyle(
+                    color: Color(0xFF64748B),
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 9),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    OutlinedButton.icon(
+                      onPressed: widget.onPick,
+                      icon: const Icon(Icons.photo_library_rounded),
+                      label: Text(hasPhoto ? 'Foto aendern' : 'Foto waehlen'),
+                    ),
+                    if (hasPhoto)
+                      TextButton.icon(
+                        onPressed: widget.onRemove,
+                        icon: const Icon(Icons.delete_outline_rounded),
+                        label: const Text('Foto entfernen'),
+                      ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _AircraftMultiSelect extends StatelessWidget {
   final List<AircraftModel> aircraft;
   final Set<String> selectedIds;
+  final String emptyMessage;
   final ValueChanged<Set<String>> onChanged;
 
   const _AircraftMultiSelect({
     required this.aircraft,
     required this.selectedIds,
+    this.emptyMessage = 'Keine Modelle vorhanden',
     required this.onChanged,
   });
 
   @override
   Widget build(BuildContext context) {
     return InputDecorator(
-      decoration: const InputDecoration(labelText: 'Modelle'),
+      decoration: const InputDecoration(labelText: 'Einsatz bei...'),
       child: Wrap(
         spacing: 8,
         runSpacing: 6,
         children: [
           if (aircraft.isEmpty)
-            const Text(
-              'Keine Modelle vorhanden',
-              style: TextStyle(color: Color(0xFF64748B)),
+            Text(
+              emptyMessage,
+              style: const TextStyle(color: Color(0xFF64748B)),
             )
           else
             for (final item in aircraft)
@@ -1592,8 +1947,13 @@ class _AircraftMultiSelect extends StatelessWidget {
 class _TextField extends StatelessWidget {
   final TextEditingController controller;
   final String label;
+  final bool isRequired;
 
-  const _TextField({required this.controller, required this.label});
+  const _TextField({
+    required this.controller,
+    required this.label,
+    this.isRequired = true,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -1602,9 +1962,65 @@ class _TextField extends StatelessWidget {
       child: TextFormField(
         controller: controller,
         decoration: InputDecoration(labelText: label),
-        validator: (value) =>
-            value == null || value.trim().isEmpty ? 'Pflichtfeld' : null,
+        validator: isRequired
+            ? (value) =>
+                value == null || value.trim().isEmpty ? 'Pflichtfeld' : null
+            : null,
       ),
     );
+  }
+}
+
+String _batteryPhotoMimeTypeForName(String fileName) {
+  final lower = fileName.toLowerCase();
+  if (lower.endsWith('.png')) {
+    return 'image/png';
+  }
+  if (lower.endsWith('.webp')) {
+    return 'image/webp';
+  }
+  return 'image/jpeg';
+}
+
+String? _optimizedBatteryPhotoDataUri(Uint8List bytes, String fileName) {
+  final optimizedBytes = _resizeBatteryPhoto(bytes);
+  if (optimizedBytes != null) {
+    return 'data:image/jpeg;base64,${base64Encode(optimizedBytes)}';
+  }
+
+  if (bytes.lengthInBytes > _batteryPhotoFallbackMaxBytes) {
+    return null;
+  }
+
+  final mimeType = _batteryPhotoMimeTypeForName(fileName);
+  return 'data:$mimeType;base64,${base64Encode(bytes)}';
+}
+
+Uint8List? _resizeBatteryPhoto(Uint8List bytes) {
+  try {
+    final decoded = img.decodeImage(bytes);
+    if (decoded == null) {
+      return null;
+    }
+
+    final oriented = img.bakeOrientation(decoded);
+    final longestSide = math.max(oriented.width, oriented.height);
+    final prepared = longestSide > _batteryPhotoMaxDimension
+        ? img.copyResize(
+            oriented,
+            width: oriented.width >= oriented.height
+                ? _batteryPhotoMaxDimension
+                : null,
+            height: oriented.height > oriented.width
+                ? _batteryPhotoMaxDimension
+                : null,
+            interpolation: img.Interpolation.average,
+          )
+        : oriented;
+    return Uint8List.fromList(
+      img.encodeJpg(prepared, quality: _batteryPhotoJpegQuality),
+    );
+  } catch (_) {
+    return null;
   }
 }

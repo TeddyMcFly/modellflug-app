@@ -4,6 +4,9 @@ import 'package:go_router/go_router.dart';
 
 import '../../shared/services/auth_service.dart';
 
+const _loginIntroLogoAsset = 'homepage/assets/login_logo12.png';
+const _loginNavy = Color(0xFF06172E);
+
 enum _AuthMode { signIn, register }
 
 class LoginPage extends ConsumerStatefulWidget {
@@ -35,54 +38,47 @@ class _LoginPageState extends ConsumerState<LoginPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFF06172E),
+      backgroundColor: _loginNavy,
       body: LayoutBuilder(
         builder: (context, constraints) {
-          final wide = constraints.maxWidth >= 860;
+          final wide = constraints.maxWidth >= 1100;
 
-          return Stack(
-            fit: StackFit.expand,
-            children: [
-              Image.asset(
-                'assets/splash/landingpage_heaven.png',
-                fit: BoxFit.cover,
-                opacity: const AlwaysStoppedAnimation(0.24),
-              ),
-              DecoratedBox(
-                decoration: BoxDecoration(
-                  color: const Color(0xFF06172E).withValues(alpha: 0.78),
-                ),
-              ),
-              SafeArea(
-                child: Center(
-                  child: SingleChildScrollView(
-                    padding: const EdgeInsets.all(24),
-                    child: ConstrainedBox(
-                      constraints: BoxConstraints(
-                        maxWidth: wide ? 900 : 460,
-                      ),
-                      child: wide
-                          ? Row(
+          return ColoredBox(
+            color: _loginNavy,
+            child: SafeArea(
+              child: Center(
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.all(24),
+                  child: ConstrainedBox(
+                    constraints: BoxConstraints(
+                      maxWidth: wide ? 1040 : 460,
+                    ),
+                    child: wide
+                        ? IntrinsicHeight(
+                            child: Row(
                               crossAxisAlignment: CrossAxisAlignment.center,
                               children: [
-                                const Expanded(child: _AuthIntro()),
-                                const SizedBox(width: 28),
+                                const SizedBox(
+                                  width: 590,
+                                  child: _AuthIntro(),
+                                ),
+                                const SizedBox(width: 30),
                                 SizedBox(width: 420, child: _buildFormCard()),
                               ],
-                            )
-                          : Column(
-                              crossAxisAlignment: CrossAxisAlignment.stretch,
-                              children: [
-                                const _AuthIntro(compact: true),
-                                const SizedBox(height: 18),
-                                _buildFormCard(),
-                              ],
                             ),
-                    ),
+                          )
+                        : Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              const _AuthIntro(compact: true),
+                              const SizedBox(height: 8),
+                              _buildFormCard(),
+                            ],
+                          ),
                   ),
                 ),
               ),
-            ],
+            ),
           );
         },
       ),
@@ -327,39 +323,75 @@ class _AuthIntro extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment:
-          compact ? CrossAxisAlignment.center : CrossAxisAlignment.start,
+    final introContent = Column(
+      crossAxisAlignment: CrossAxisAlignment.center,
       mainAxisSize: MainAxisSize.min,
       children: [
-        const Icon(
-          Icons.flight_takeoff_rounded,
-          color: Color(0xFF60A5FA),
-          size: 42,
-        ),
-        const SizedBox(height: 14),
         Text(
           'Modellflug-Heaven',
-          textAlign: compact ? TextAlign.center : TextAlign.left,
-          style: const TextStyle(
+          textAlign: TextAlign.center,
+          style: TextStyle(
             color: Colors.white,
-            fontSize: 36,
+            fontSize: compact ? 36 : 46,
             fontWeight: FontWeight.w900,
             letterSpacing: 0,
           ),
         ),
-        const SizedBox(height: 8),
+        const SizedBox(height: 4),
         Text(
-          'Dein Konto verbindet spaeter PC, Handy, iPad und Browser mit denselben Daten.',
-          textAlign: compact ? TextAlign.center : TextAlign.left,
-          style: const TextStyle(
-            color: Color(0xFFBFDBFE),
-            fontSize: 15,
+          'Faszination Modellflug - Alles in einer App',
+          textAlign: TextAlign.center,
+          style: TextStyle(
+            color: const Color(0xFFBFDBFE),
+            fontSize: compact ? 15 : 18,
             height: 1.35,
             fontWeight: FontWeight.w700,
           ),
         ),
+        SizedBox(height: compact ? 24 : 34),
+        _AuthIntroLogo(compact: compact),
       ],
+    );
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.center,
+      mainAxisSize: compact ? MainAxisSize.min : MainAxisSize.max,
+      mainAxisAlignment:
+          compact ? MainAxisAlignment.start : MainAxisAlignment.center,
+      children: [
+        introContent,
+      ],
+    );
+  }
+}
+
+class _AuthIntroLogo extends StatelessWidget {
+  final bool compact;
+
+  const _AuthIntroLogo({required this.compact});
+
+  @override
+  Widget build(BuildContext context) {
+    final logoHeight = compact ? 170.0 : 250.0;
+
+    return Align(
+      alignment: Alignment.center,
+      child: ConstrainedBox(
+        constraints: BoxConstraints(maxWidth: compact ? 430 : 680),
+        child: SizedBox(
+          width: double.infinity,
+          height: logoHeight,
+          child: ClipRect(
+            child: Image.asset(
+              _loginIntroLogoAsset,
+              fit: BoxFit.contain,
+              alignment: Alignment.center,
+              filterQuality: FilterQuality.high,
+              semanticLabel: 'Modellflug-Heaven Logo',
+            ),
+          ),
+        ),
+      ),
     );
   }
 }

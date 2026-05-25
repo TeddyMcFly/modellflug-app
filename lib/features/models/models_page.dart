@@ -1310,7 +1310,7 @@ class _BestBatteryList extends StatelessWidget {
       battery.label,
     ].join(' ');
     return '$name - ${battery.chemistry} ${battery.cells}S, '
-        '${battery.capacityMah} mAh, ${battery.cRate}C, '
+        '${battery.capacityMah} mAh, ${battery.dischargeRateLabel}, '
         '${battery.status.label}';
   }
 
