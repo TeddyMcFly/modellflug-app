@@ -39,7 +39,13 @@ class FleetState {
   int get totalFlights => flights.length;
 
   int get totalMinutes =>
-      flights.fold(0, (sum, item) => sum + item.durationMinutes);
+      flights.fold(0, (sum, item) => sum + item.durationMinutes) +
+      aircraft.fold(
+        0,
+        (sum, item) =>
+            sum +
+            (item.previousFlightMinutes < 0 ? 0 : item.previousFlightMinutes),
+      );
 
   double get totalHours => totalMinutes / 60;
 

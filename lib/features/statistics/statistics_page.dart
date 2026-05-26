@@ -179,11 +179,11 @@ class _AircraftHoursChart extends StatelessWidget {
   Widget build(BuildContext context) {
     final aircraftWithHours = [
       for (final aircraft in fleet.aircraft)
-        if (aircraft.flightHours > 0) aircraft,
+        if (aircraft.totalFlightMinutes > 0) aircraft,
     ];
     final totalHours = aircraftWithHours.fold<double>(
       0,
-      (sum, aircraft) => sum + aircraft.flightHours,
+      (sum, aircraft) => sum + aircraft.totalFlightHours,
     );
 
     return SizedBox(
@@ -228,7 +228,8 @@ class _AircraftHoursChart extends StatelessWidget {
                                     i < aircraftWithHours.length;
                                     i++)
                                   PieChartSectionData(
-                                    value: aircraftWithHours[i].flightHours,
+                                    value:
+                                        aircraftWithHours[i].totalFlightHours,
                                     color: _aircraftChartColor(i),
                                     title: '',
                                     radius: 44,
@@ -298,10 +299,10 @@ class _AircraftHoursLegend extends StatelessWidget {
           _AircraftHoursLegendItem(
             color: _aircraftChartColor(i),
             name: aircraft[i].name,
-            hours: aircraft[i].flightHours,
+            hours: aircraft[i].totalFlightHours,
             percent: totalHours == 0
                 ? 0
-                : aircraft[i].flightHours / totalHours * 100,
+                : aircraft[i].totalFlightHours / totalHours * 100,
           ),
       ],
     );
@@ -729,9 +730,7 @@ class _TopModelsTable extends StatelessWidget {
           aircraft: model,
           flights:
               flights.where((flight) => flight.aircraftId == model.id).length,
-          minutes: flights
-              .where((flight) => flight.aircraftId == model.id)
-              .fold<int>(0, (sum, flight) => sum + flight.durationMinutes),
+          minutes: model.totalFlightMinutes,
         ),
     ]..sort((a, b) {
         final flightCompare = b.flights.compareTo(a.flights);
@@ -741,7 +740,8 @@ class _TopModelsTable extends StatelessWidget {
         return b.minutes.compareTo(a.minutes);
       });
 
-    final visibleStats = stats.where((item) => item.flights > 0).take(5);
+    final visibleStats =
+        stats.where((item) => item.flights > 0 || item.minutes > 0).take(5);
 
     return SizedBox(
       width: 390,

@@ -15,12 +15,14 @@ class DroppedImageFile {
 class ImageDropZone extends StatelessWidget {
   final Widget child;
   final ValueChanged<DroppedImageFile> onImageDropped;
+  final ValueChanged<List<DroppedImageFile>>? onImagesDropped;
   final ValueChanged<bool>? onDragActiveChanged;
 
   const ImageDropZone({
     super.key,
     required this.child,
     required this.onImageDropped,
+    this.onImagesDropped,
     this.onDragActiveChanged,
   });
 

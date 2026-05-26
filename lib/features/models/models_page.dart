@@ -15,7 +15,9 @@ import '../../core/widgets/app_scaffold.dart';
 import '../../shared/models/aircraft_model.dart';
 import '../../shared/providers/fleet_provider.dart';
 import '../../shared/services/flight_timer_tone_player.dart';
+import '../../shared/utils/flight_time_input.dart';
 import '../../shared/utils/flight_time_format.dart';
+import '../../shared/utils/image_drop_zone.dart';
 import '../../shared/utils/media_source.dart';
 
 const _repairFilterKey = '__repair__';
@@ -407,7 +409,7 @@ class _AircraftInventoryList extends StatelessWidget {
 
 String _modelListTitle(String? selectedCategory) {
   if (selectedCategory == null) {
-    return 'Alle aktiven Modelle';
+    return 'Flugbereite Modelle';
   }
   if (_isAllModelsFilter(selectedCategory)) {
     return 'Alle Modelle';
@@ -492,6 +494,7 @@ class _CategoryFilterPanelState extends State<_CategoryFilterPanel> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const Row(
+            mainAxisSize: MainAxisSize.min,
             children: [
               Icon(
                 Icons.category_rounded,
@@ -499,14 +502,12 @@ class _CategoryFilterPanelState extends State<_CategoryFilterPanel> {
                 size: 17,
               ),
               SizedBox(width: 7),
-              Expanded(
-                child: Text(
-                  'Kategorien zur Auswahl',
-                  style: TextStyle(
-                    color: Color(0xFF0F172A),
-                    fontSize: 13,
-                    fontWeight: FontWeight.w900,
-                  ),
+              Text(
+                'Kategorien zur Auswahl',
+                style: TextStyle(
+                  color: Color(0xFF0F172A),
+                  fontSize: 13,
+                  fontWeight: FontWeight.w900,
                 ),
               ),
             ],
@@ -531,14 +532,14 @@ class _CategoryFilterPanelState extends State<_CategoryFilterPanel> {
                   if (index == 0) {
                     return _AllModelsFilterButton(
                       selected: widget.selectedCategory == null,
-                      message: 'Alle aktiven Modelle ohne die Ausgemusterten',
+                      message: 'Nur Modelle mit Status Flugbereit...',
                       onTap: () => widget.onSelected(null),
                     );
                   }
                   if (index == 1) {
                     return _AllModelsFilterButton(
                       selected: _isAllModelsFilter(widget.selectedCategory),
-                      message: 'Alle Modelle inklusive den Ausgemusterten',
+                      message: 'Wirklich alle deine eingetragenen Modelle...',
                       showRetiredMarker: true,
                       onTap: () => widget.onSelected(_allModelsFilterKey),
                     );
@@ -816,7 +817,7 @@ class _EmptyCategorySelection extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 10),
         child: Text(
           category == null
-              ? 'Keine aktiven Modelle vorhanden.'
+              ? 'Keine flugbereiten Modelle vorhanden.'
               : _isAllModelsFilter(category)
                   ? 'Noch keine Modelle vorhanden.'
                   : _isRepairFilter(category)
@@ -860,7 +861,7 @@ class _NoModelsInCategory extends StatelessWidget {
               const SizedBox(height: 16),
               Text(
                 category == null
-                    ? 'Kein aktives Modell ausgewaehlt.'
+                    ? 'Kein flugbereites Modell ausgewaehlt.'
                     : _isAllModelsFilter(category)
                         ? 'Kein Modell ausgewaehlt.'
                         : _isRepairFilter(category)
@@ -2040,7 +2041,7 @@ class _FlightTimerDialogState extends State<_FlightTimerDialog> {
                           ),
                           const SizedBox(height: 7),
                           Text(
-                            '${formatFlightHours(widget.aircraft.flightHours)} gesamt',
+                            '${formatFlightMinutes(widget.aircraft.totalFlightMinutes)} gesamt',
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: TextStyle(
@@ -3139,7 +3140,7 @@ class _AircraftInfoTable extends StatelessWidget {
       ('Servos', _fallback(aircraft.servos)),
       ('Kaufdatum', _purchaseDateLabel(aircraft, formatter)),
       ('Fluege', '${aircraft.totalFlights}'),
-      ('Flugzeit', formatFlightHours(aircraft.flightHours)),
+      ('Flugzeit', formatFlightMinutes(aircraft.totalFlightMinutes)),
       ('Status', aircraft.status.label),
     ];
 
@@ -3481,7 +3482,7 @@ class _AircraftDialogState extends State<_AircraftDialog> {
   final _purchaseDate = TextEditingController();
   final _drive = TextEditingController();
   final _speedController = TextEditingController();
-  final _recommendedDriveBattery = TextEditingController();
+  final _previousFlightMinutes = TextEditingController();
   final _notes = TextEditingController();
   final _repairNotes = TextEditingController();
   final _imagePicker = ImagePicker();
@@ -3529,7 +3530,8 @@ class _AircraftDialogState extends State<_AircraftDialog> {
         DateFormat('dd.MM.yyyy').format(aircraft.purchaseDate);
     _drive.text = aircraft.drive;
     _speedController.text = aircraft.speedController;
-    _recommendedDriveBattery.text = aircraft.recommendedDriveBattery;
+    _previousFlightMinutes.text =
+        formatFlightMinutesInput(aircraft.previousFlightMinutes);
     _batteryCells
       ..clear()
       ..addAll(aircraft.batteryCells.map((cell) => cell.clamp(1, 6)));
@@ -3565,7 +3567,7 @@ class _AircraftDialogState extends State<_AircraftDialog> {
     _purchaseDate.dispose();
     _drive.dispose();
     _speedController.dispose();
-    _recommendedDriveBattery.dispose();
+    _previousFlightMinutes.dispose();
     _notes.dispose();
     _repairNotes.dispose();
     super.dispose();
@@ -3597,6 +3599,7 @@ class _AircraftDialogState extends State<_AircraftDialog> {
                     child: _PhotoPickerPanel(
                       photoDataUris: _photoDataUris,
                       onPick: _pickPhotos,
+                      onDrop: _acceptDroppedPhotos,
                       onRemove: (index) =>
                           setState(() => _photoDataUris.removeAt(index)),
                       onReorder: _reorderPhoto,
@@ -3680,10 +3683,16 @@ class _AircraftDialogState extends State<_AircraftDialog> {
                     label: 'Regler',
                     requiredField: false,
                   ),
-                  _TextField(
-                    controller: _recommendedDriveBattery,
-                    label: 'Empfohlener Antriebsakku',
-                    requiredField: false,
+                  SizedBox(
+                    width: 260,
+                    child: TextFormField(
+                      controller: _previousFlightMinutes,
+                      style: _aircraftDialogInputStyle,
+                      decoration: const InputDecoration(
+                        labelText: 'Früh. Flugzeiten (min)',
+                        labelStyle: _aircraftDialogLabelStyle,
+                      ),
+                    ),
                   ),
                   _TextField(
                     controller: _receiver,
@@ -3965,7 +3974,7 @@ class _AircraftDialogState extends State<_AircraftDialog> {
       'purchaseDate': _purchaseDate.text.trim(),
       'drive': _drive.text.trim(),
       'speedController': _speedController.text.trim(),
-      'recommendedDriveBattery': _recommendedDriveBattery.text.trim(),
+      'previousFlightMinutes': _previousFlightMinutes.text.trim(),
       'notes': _notes.text.trim(),
       'repairNotes': _repairNotes.text.trim(),
       'status': _status.name,
@@ -3996,6 +4005,7 @@ class _AircraftDialogState extends State<_AircraftDialog> {
     late final double wingspanMeters;
     late final double lengthMeters;
     late final double weightKg;
+    late final int previousFlightMinutes;
     try {
       purchaseDate = _parseOptionalGermanDateInput(
         _purchaseDate.text,
@@ -4011,6 +4021,8 @@ class _AircraftDialogState extends State<_AircraftDialog> {
             fieldName: 'Gewicht',
           ) /
           1000;
+      previousFlightMinutes =
+          _parseOptionalFlightMinutes(_previousFlightMinutes.text);
     } on _AircraftInputException catch (error) {
       unawaited(_showInputError(error.message));
       return;
@@ -4037,7 +4049,7 @@ class _AircraftDialogState extends State<_AircraftDialog> {
         materialFuselageWing: _materialFuselageWing.text.trim(),
         wingLoading: _wingLoading.text.trim(),
         centerOfGravity: _centerOfGravity.text.trim(),
-        recommendedDriveBattery: _recommendedDriveBattery.text.trim(),
+        recommendedDriveBattery: existing?.recommendedDriveBattery ?? '',
         servos: _servos.text.trim(),
         purchaseDate: purchaseDate.date,
         purchaseDateInput: purchaseDate.input,
@@ -4054,6 +4066,7 @@ class _AircraftDialogState extends State<_AircraftDialog> {
         ]),
         totalFlights: existing?.totalFlights ?? 0,
         flightHours: existing?.flightHours ?? 0,
+        previousFlightMinutes: previousFlightMinutes,
         status: _status,
         lastService: existing?.lastService ?? now,
         nextService: existing?.nextService ?? now.add(const Duration(days: 60)),
@@ -4124,6 +4137,16 @@ class _AircraftDialogState extends State<_AircraftDialog> {
     return parsed;
   }
 
+  int _parseOptionalFlightMinutes(String value) {
+    try {
+      return parseFlightMinutesInput(value);
+    } on FormatException {
+      throw const _AircraftInputException(
+        'Bitte pruefe die frueheren Flugzeiten. Erlaubt sind zum Beispiel 120, 120 min, 120 Minuten, 2 h oder 2 Stunden.',
+      );
+    }
+  }
+
   Future<void> _showInputError(String message) {
     return showDialog<void>(
       context: context,
@@ -4151,11 +4174,29 @@ class _AircraftDialogState extends State<_AircraftDialog> {
       return;
     }
 
+    final photoFiles = <({Uint8List bytes, String name})>[];
+    for (final pickedImage in pickedImages) {
+      photoFiles.add(
+        (bytes: await pickedImage.readAsBytes(), name: pickedImage.name),
+      );
+    }
+    await _storeModelPhotoFiles(photoFiles);
+  }
+
+  Future<void> _acceptDroppedPhotos(List<DroppedImageFile> files) async {
+    await _storeModelPhotoFiles([
+      for (final file in files) (bytes: file.bytes, name: file.name),
+    ]);
+  }
+
+  Future<void> _storeModelPhotoFiles(
+    List<({Uint8List bytes, String name})> photoFiles,
+  ) async {
     final dataUris = <String>[];
     var skippedImages = 0;
-    for (final pickedImage in pickedImages) {
-      final bytes = await pickedImage.readAsBytes();
-      final dataUri = _optimizedModelPhotoDataUri(bytes, pickedImage.name);
+    for (final photoFile in photoFiles) {
+      final dataUri =
+          _optimizedModelPhotoDataUri(photoFile.bytes, photoFile.name);
       if (dataUri == null) {
         skippedImages++;
       } else {
@@ -4188,18 +4229,27 @@ class _AircraftDialogState extends State<_AircraftDialog> {
   }
 }
 
-class _PhotoPickerPanel extends StatelessWidget {
+class _PhotoPickerPanel extends StatefulWidget {
   final List<String> photoDataUris;
   final VoidCallback onPick;
+  final ValueChanged<List<DroppedImageFile>> onDrop;
   final ValueChanged<int> onRemove;
   final ReorderCallback onReorder;
 
   const _PhotoPickerPanel({
     required this.photoDataUris,
     required this.onPick,
+    required this.onDrop,
     required this.onRemove,
     required this.onReorder,
   });
+
+  @override
+  State<_PhotoPickerPanel> createState() => _PhotoPickerPanelState();
+}
+
+class _PhotoPickerPanelState extends State<_PhotoPickerPanel> {
+  bool _isDragActive = false;
 
   @override
   Widget build(BuildContext context) {
@@ -4208,7 +4258,20 @@ class _PhotoPickerPanel extends StatelessWidget {
       decoration: BoxDecoration(
         color: const Color(0xFFF8FAFC),
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: const Color(0xFFE2E8F0)),
+        border: Border.all(
+          color:
+              _isDragActive ? const Color(0xFF0A84FF) : const Color(0xFFE2E8F0),
+          width: _isDragActive ? 2 : 1,
+        ),
+        boxShadow: _isDragActive
+            ? const [
+                BoxShadow(
+                  color: Color(0x220A84FF),
+                  blurRadius: 12,
+                  offset: Offset(0, 4),
+                ),
+              ]
+            : null,
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -4219,7 +4282,7 @@ class _PhotoPickerPanel extends StatelessWidget {
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
-                  'Modellfotos (${photoDataUris.length})',
+                  'Modellfotos (${widget.photoDataUris.length})',
                   style: const TextStyle(
                     fontSize: 16,
                     fontWeight: FontWeight.w900,
@@ -4227,107 +4290,177 @@ class _PhotoPickerPanel extends StatelessWidget {
                 ),
               ),
               OutlinedButton.icon(
-                onPressed: onPick,
+                onPressed: widget.onPick,
                 icon: const Icon(Icons.add_photo_alternate_rounded),
                 label: const Text('Fotos hinzufuegen'),
               ),
             ],
           ),
           const SizedBox(height: 10),
-          if (photoDataUris.isEmpty)
-            Container(
+          if (widget.photoDataUris.isEmpty)
+            SizedBox(
               width: double.infinity,
-              padding: const EdgeInsets.all(18),
-              decoration: BoxDecoration(
-                color: const Color(0xFFEFF6FF),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: const Row(
-                children: [
-                  Icon(Icons.info_outline_rounded, color: Color(0xFF0A84FF)),
-                  SizedBox(width: 10),
-                  Expanded(
-                    child: Text(
-                      'Noch keine Fotos hinterlegt. Du kannst mehrere Bilder pro Modell speichern.',
-                      style: TextStyle(
-                        color: Color(0xFF334155),
-                        fontWeight: FontWeight.w700,
-                      ),
+              height: 76,
+              child: _buildDropZone(
+                Container(
+                  padding: const EdgeInsets.all(18),
+                  decoration: BoxDecoration(
+                    color: _isDragActive
+                        ? const Color(0xFFDCEEFF)
+                        : const Color(0xFFEFF6FF),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(
+                      color: _isDragActive
+                          ? const Color(0xFF0A84FF)
+                          : Colors.transparent,
+                      width: _isDragActive ? 2 : 1,
                     ),
                   ),
-                ],
+                  child: const Row(
+                    children: [
+                      Icon(
+                        Icons.info_outline_rounded,
+                        color: Color(0xFF0A84FF),
+                      ),
+                      SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                          'Noch keine Fotos hinterlegt. Du kannst mehrere Bilder pro Modell speichern.',
+                          style: TextStyle(
+                            color: Color(0xFF334155),
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
               ),
             )
           else
             SizedBox(
               height: 112,
-              child: ReorderableListView.builder(
-                buildDefaultDragHandles: false,
-                scrollDirection: Axis.horizontal,
-                itemCount: photoDataUris.length,
-                onReorder: onReorder,
-                itemBuilder: (context, index) {
-                  return Padding(
-                    key: ValueKey(photoDataUris[index]),
-                    padding: EdgeInsets.only(
-                      right: index == photoDataUris.length - 1 ? 0 : 10,
-                    ),
-                    child: Stack(
-                      children: [
-                        ClipRRect(
+              child: Row(
+                children: [
+                  _buildDropZone(
+                    Tooltip(
+                      message: 'Fotos ablegen',
+                      child: Container(
+                        width: 96,
+                        height: 112,
+                        decoration: BoxDecoration(
+                          color: _isDragActive
+                              ? const Color(0xFFDCEEFF)
+                              : const Color(0xFFEFF6FF),
                           borderRadius: BorderRadius.circular(8),
-                          child: SizedBox(
-                            width: 142,
-                            height: 112,
-                            child: Image(
-                              image: mediaImageProvider(photoDataUris[index]),
-                              fit: BoxFit.cover,
-                            ),
+                          border: Border.all(
+                            color: _isDragActive
+                                ? const Color(0xFF0A84FF)
+                                : const Color(0xFFD8E8FF),
+                            width: _isDragActive ? 2 : 1,
                           ),
                         ),
-                        Positioned(
-                          left: 6,
-                          top: 6,
-                          child: Tooltip(
-                            message: 'Foto verschieben',
-                            child: ReorderableDragStartListener(
-                              index: index,
-                              child: Container(
-                                width: 32,
-                                height: 32,
-                                decoration: BoxDecoration(
-                                  color: Colors.black54,
-                                  borderRadius: BorderRadius.circular(16),
-                                ),
-                                child: const Icon(
-                                  Icons.drag_indicator_rounded,
-                                  color: Colors.white,
-                                  size: 20,
+                        child: const Icon(
+                          Icons.add_photo_alternate_rounded,
+                          color: Color(0xFF0A84FF),
+                          size: 30,
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: ReorderableListView.builder(
+                      buildDefaultDragHandles: false,
+                      scrollDirection: Axis.horizontal,
+                      itemCount: widget.photoDataUris.length,
+                      onReorder: widget.onReorder,
+                      itemBuilder: (context, index) {
+                        return Padding(
+                          key: ValueKey(widget.photoDataUris[index]),
+                          padding: EdgeInsets.only(
+                            right: index == widget.photoDataUris.length - 1
+                                ? 0
+                                : 10,
+                          ),
+                          child: Stack(
+                            children: [
+                              ClipRRect(
+                                borderRadius: BorderRadius.circular(8),
+                                child: SizedBox(
+                                  width: 142,
+                                  height: 112,
+                                  child: Image(
+                                    image: mediaImageProvider(
+                                      widget.photoDataUris[index],
+                                    ),
+                                    fit: BoxFit.cover,
+                                  ),
                                 ),
                               ),
-                            ),
+                              Positioned(
+                                left: 6,
+                                top: 6,
+                                child: Tooltip(
+                                  message: 'Foto verschieben',
+                                  child: ReorderableDragStartListener(
+                                    index: index,
+                                    child: Container(
+                                      width: 32,
+                                      height: 32,
+                                      decoration: BoxDecoration(
+                                        color: Colors.black54,
+                                        borderRadius: BorderRadius.circular(16),
+                                      ),
+                                      child: const Icon(
+                                        Icons.drag_indicator_rounded,
+                                        color: Colors.white,
+                                        size: 20,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                              Positioned(
+                                right: 6,
+                                top: 6,
+                                child: IconButton.filled(
+                                  onPressed: () => widget.onRemove(index),
+                                  icon: const Icon(
+                                    Icons.close_rounded,
+                                    size: 18,
+                                  ),
+                                  style: IconButton.styleFrom(
+                                    backgroundColor: Colors.black54,
+                                    foregroundColor: Colors.white,
+                                  ),
+                                ),
+                              ),
+                            ],
                           ),
-                        ),
-                        Positioned(
-                          right: 6,
-                          top: 6,
-                          child: IconButton.filled(
-                            onPressed: () => onRemove(index),
-                            icon: const Icon(Icons.close_rounded, size: 18),
-                            style: IconButton.styleFrom(
-                              backgroundColor: Colors.black54,
-                              foregroundColor: Colors.white,
-                            ),
-                          ),
-                        ),
-                      ],
+                        );
+                      },
                     ),
-                  );
-                },
+                  ),
+                ],
               ),
             ),
         ],
       ),
+    );
+  }
+
+  Widget _buildDropZone(Widget child) {
+    return ImageDropZone(
+      onImageDropped: (file) => widget.onDrop([file]),
+      onImagesDropped: widget.onDrop,
+      onDragActiveChanged: (active) {
+        if (_isDragActive == active) {
+          return;
+        }
+        setState(() => _isDragActive = active);
+      },
+      child: child,
     );
   }
 }
@@ -4615,7 +4748,7 @@ List<AircraftModel> _aircraftForCategory(
   if (category == null) {
     return [
       for (final item in aircraft)
-        if (!_isRetiredAircraft(item)) item,
+        if (item.status == AircraftStatus.ready) item,
     ];
   }
   if (_isRepairFilter(category)) {

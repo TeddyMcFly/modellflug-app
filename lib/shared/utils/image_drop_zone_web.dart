@@ -19,12 +19,14 @@ class DroppedImageFile {
 class ImageDropZone extends StatefulWidget {
   final Widget child;
   final ValueChanged<DroppedImageFile> onImageDropped;
+  final ValueChanged<List<DroppedImageFile>>? onImagesDropped;
   final ValueChanged<bool>? onDragActiveChanged;
 
   const ImageDropZone({
     super.key,
     required this.child,
     required this.onImageDropped,
+    this.onImagesDropped,
     this.onDragActiveChanged,
   });
 
@@ -71,7 +73,7 @@ class _ImageDropZoneState extends State<ImageDropZone> {
         event.preventDefault();
         event.stopPropagation();
         setActive(false);
-        unawaited(_readDroppedImage(event));
+        unawaited(_readDroppedImages(event));
       }
 
       element.addEventListener('dragenter', handleDrag.toJS);
@@ -94,39 +96,46 @@ class _ImageDropZoneState extends State<ImageDropZone> {
     );
   }
 
-  Future<void> _readDroppedImage(web.Event event) async {
+  Future<void> _readDroppedImages(web.Event event) async {
     final dragEvent = event as web.DragEvent;
     final files = dragEvent.dataTransfer?.files;
     if (files == null || files.length == 0) {
       return;
     }
 
-    web.File? selectedFile;
+    final selectedFiles = <web.File>[];
     for (var index = 0; index < files.length; index++) {
       final file = files.item(index);
       if (file == null) {
         continue;
       }
       if (_isImageFile(file)) {
-        selectedFile = file;
-        break;
+        selectedFiles.add(file);
       }
     }
 
-    if (selectedFile == null) {
+    if (selectedFiles.isEmpty) {
       return;
     }
 
-    final buffer = await selectedFile.arrayBuffer().toDart;
+    final droppedFiles = <DroppedImageFile>[];
+    for (final selectedFile in selectedFiles) {
+      final buffer = await selectedFile.arrayBuffer().toDart;
+      droppedFiles.add(
+        DroppedImageFile(
+          name: selectedFile.name,
+          bytes: buffer.toDart.asUint8List(),
+        ),
+      );
+    }
+
     if (!mounted) {
       return;
     }
-    widget.onImageDropped(
-      DroppedImageFile(
-        name: selectedFile.name,
-        bytes: buffer.toDart.asUint8List(),
-      ),
-    );
+    widget.onImagesDropped?.call(droppedFiles);
+    if (widget.onImagesDropped == null) {
+      widget.onImageDropped(droppedFiles.first);
+    }
   }
 
   bool _isImageFile(web.File file) {

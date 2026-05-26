@@ -8,8 +8,8 @@
       content="Modellflug-Heaven ist eine App fuer Modellpiloten, die Modelle, Akkus, Flugbuch, Chat, Statistik, Webcam und Wetter an einem Ort verwalten moechten."
     >
     <title>Modellflug-Heaven</title>
-    <link rel="icon" href="assets/favicon.png" type="image/png">
-    <link rel="stylesheet" href="styles.css">
+    <link rel="icon" href="assets/favicon.png?v=2" type="image/png">
+    <link rel="stylesheet" href="styles.css?v=13">
   </head>
   <body>
     <header class="site-header" aria-label="Hauptnavigation">
@@ -23,6 +23,8 @@
         <span>Modellflug-Heaven</span>
       </a>
       <nav class="nav-links" aria-label="Seitennavigation">
+        <a href="#start">Home</a>
+        <a href="impressum.html">Impressum</a>
         <a href="#funktionen">Funktionen</a>
         <a href="#testzugang">Testzugang</a>
         <a href="kontakt.html">Kontakt</a>
@@ -52,20 +54,32 @@
 
       <section class="intro-band" aria-label="Kurzuebersicht">
         <div class="intro-grid">
-          <dl class="quick-facts">
-            <div>
-              <dt>Flotte</dt>
-              <dd>Modelle und Status</dd>
-            </div>
-            <div>
-              <dt>Flugbuch</dt>
-              <dd>Fluege und Zeiten</dd>
-            </div>
-            <div>
-              <dt>Akkus</dt>
-              <dd>Lagerung und Service</dd>
-            </div>
-          </dl>
+          <nav class="quick-facts" aria-label="Direkt zu den Homepage-Bereichen">
+            <a class="quick-fact-link" href="#dashboard">
+              <span class="quick-fact-title">Dashboard</span>
+            </a>
+            <a class="quick-fact-link" href="#modelle">
+              <span class="quick-fact-title">Modelle</span>
+            </a>
+            <a class="quick-fact-link" href="#statistik">
+              <span class="quick-fact-title">Statistik</span>
+            </a>
+            <a class="quick-fact-link" href="#webcam-wetter">
+              <span class="quick-fact-title">Webcam &amp; Wetter</span>
+            </a>
+            <a class="quick-fact-link" href="#konfiguration">
+              <span class="quick-fact-title">Konfiguration</span>
+            </a>
+            <a class="quick-fact-link" href="#chat-wetter">
+              <span class="quick-fact-title">Chat &amp; Wetter</span>
+            </a>
+            <a class="quick-fact-link" href="#akkus">
+              <span class="quick-fact-title">Akkus</span>
+            </a>
+            <a class="quick-fact-link" href="#features">
+              <span class="quick-fact-title">Features</span>
+            </a>
+          </nav>
         </div>
       </section>
 
@@ -80,32 +94,37 @@
             <span class="feature-icon models" aria-hidden="true"></span>
             <h3>Modelle verwalten</h3>
             <p>
-              Bilder, Kategorie, Status, Sender, Speicherplatz und Notizen bleiben
-              gemeinsam am Modell.
+              Bilder, Flug-Status, Sender und Speicherplatz, alle Infos, Daten
+              und Eins&auml;tze werden zentral f&uuml;r jedes Modell-Flugzeug verwaltet.
             </p>
           </article>
           <article class="feature-card">
             <span class="feature-icon flightbook" aria-hidden="true"></span>
             <h3>Flugbuch fuehren</h3>
             <p>
-              Fluege, Orte, Dauer und Erfahrungen werden sauber dokumentiert und
-              spaeter leichter wiedergefunden.
+              Saubere Dokumentation aller flugrelevanten Daten, auf Wunsch
+              umfangreich ausgewertet: Flugl&auml;nge, Flugort, Dauer, Pilot,
+              Modell, Erfahrungen, Akku-Nutzung und Notizen werden zentral
+              verwaltet.
             </p>
           </article>
           <article class="feature-card">
             <span class="feature-icon batteries" aria-hidden="true"></span>
             <h3>Akkus im Blick</h3>
             <p>
-              Ladezustand, Lagerung und Service helfen, die Energieversorgung vor
-              dem Start nicht dem Zufall zu ueberlassen.
+              Akku-Pflege leicht gemacht: Der Ladezustand, Alter und
+              prognostizierte Lebensdauer durch Kontrolle der Anzahl der
+              Ladungen helfen bei Einsatz und Pflege der teuren
+              Energieversorgung.
             </p>
           </article>
           <article class="feature-card">
             <span class="feature-icon weather" aria-hidden="true"></span>
             <h3>Wetter und Webcam</h3>
             <p>
-              Wind, Sicht, Niederschlag und Flugplatzbild helfen bei der schnellen
-              Einschaetzung des Tages.
+              Life-Wetter oder mehrt&auml;gige Vorhersage f&uuml;r die
+              Lieblings-Flugpl&auml;tze helfen in Verbindung mit Webcams bei der
+              Einsch&auml;tzung der tats&auml;chlichen Flugbedingungen.
             </p>
           </article>
           <article class="feature-card">
@@ -121,14 +140,16 @@
             <span class="feature-icon stats" aria-hidden="true"></span>
             <h3>Statistik nutzen</h3>
             <p>
-              Flugzeiten, Nutzung und Entwicklung der Flotte werden greifbar statt
-              nur geschaetzt.
+              Daten-Auswertungen helfen dabei, Entwicklungen zu erkennen und
+              Tendenzen zu sehen. In welchem Zustand sind meine Akkus, mit
+              welchem Modell fliege ich wo und wann am meisten, fliege ich mehr
+              3D oder ruhige Segler? Die Statistikseite beantwortet alle Fragen.
             </p>
           </article>
         </div>
       </section>
 
-      <section class="showcase-band" aria-label="Einblicke">
+      <section class="showcase-band" id="dashboard" aria-label="Einblicke">
         <div class="showcase">
           <div class="showcase-copy">
             <p class="eyebrow">Gedacht fuer den Alltag</p>
@@ -149,7 +170,7 @@
         </div>
       </section>
 
-      <section class="model-details-band" aria-labelledby="model-details-title">
+      <section class="model-details-band" id="modelle" aria-labelledby="model-details-title">
         <div class="model-details">
           <div class="model-details-copy">
             <p class="eyebrow">Modelle im Griff</p>
@@ -202,7 +223,7 @@
         </div>
       </section>
 
-      <section class="model-details-band model-details-band-soft" aria-labelledby="statistics-title">
+      <section class="model-details-band model-details-band-soft" id="statistik" aria-labelledby="statistics-title">
         <div class="model-details">
           <div class="model-details-copy">
             <p class="eyebrow">Entwicklung erkennen</p>
@@ -224,7 +245,7 @@
         </div>
       </section>
 
-      <section class="model-details-band model-details-band-soft" aria-labelledby="webcam-weather-title">
+      <section class="model-details-band model-details-band-soft" id="webcam-wetter" aria-labelledby="webcam-weather-title">
         <div class="model-details">
           <div class="model-details-copy">
             <p class="eyebrow">Platz im Blick</p>
@@ -247,7 +268,7 @@
         </div>
       </section>
 
-      <section class="model-details-band model-details-band-soft" aria-labelledby="configuration-title">
+      <section class="model-details-band model-details-band-soft" id="konfiguration" aria-labelledby="configuration-title">
         <div class="model-details">
           <div class="model-details-copy">
             <p class="eyebrow">Alles einstellen</p>
@@ -268,7 +289,7 @@
         </div>
       </section>
 
-      <section class="model-details-band" aria-labelledby="friends-title">
+      <section class="model-details-band" id="chat-wetter" aria-labelledby="friends-title">
         <div class="model-details">
           <div class="model-details-copy">
             <p class="eyebrow">Gemeinsam fliegen</p>
@@ -291,7 +312,7 @@
         </div>
       </section>
 
-      <section class="model-details-band model-details-band-soft" aria-labelledby="battery-title">
+      <section class="model-details-band model-details-band-soft" id="akkus" aria-labelledby="battery-title">
         <div class="model-details">
           <div class="model-details-copy">
             <p class="eyebrow">Sensibel und pflegebed&uuml;rftig</p>
@@ -313,7 +334,7 @@
         </div>
       </section>
 
-      <section class="model-details-band model-details-band-soft features-section" aria-labelledby="features-title">
+      <section class="model-details-band model-details-band-soft features-section" id="features" aria-labelledby="features-title">
         <div class="model-details">
           <div class="model-details-copy">
             <p class="eyebrow">Die App-Luxusausstattung</p>
@@ -413,7 +434,7 @@
     <footer class="site-footer" id="kontakt">
       <div>
         <strong>Modellflug-Heaven</strong>
-        <p>Faszination Modellflug - Alles in einer App</p>
+        <p>Die ganze Faszination des Modellfluges in einer App</p>
       </div>
       <div class="footer-links">
         <a href="kontakt.html">Kontakt</a>

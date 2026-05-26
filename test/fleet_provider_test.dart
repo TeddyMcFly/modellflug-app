@@ -75,4 +75,32 @@ void main() {
     expect(restored.photoSource, downloadUrl);
     expect(restored.photoPreviewSource, thumbnailDataUri);
   });
+
+  test('previous model flight minutes are stored and counted', () {
+    final container = ProviderContainer();
+    addTearDown(container.dispose);
+
+    final initialState = container.read(fleetProvider);
+    final initialAircraft = initialState.aircraft.first;
+    final initialTotalMinutes = initialState.totalMinutes;
+    final changedAircraft =
+        initialAircraft.copyWith(previousFlightMinutes: 120);
+
+    container.read(fleetProvider.notifier).updateAircraft(changedAircraft);
+
+    final updatedState = container.read(fleetProvider);
+    final restoredAircraft = AircraftModel.fromJson(
+      changedAircraft.toJson(),
+    );
+
+    expect(restoredAircraft.previousFlightMinutes, 120);
+    expect(
+      restoredAircraft.totalFlightMinutes,
+      restoredAircraft.loggedFlightMinutes + 120,
+    );
+    expect(
+      updatedState.totalMinutes,
+      initialTotalMinutes - initialAircraft.previousFlightMinutes + 120,
+    );
+  });
 }

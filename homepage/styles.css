@@ -218,41 +218,58 @@ h3 {
 .intro-band {
   background: var(--ink);
   color: #ffffff;
-  padding: 28px 40px;
+  padding: 20px 4px 16px 40px;
 }
 
 .intro-grid {
   width: min(1180px, 100%);
-  margin: 0 auto;
+  margin: 0 0 0 auto;
   display: grid;
   grid-template-columns: 1fr;
   align-items: center;
 }
 
 .quick-facts {
-  justify-self: end;
-  width: min(560px, 100%);
+  width: fit-content;
+  max-width: 100%;
   display: grid;
-  grid-template-columns: repeat(3, minmax(120px, 1fr));
-  gap: 10px;
-  margin: 0;
+  grid-template-columns: repeat(8, auto);
+  justify-content: end;
+  justify-items: end;
+  gap: 14px;
+  margin: 0 0 0 auto;
 }
 
-.quick-facts div {
-  border-left: 3px solid var(--blue);
-  padding: 4px 0 4px 12px;
+.quick-fact-link {
+  border-right: 2px solid var(--blue);
+  padding: 3px 8px 3px 0;
+  text-align: right;
+  transition: color 160ms ease, border-color 160ms ease, transform 160ms ease;
 }
 
-.quick-facts dt {
-  font-size: 14px;
+.quick-fact-title {
+  display: block;
+  font-size: 12px;
   font-weight: 900;
+  white-space: nowrap;
 }
 
-.quick-facts dd {
-  margin: 2px 0 0;
-  color: rgba(255, 255, 255, 0.66);
-  font-size: 13px;
-  font-weight: 700;
+.quick-fact-link:hover,
+.quick-fact-link:focus-visible {
+  color: #ffffff;
+  border-color: #78b7ff;
+  transform: translateY(-1px);
+}
+
+#dashboard,
+#modelle,
+#statistik,
+#webcam-wetter,
+#konfiguration,
+#chat-wetter,
+#akkus,
+#features {
+  scroll-margin-top: 82px;
 }
 
 .section {
@@ -292,127 +309,41 @@ h3 {
 
 .feature-icon {
   display: block;
-  width: 36px;
-  height: 36px;
+  width: 56px;
+  height: 56px;
   border-radius: 8px;
-  background: var(--blue);
-  position: relative;
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: contain;
 }
 
 .feature-icon::before,
 .feature-icon::after {
-  content: "";
-  position: absolute;
-  background: #ffffff;
+  content: none;
 }
 
-.feature-icon.models::before {
-  width: 24px;
-  height: 4px;
-  left: 6px;
-  top: 16px;
-  transform: rotate(-15deg);
-}
-
-.feature-icon.models::after {
-  width: 10px;
-  height: 10px;
-  left: 17px;
-  top: 13px;
-  clip-path: polygon(0 0, 100% 50%, 0 100%);
+.feature-icon.models {
+  background-image: url("assets/icon-modelle.svg?v=4");
 }
 
 .feature-icon.flightbook {
-  background: var(--green);
-}
-
-.feature-icon.flightbook::before {
-  width: 20px;
-  height: 24px;
-  left: 8px;
-  top: 6px;
-  border-radius: 2px;
-}
-
-.feature-icon.flightbook::after {
-  width: 12px;
-  height: 2px;
-  left: 12px;
-  top: 14px;
-  box-shadow: 0 6px 0 #188a55;
+  background-image: url("assets/icon-flugbuch.svg?v=4");
 }
 
 .feature-icon.batteries {
-  background: var(--amber);
-}
-
-.feature-icon.batteries::before {
-  width: 20px;
-  height: 13px;
-  left: 7px;
-  top: 12px;
-  border-radius: 2px;
-}
-
-.feature-icon.batteries::after {
-  width: 3px;
-  height: 8px;
-  left: 27px;
-  top: 15px;
+  background-image: url("assets/icon-akku.svg?v=4");
 }
 
 .feature-icon.weather {
-  background: #1685a8;
-}
-
-.feature-icon.weather::before {
-  width: 14px;
-  height: 14px;
-  border-radius: 50%;
-  left: 6px;
-  top: 7px;
-}
-
-.feature-icon.weather::after {
-  width: 22px;
-  height: 4px;
-  left: 8px;
-  top: 23px;
-  border-radius: 8px;
-  box-shadow: -4px 5px 0 rgba(255, 255, 255, 0.74);
+  background-image: url("assets/icon-wetter-webcam.svg?v=4");
 }
 
 .feature-icon.chat {
-  background: #6f56d9;
-}
-
-.feature-icon.chat::before {
-  width: 22px;
-  height: 15px;
-  left: 7px;
-  top: 8px;
-  border-radius: 8px 8px 8px 2px;
-}
-
-.feature-icon.chat::after {
-  width: 5px;
-  height: 5px;
-  left: 13px;
-  top: 13px;
-  border-radius: 50%;
-  box-shadow: 7px 0 0 #ffffff, 14px 0 0 #ffffff;
+  background-image: url("assets/icon-chat.svg?v=4");
 }
 
 .feature-icon.stats {
-  background: var(--blue-dark);
-}
-
-.feature-icon.stats::before {
-  width: 5px;
-  height: 20px;
-  left: 9px;
-  top: 10px;
-  box-shadow: 9px -6px 0 #ffffff, 18px 4px 0 #ffffff;
+  background-image: url("assets/icon-statistik.svg?v=4");
 }
 
 .showcase-band {
@@ -452,7 +383,9 @@ h3 {
 }
 
 .media-grid {
+  position: relative;
   display: block;
+  overflow: visible;
 }
 
 .media-grid img {
@@ -709,6 +642,8 @@ h3 {
 }
 
 .feature-table-card {
+  width: min(620px, 100%);
+  justify-self: end;
   overflow-x: auto;
 }
 
@@ -1022,6 +957,13 @@ h3 {
 
 .contact-card {
   max-width: 720px;
+}
+
+.legal-actions {
+  width: min(920px, 100%);
+  display: flex;
+  justify-content: center;
+  margin: 44px auto 0;
 }
 
 .site-footer {

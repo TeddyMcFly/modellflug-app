@@ -149,6 +149,7 @@ class AircraftModel {
   final List<String> featureOptions;
   final int totalFlights;
   final double flightHours;
+  final int previousFlightMinutes;
   final AircraftStatus status;
   final DateTime lastService;
   final DateTime nextService;
@@ -188,6 +189,7 @@ class AircraftModel {
     this.featureOptions = const [],
     required this.totalFlights,
     required this.flightHours,
+    this.previousFlightMinutes = 0,
     required this.status,
     required this.lastService,
     required this.nextService,
@@ -222,6 +224,14 @@ class AircraftModel {
     return [batteryCount];
   }
 
+  int get loggedFlightMinutes => (flightHours * 60).round();
+
+  int get totalFlightMinutes =>
+      loggedFlightMinutes +
+      (previousFlightMinutes < 0 ? 0 : previousFlightMinutes);
+
+  double get totalFlightHours => totalFlightMinutes / 60;
+
   AircraftModel copyWith({
     String? id,
     String? name,
@@ -251,6 +261,7 @@ class AircraftModel {
     List<String>? featureOptions,
     int? totalFlights,
     double? flightHours,
+    int? previousFlightMinutes,
     AircraftStatus? status,
     DateTime? lastService,
     DateTime? nextService,
@@ -294,6 +305,8 @@ class AircraftModel {
       featureOptions: featureOptions ?? this.featureOptions,
       totalFlights: totalFlights ?? this.totalFlights,
       flightHours: flightHours ?? this.flightHours,
+      previousFlightMinutes:
+          previousFlightMinutes ?? this.previousFlightMinutes,
       status: status ?? this.status,
       lastService: lastService ?? this.lastService,
       nextService: nextService ?? this.nextService,
@@ -347,6 +360,8 @@ class AircraftModel {
       ],
       totalFlights: json['totalFlights'] as int,
       flightHours: (json['flightHours'] as num).toDouble(),
+      previousFlightMinutes:
+          (json['previousFlightMinutes'] as num?)?.toInt() ?? 0,
       status: _aircraftStatusFromJson(json['status'] as String?),
       lastService: DateTime.parse(json['lastService'] as String),
       nextService: DateTime.parse(json['nextService'] as String),
@@ -398,6 +413,7 @@ class AircraftModel {
       'featureOptions': featureOptions,
       'totalFlights': totalFlights,
       'flightHours': flightHours,
+      'previousFlightMinutes': previousFlightMinutes,
       'status': status.name,
       'lastService': lastService.toIso8601String(),
       'nextService': nextService.toIso8601String(),

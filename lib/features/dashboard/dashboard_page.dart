@@ -290,7 +290,7 @@ class _AircraftPhotoTile extends StatelessWidget {
               ),
               const SizedBox(height: 2),
               Text(
-                '${aircraft.status.label} - ${formatFlightHours(aircraft.flightHours)}',
+                '${aircraft.status.label} - ${formatFlightMinutes(aircraft.totalFlightMinutes)}',
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: TextStyle(
