@@ -121,6 +121,9 @@ class _ModelsPageState extends ConsumerState<ModelsPage> {
                                       )
                                     : _AircraftDetails(
                                         aircraft: selectedAircraft,
+                                        flightMinutes:
+                                            fleet.flightMinutesForAircraft(
+                                                selectedAircraft),
                                         batteries: fleet.batteries,
                                         onEdit: () => _showAircraftDialog(
                                             context,
@@ -169,6 +172,8 @@ class _ModelsPageState extends ConsumerState<ModelsPage> {
                       ? _NoModelsInCategory(category: _selectedCategoryFilter)
                       : _AircraftDetails(
                           aircraft: selectedAircraft,
+                          flightMinutes:
+                              fleet.flightMinutesForAircraft(selectedAircraft),
                           batteries: fleet.batteries,
                           onEdit: () => _showAircraftDialog(
                             context,
@@ -227,18 +232,19 @@ class _ModelsPageState extends ConsumerState<ModelsPage> {
 
   void _showAircraftDialog(BuildContext context, {AircraftModel? aircraft}) {
     final editingAircraft = aircraft;
+    final fleet = ref.read(fleetProvider);
     showDialog<void>(
       context: context,
       builder: (context) => _AircraftDialog(
         aircraft: editingAircraft,
-        transmitterOptions: ref.read(fleetProvider).pilotProfile.transmitters,
-        onSubmit: (aircraft) {
+        batteries: fleet.batteries,
+        transmitterOptions: fleet.pilotProfile.transmitters,
+        onSubmit: (aircraft, selectedBatteryIds) {
           final notifier = ref.read(fleetProvider.notifier);
-          if (editingAircraft == null) {
-            notifier.addAircraft(aircraft);
-          } else {
-            notifier.updateAircraft(aircraft);
-          }
+          notifier.saveAircraftWithBatteryAssignment(
+            aircraft,
+            selectedBatteryIds: selectedBatteryIds,
+          );
           setState(() => _selectedAircraftId = aircraft.id);
         },
       ),
@@ -287,6 +293,7 @@ class _ModelsPageState extends ConsumerState<ModelsPage> {
       barrierDismissible: false,
       builder: (context) => _FlightTimerDialog(
         aircraft: aircraft,
+        totalFlightMinutes: fleet.flightMinutesForAircraft(aircraft),
         availableBatteries: _eligibleFlightBatteries(aircraft, fleet.batteries),
         homeAirfield: pilotProfile.homeAirfield,
         flightAreas: pilotProfile.flightAreas,
@@ -974,6 +981,7 @@ class _AircraftListItem extends StatelessWidget {
 
 class _AircraftDetails extends StatelessWidget {
   final AircraftModel aircraft;
+  final int flightMinutes;
   final List<BatteryPack> batteries;
   final ValueChanged<AircraftStatus> onStatusChanged;
   final VoidCallback onEdit;
@@ -982,6 +990,7 @@ class _AircraftDetails extends StatelessWidget {
 
   const _AircraftDetails({
     required this.aircraft,
+    required this.flightMinutes,
     required this.batteries,
     required this.onStatusChanged,
     required this.onEdit,
@@ -1113,7 +1122,7 @@ class _AircraftDetails extends StatelessWidget {
               ),
             ),
           ),
-          if (!_isRetiredAircraft(aircraft))
+          if (!_isRetiredAircraft(aircraft)) ...[
             Padding(
               padding: const EdgeInsets.fromLTRB(12, 10, 12, 0),
               child: Align(
@@ -1135,14 +1144,21 @@ class _AircraftDetails extends StatelessWidget {
                 ),
               ),
             ),
+          ],
           Expanded(
             child: SingleChildScrollView(
-              padding: const EdgeInsets.all(22),
+              padding: EdgeInsets.fromLTRB(
+                22,
+                _isRetiredAircraft(aircraft) ? 22 : 10,
+                22,
+                22,
+              ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   _AircraftInfoTable(
                     aircraft: aircraft,
+                    flightMinutes: flightMinutes,
                     formatter: formatter,
                   ),
                   const SizedBox(height: 22),
@@ -1418,6 +1434,26 @@ String _flightBatteryShortLabel(BatteryPack battery) {
 String _flightBatteryDetailLabel(BatteryPack battery) {
   return '${battery.chemistry} ${battery.cells}S - ${battery.capacityMah} mAh - '
       '${battery.cycles} Zyklen - ${battery.status.label}';
+}
+
+int _compareAircraftDialogBatteries(BatteryPack a, BatteryPack b) {
+  final statusCompare =
+      _batteryStatusRank(a.status).compareTo(_batteryStatusRank(b.status));
+  if (statusCompare != 0) {
+    return statusCompare;
+  }
+  final numberCompare = a.inventoryNumber.compareTo(b.inventoryNumber);
+  if (numberCompare != 0) {
+    return numberCompare;
+  }
+  return a.label.toLowerCase().compareTo(b.label.toLowerCase());
+}
+
+String _aircraftDialogBatteryLabel(BatteryPack battery) {
+  final prefix =
+      battery.inventoryNumber > 0 ? 'Akku ${battery.inventoryNumber}: ' : '';
+  return '$prefix${battery.label} - ${battery.cells}S '
+      '${battery.capacityMah} mAh - ${battery.status.label}';
 }
 
 Color _flightBatteryStatusColor(BatteryStatus status) {
@@ -1708,6 +1744,7 @@ class _FlightTimerResult {
 
 class _FlightTimerDialog extends StatefulWidget {
   final AircraftModel aircraft;
+  final int totalFlightMinutes;
   final List<BatteryPack> availableBatteries;
   final String homeAirfield;
   final List<String> flightAreas;
@@ -1716,6 +1753,7 @@ class _FlightTimerDialog extends StatefulWidget {
 
   const _FlightTimerDialog({
     required this.aircraft,
+    required this.totalFlightMinutes,
     required this.availableBatteries,
     required this.homeAirfield,
     required this.flightAreas,
@@ -2041,7 +2079,7 @@ class _FlightTimerDialogState extends State<_FlightTimerDialog> {
                           ),
                           const SizedBox(height: 7),
                           Text(
-                            '${formatFlightMinutes(widget.aircraft.totalFlightMinutes)} gesamt',
+                            '${formatFlightMinutes(widget.totalFlightMinutes)} gesamt',
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: TextStyle(
@@ -3107,10 +3145,12 @@ enum _AircraftDetailsAction { edit, delete }
 
 class _AircraftInfoTable extends StatelessWidget {
   final AircraftModel aircraft;
+  final int flightMinutes;
   final DateFormat formatter;
 
   const _AircraftInfoTable({
     required this.aircraft,
+    required this.flightMinutes,
     required this.formatter,
   });
 
@@ -3140,7 +3180,7 @@ class _AircraftInfoTable extends StatelessWidget {
       ('Servos', _fallback(aircraft.servos)),
       ('Kaufdatum', _purchaseDateLabel(aircraft, formatter)),
       ('Fluege', '${aircraft.totalFlights}'),
-      ('Flugzeit', formatFlightMinutes(aircraft.totalFlightMinutes)),
+      ('Flugzeit', formatFlightMinutes(flightMinutes)),
       ('Status', aircraft.status.label),
     ];
 
@@ -3149,6 +3189,8 @@ class _AircraftInfoTable extends StatelessWidget {
       icon: Icons.fact_check_rounded,
       iconSize: 18,
       iconColor: const Color(0xFF38BDF8),
+      titleBackgroundColor: const Color(0xFF06172E),
+      titleForegroundColor: Colors.white,
       framed: false,
       children: [
         Table(
@@ -3381,6 +3423,8 @@ class _InfoPanel extends StatelessWidget {
   final IconData icon;
   final double iconSize;
   final Color iconColor;
+  final Color? titleBackgroundColor;
+  final Color? titleForegroundColor;
   final bool framed;
   final List<Widget> children;
 
@@ -3389,12 +3433,30 @@ class _InfoPanel extends StatelessWidget {
     required this.icon,
     this.iconSize = 24,
     this.iconColor = const Color(0xFF0A84FF),
+    this.titleBackgroundColor,
+    this.titleForegroundColor,
     this.framed = true,
     required this.children,
   });
 
   @override
   Widget build(BuildContext context) {
+    final titleColor = titleForegroundColor ?? const Color(0xFF0F172A);
+    final heading = Row(
+      children: [
+        Icon(icon, color: iconColor, size: iconSize),
+        const SizedBox(width: 8),
+        Text(
+          title,
+          style: TextStyle(
+            color: titleColor,
+            fontSize: 17,
+            fontWeight: FontWeight.w900,
+          ),
+        ),
+      ],
+    );
+
     return Container(
       width: double.infinity,
       padding: framed ? const EdgeInsets.all(16) : EdgeInsets.zero,
@@ -3408,19 +3470,18 @@ class _InfoPanel extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            children: [
-              Icon(icon, color: iconColor, size: iconSize),
-              const SizedBox(width: 8),
-              Text(
-                title,
-                style: const TextStyle(
-                  fontSize: 17,
-                  fontWeight: FontWeight.w900,
-                ),
+          if (titleBackgroundColor == null)
+            heading
+          else
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              decoration: BoxDecoration(
+                color: titleBackgroundColor,
+                borderRadius: BorderRadius.circular(6),
               ),
-            ],
-          ),
+              child: heading,
+            ),
           const SizedBox(height: 12),
           ...children,
         ],
@@ -3448,11 +3509,14 @@ class _EmptyFleet extends StatelessWidget {
 
 class _AircraftDialog extends StatefulWidget {
   final AircraftModel? aircraft;
+  final List<BatteryPack> batteries;
   final List<String> transmitterOptions;
-  final ValueChanged<AircraftModel> onSubmit;
+  final void Function(AircraftModel aircraft, Set<String> selectedBatteryIds)
+      onSubmit;
 
   const _AircraftDialog({
     this.aircraft,
+    required this.batteries,
     required this.transmitterOptions,
     required this.onSubmit,
   });
@@ -3491,6 +3555,7 @@ class _AircraftDialogState extends State<_AircraftDialog> {
   String _type = 'Trainer';
   String _driveType = '';
   String _selectedTransmitter = '';
+  final Set<String> _selectedBatteryIds = {};
   final Set<int> _batteryCells = {};
   final Set<String> _featureOptions = {};
   var _allowClose = false;
@@ -3535,6 +3600,10 @@ class _AircraftDialogState extends State<_AircraftDialog> {
     _batteryCells
       ..clear()
       ..addAll(aircraft.batteryCells.map((cell) => cell.clamp(1, 6)));
+    _selectedBatteryIds
+      ..clear()
+      ..addAll(_assignedBatteryIdsForAircraft(aircraft.id));
+    _clearSelectedBatteryIfUnavailable();
     _featureOptions
       ..clear()
       ..addAll([
@@ -3590,6 +3659,7 @@ class _AircraftDialogState extends State<_AircraftDialog> {
           child: Form(
             key: _formKey,
             child: SingleChildScrollView(
+              padding: const EdgeInsets.only(bottom: 16),
               child: Wrap(
                 spacing: 12,
                 runSpacing: 12,
@@ -3737,17 +3807,10 @@ class _AircraftDialogState extends State<_AircraftDialog> {
                     width: 532,
                     child: _BatteryCellsMultiSelect(
                       selectedCells: _batteryCells,
-                      onChanged: (cell, selected) {
-                        setState(() {
-                          if (selected) {
-                            _batteryCells.add(cell);
-                          } else {
-                            _batteryCells.remove(cell);
-                          }
-                        });
-                      },
+                      onChanged: _updateBatteryCellSelection,
                     ),
                   ),
+                  _buildCompatibleBatteryInput(),
                   SizedBox(
                     width: 532,
                     child: _AircraftFeaturesMultiSelect(
@@ -3867,6 +3930,72 @@ class _AircraftDialogState extends State<_AircraftDialog> {
     );
   }
 
+  Widget _buildCompatibleBatteryInput() {
+    final options = _compatibleBatteryOptions();
+    final emptyText = _batteryCells.isEmpty
+        ? 'Zuerst Akku-Typ waehlen'
+        : 'Keine passenden Akkus';
+
+    return SizedBox(
+      width: 532,
+      child: InputDecorator(
+        decoration: const InputDecoration(
+          labelText: 'Passende Akkus',
+          labelStyle: _aircraftDialogLabelStyle,
+        ),
+        child: Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            if (options.isEmpty)
+              Text(
+                emptyText,
+                style: const TextStyle(
+                  color: Color(0xFF64748B),
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                ),
+              )
+            else
+              for (final battery in options)
+                FilterChip(
+                  materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  visualDensity: VisualDensity.compact,
+                  avatar: Icon(
+                    Icons.battery_charging_full_rounded,
+                    color: _flightBatteryStatusColor(battery.status),
+                    size: 17,
+                  ),
+                  label: Text(
+                    _aircraftDialogBatteryLabel(battery),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  selected: _selectedBatteryIds.contains(battery.id),
+                  selectedColor: const Color(0xFFDCEEFF),
+                  checkmarkColor: const Color(0xFF0A84FF),
+                  labelStyle: TextStyle(
+                    color: _selectedBatteryIds.contains(battery.id)
+                        ? const Color(0xFF075985)
+                        : const Color(0xFF334155),
+                    fontSize: 11,
+                    fontWeight: FontWeight.w800,
+                  ),
+                  onSelected: (selected) {
+                    setState(() {
+                      if (selected) {
+                        _selectedBatteryIds.add(battery.id);
+                      } else {
+                        _selectedBatteryIds.remove(battery.id);
+                      }
+                    });
+                  },
+                ),
+          ],
+        ),
+      ),
+    );
+  }
+
   List<String> _availableTransmitters() {
     final values = <String>{
       for (final transmitter in widget.transmitterOptions)
@@ -3886,6 +4015,61 @@ class _AircraftDialogState extends State<_AircraftDialog> {
     }
     _selectedTransmitter = defaultTransmitter;
     _transmitter.text = defaultTransmitter;
+  }
+
+  void _updateBatteryCellSelection(int cell, bool selected) {
+    setState(() {
+      if (selected) {
+        _batteryCells.add(cell);
+      } else {
+        _batteryCells.remove(cell);
+      }
+      _clearSelectedBatteryIfUnavailable();
+    });
+  }
+
+  void _clearSelectedBatteryIfUnavailable() {
+    if (_selectedBatteryIds.isEmpty) {
+      return;
+    }
+    final availableIds = {
+      for (final battery in _compatibleBatteryOptions()) battery.id,
+    };
+    _selectedBatteryIds.removeWhere((id) => !availableIds.contains(id));
+  }
+
+  List<BatteryPack> _compatibleBatteryOptions() {
+    final selectedCells = {
+      for (final cell in _batteryCells)
+        if (cell > 0) cell,
+    };
+    if (selectedCells.isEmpty) {
+      return const [];
+    }
+    final seenBatteryIds = <String>{};
+    final options = <BatteryPack>[];
+    for (final battery in widget.batteries) {
+      final batteryId = battery.id.trim();
+      if (batteryId.isEmpty ||
+          !selectedCells.contains(battery.cells) ||
+          !seenBatteryIds.add(batteryId)) {
+        continue;
+      }
+      options.add(battery);
+    }
+    options.sort(_compareAircraftDialogBatteries);
+    return options;
+  }
+
+  Set<String> _assignedBatteryIdsForAircraft(String aircraftId) {
+    final assigned = [
+      for (final battery in widget.batteries)
+        if (battery.aircraftIds.contains(aircraftId)) battery,
+    ]..sort(_compareAircraftDialogBatteries);
+    return {
+      for (final battery in assigned)
+        if (battery.id.trim().isNotEmpty) battery.id,
+    };
   }
 
   Future<void> _requestClose() async {
@@ -3955,6 +4139,7 @@ class _AircraftDialogState extends State<_AircraftDialog> {
 
   String _inputSignature() {
     final batteryCells = _batteryCells.toList()..sort();
+    final selectedBatteryIds = _selectedBatteryIds.toList()..sort();
     final features = _featureOptions.toList()..sort();
     return jsonEncode({
       'name': _name.text.trim(),
@@ -3981,6 +4166,7 @@ class _AircraftDialogState extends State<_AircraftDialog> {
       'type': _type,
       'driveType': _driveType,
       'batteryCells': batteryCells,
+      'selectedBatteryIds': selectedBatteryIds,
       'features': features,
       'photos': [
         for (final source in _photoDataUris)
@@ -4031,52 +4217,51 @@ class _AircraftDialogState extends State<_AircraftDialog> {
     final notesText = _notes.text.trim();
     final repairText = _repairNotes.text.trim();
     final selectedBatteryCells = _batteryCells.toList()..sort();
-    widget.onSubmit(
-      AircraftModel(
-        id: existing?.id ?? const Uuid().v4(),
-        name: _name.text.trim(),
-        type: _type,
-        manufacturer: _manufacturer.text.trim(),
-        registration: '',
-        wingspanMeters: wingspanMeters,
-        lengthMeters: lengthMeters,
-        weightKg: weightKg,
-        transmitter: _transmitter.text.trim(),
-        transmitterMemorySlot: _transmitterMemorySlot.text.trim(),
-        receiver: _receiver.text.trim(),
-        propeller: _propeller.text.trim(),
-        rcFunctions: _rcFunctions.text.trim(),
-        materialFuselageWing: _materialFuselageWing.text.trim(),
-        wingLoading: _wingLoading.text.trim(),
-        centerOfGravity: _centerOfGravity.text.trim(),
-        recommendedDriveBattery: existing?.recommendedDriveBattery ?? '',
-        servos: _servos.text.trim(),
-        purchaseDate: purchaseDate.date,
-        purchaseDateInput: purchaseDate.input,
-        drive: _drive.text.trim(),
-        driveType: _driveType,
-        speedController: _speedController.text.trim(),
-        batteryCount:
-            selectedBatteryCells.isEmpty ? 0 : selectedBatteryCells.first,
-        batteryCellOptions: List.unmodifiable(selectedBatteryCells),
-        featureOptions: List.unmodifiable([
-          for (final feature in aircraftFeatureOptions)
-            if (_featureOptions.contains(feature) && !_isDriveFeature(feature))
-              feature,
-        ]),
-        totalFlights: existing?.totalFlights ?? 0,
-        flightHours: existing?.flightHours ?? 0,
-        previousFlightMinutes: previousFlightMinutes,
-        status: _status,
-        lastService: existing?.lastService ?? now,
-        nextService: existing?.nextService ?? now.add(const Duration(days: 60)),
-        notes: notesText.isEmpty ? 'Noch keine Notizen hinterlegt.' : notesText,
-        repairNotes: repairText,
-        photoDataUris: List.unmodifiable(
-          _optimizedModelPhotoSources(_photoDataUris),
-        ),
+    final aircraft = AircraftModel(
+      id: existing?.id ?? const Uuid().v4(),
+      name: _name.text.trim(),
+      type: _type,
+      manufacturer: _manufacturer.text.trim(),
+      registration: '',
+      wingspanMeters: wingspanMeters,
+      lengthMeters: lengthMeters,
+      weightKg: weightKg,
+      transmitter: _transmitter.text.trim(),
+      transmitterMemorySlot: _transmitterMemorySlot.text.trim(),
+      receiver: _receiver.text.trim(),
+      propeller: _propeller.text.trim(),
+      rcFunctions: _rcFunctions.text.trim(),
+      materialFuselageWing: _materialFuselageWing.text.trim(),
+      wingLoading: _wingLoading.text.trim(),
+      centerOfGravity: _centerOfGravity.text.trim(),
+      recommendedDriveBattery: existing?.recommendedDriveBattery ?? '',
+      servos: _servos.text.trim(),
+      purchaseDate: purchaseDate.date,
+      purchaseDateInput: purchaseDate.input,
+      drive: _drive.text.trim(),
+      driveType: _driveType,
+      speedController: _speedController.text.trim(),
+      batteryCount:
+          selectedBatteryCells.isEmpty ? 0 : selectedBatteryCells.first,
+      batteryCellOptions: List.unmodifiable(selectedBatteryCells),
+      featureOptions: List.unmodifiable([
+        for (final feature in aircraftFeatureOptions)
+          if (_featureOptions.contains(feature) && !_isDriveFeature(feature))
+            feature,
+      ]),
+      totalFlights: existing?.totalFlights ?? 0,
+      flightHours: existing?.flightHours ?? 0,
+      previousFlightMinutes: previousFlightMinutes,
+      status: _status,
+      lastService: existing?.lastService ?? now,
+      nextService: existing?.nextService ?? now.add(const Duration(days: 60)),
+      notes: notesText.isEmpty ? 'Noch keine Notizen hinterlegt.' : notesText,
+      repairNotes: repairText,
+      photoDataUris: List.unmodifiable(
+        _optimizedModelPhotoSources(_photoDataUris),
       ),
     );
+    widget.onSubmit(aircraft, {..._selectedBatteryIds});
     _closeDialog();
   }
 
@@ -4342,28 +4527,30 @@ class _PhotoPickerPanelState extends State<_PhotoPickerPanel> {
               height: 112,
               child: Row(
                 children: [
-                  _buildDropZone(
-                    Tooltip(
-                      message: 'Fotos ablegen',
-                      child: Container(
-                        width: 96,
-                        height: 112,
-                        decoration: BoxDecoration(
-                          color: _isDragActive
-                              ? const Color(0xFFDCEEFF)
-                              : const Color(0xFFEFF6FF),
-                          borderRadius: BorderRadius.circular(8),
-                          border: Border.all(
+                  SizedBox(
+                    width: 96,
+                    height: 112,
+                    child: _buildDropZone(
+                      Tooltip(
+                        message: 'Fotos ablegen',
+                        child: Container(
+                          decoration: BoxDecoration(
                             color: _isDragActive
-                                ? const Color(0xFF0A84FF)
-                                : const Color(0xFFD8E8FF),
-                            width: _isDragActive ? 2 : 1,
+                                ? const Color(0xFFDCEEFF)
+                                : const Color(0xFFEFF6FF),
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(
+                              color: _isDragActive
+                                  ? const Color(0xFF0A84FF)
+                                  : const Color(0xFFD8E8FF),
+                              width: _isDragActive ? 2 : 1,
+                            ),
                           ),
-                        ),
-                        child: const Icon(
-                          Icons.add_photo_alternate_rounded,
-                          color: Color(0xFF0A84FF),
-                          size: 30,
+                          child: const Icon(
+                            Icons.add_photo_alternate_rounded,
+                            color: Color(0xFF0A84FF),
+                            size: 30,
+                          ),
                         ),
                       ),
                     ),

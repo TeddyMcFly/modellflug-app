@@ -463,6 +463,8 @@ class FlightLogEntry {
   final String location;
   final int durationMinutes;
   final int batteryPacks;
+  final String batteryId;
+  final String batteryLabel;
   final String pilot;
   final String notes;
 
@@ -473,6 +475,8 @@ class FlightLogEntry {
     required this.location,
     required this.durationMinutes,
     required this.batteryPacks,
+    this.batteryId = '',
+    this.batteryLabel = '',
     required this.pilot,
     required this.notes,
   });
@@ -484,6 +488,8 @@ class FlightLogEntry {
     String? location,
     int? durationMinutes,
     int? batteryPacks,
+    String? batteryId,
+    String? batteryLabel,
     String? pilot,
     String? notes,
   }) {
@@ -494,6 +500,8 @@ class FlightLogEntry {
       location: location ?? this.location,
       durationMinutes: durationMinutes ?? this.durationMinutes,
       batteryPacks: batteryPacks ?? this.batteryPacks,
+      batteryId: batteryId ?? this.batteryId,
+      batteryLabel: batteryLabel ?? this.batteryLabel,
       pilot: pilot ?? this.pilot,
       notes: notes ?? this.notes,
     );
@@ -507,6 +515,8 @@ class FlightLogEntry {
       location: json['location'] as String,
       durationMinutes: json['durationMinutes'] as int,
       batteryPacks: json['batteryPacks'] as int,
+      batteryId: json['batteryId'] as String? ?? '',
+      batteryLabel: json['batteryLabel'] as String? ?? '',
       pilot: json['pilot'] as String,
       notes: json['notes'] as String,
     );
@@ -520,6 +530,8 @@ class FlightLogEntry {
       'location': location,
       'durationMinutes': durationMinutes,
       'batteryPacks': batteryPacks,
+      'batteryId': batteryId,
+      'batteryLabel': batteryLabel,
       'pilot': pilot,
       'notes': notes,
     };

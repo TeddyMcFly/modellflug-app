@@ -49,6 +49,17 @@ class FleetState {
 
   double get totalHours => totalMinutes / 60;
 
+  int flightMinutesForAircraft(AircraftModel aircraft) {
+    final flightbookMinutes = flights.fold<int>(
+      0,
+      (sum, flight) =>
+          flight.aircraftId == aircraft.id ? sum + flight.durationMinutes : sum,
+    );
+    final previousMinutes =
+        aircraft.previousFlightMinutes < 0 ? 0 : aircraft.previousFlightMinutes;
+    return flightbookMinutes + previousMinutes;
+  }
+
   int get nextBatteryInventoryNumber {
     if (batteries.isEmpty) {
       return 1;

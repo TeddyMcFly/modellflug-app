@@ -11,6 +11,7 @@ import '../../shared/providers/fleet_provider.dart';
 import '../../shared/services/auth_service.dart';
 import '../../shared/services/member_chat_service.dart';
 import '../../shared/services/open_meteo_service.dart';
+import '../../shared/services/subscription_service.dart';
 import '../../shared/utils/media_source.dart';
 
 const _navigationColor = Color(0xFF06172E);
@@ -51,6 +52,15 @@ class AppScaffold extends ConsumerWidget {
     final routeState = GoRouterState.of(context);
     final location = routeState.matchedLocation;
     final fleet = ref.watch(fleetProvider);
+    final accountAccess = ref.watch(accountAccessProvider);
+    final subscriptionNotice = accountAccess.maybeWhen(
+      data: (value) => value.shouldShowNotice ? value : null,
+      orElse: () => null,
+    );
+    final subscriptionLocked = accountAccess.maybeWhen(
+      data: (value) => value.isExpired && _routeRequiresFullAccess(location),
+      orElse: () => false,
+    );
     final authUser = ref.watch(authStateProvider).maybeWhen(
           data: (user) => user,
           orElse: () => null,
@@ -108,13 +118,25 @@ class AppScaffold extends ConsumerWidget {
                             weatherLocation: weatherLocation,
                             notifications: notifications,
                             headerWeather: headerWeather,
-                            action: action,
+                            action: subscriptionLocked ? null : action,
                             titleFontSize: titleFontSize,
                             userEmail: userEmail,
                             onSignOut: () => unawaited(_signOut(context, ref)),
                           ),
                           const SizedBox(height: 12),
-                          ...children,
+                          if (subscriptionNotice != null) ...[
+                            _SubscriptionAccessBanner(
+                              access: subscriptionNotice,
+                              onOpenSettings: () => context.go('/settings'),
+                            ),
+                            const SizedBox(height: 12),
+                          ],
+                          if (subscriptionLocked)
+                            _SubscriptionExpiredContent(
+                              onOpenSettings: () => context.go('/settings'),
+                            )
+                          else
+                            ...children,
                         ],
                       ),
                     ),
@@ -155,6 +177,143 @@ class AppScaffold extends ConsumerWidget {
     if (context.mounted) {
       context.go('/login');
     }
+  }
+}
+
+bool _routeRequiresFullAccess(String location) {
+  return switch (location) {
+    '/models' || '/flightbook' || '/batteries' || '/friends' => true,
+    _ => false,
+  };
+}
+
+class _SubscriptionAccessBanner extends StatelessWidget {
+  final AccountAccess access;
+  final VoidCallback onOpenSettings;
+
+  const _SubscriptionAccessBanner({
+    required this.access,
+    required this.onOpenSettings,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final expired = access.isExpired;
+    final color = expired ? const Color(0xFFB91C1C) : const Color(0xFFB45309);
+    final background =
+        expired ? const Color(0xFFFFF1F2) : const Color(0xFFFFFBEB);
+    final border = expired ? const Color(0xFFFECACA) : const Color(0xFFFDE68A);
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: background,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: border),
+      ),
+      child: Row(
+        children: [
+          Icon(
+            expired ? Icons.lock_clock_rounded : Icons.hourglass_top_rounded,
+            color: color,
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  access.compactLabel,
+                  style: TextStyle(
+                    color: color,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  access.detail,
+                  style: const TextStyle(
+                    color: Color(0xFF475569),
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 10),
+          OutlinedButton.icon(
+            onPressed: onOpenSettings,
+            icon: const Icon(Icons.settings_rounded),
+            label: const Text('Einstellungen'),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SubscriptionExpiredContent extends StatelessWidget {
+  final VoidCallback onOpenSettings;
+
+  const _SubscriptionExpiredContent({required this.onOpenSettings});
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 620),
+        child: Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(22),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: const Color(0xFFE2E8F0)),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Row(
+                children: [
+                  Icon(Icons.lock_clock_rounded, color: Color(0xFFB91C1C)),
+                  SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      'Testzeit abgelaufen',
+                      style: TextStyle(
+                        color: Color(0xFF06172E),
+                        fontSize: 20,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 10),
+              const Text(
+                'Deine Daten bleiben erhalten. Dashboard, Statistik, Webcam und Einstellungen bleiben sichtbar. Neue Modelle, Fluege, Akkus und Chat-Aenderungen sind nach der Freischaltung wieder moeglich.',
+                style: TextStyle(
+                  color: Color(0xFF475569),
+                  fontSize: 13,
+                  fontWeight: FontWeight.w700,
+                  height: 1.35,
+                ),
+              ),
+              const SizedBox(height: 16),
+              FilledButton.icon(
+                onPressed: onOpenSettings,
+                icon: const Icon(Icons.workspace_premium_rounded),
+                label: const Text('Bezahlversion aktivieren'),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 }
 

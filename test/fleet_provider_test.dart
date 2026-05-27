@@ -42,6 +42,45 @@ void main() {
     expect(updatedBattery.lastUsed, flightDate);
   });
 
+  test('deleteFlight removes entry and restores totals', () {
+    final container = ProviderContainer();
+    addTearDown(container.dispose);
+
+    final initialState = container.read(fleetProvider);
+    final aircraft = initialState.aircraft.first;
+    final battery = initialState.batteries.first;
+    final flightDate = DateTime(2026, 5, 27, 16, 45);
+    final entry = FlightLogEntry(
+      id: 'delete-test-flight',
+      aircraftId: aircraft.id,
+      date: flightDate,
+      location: 'Testplatz',
+      durationMinutes: 15,
+      batteryPacks: 1,
+      batteryId: battery.id,
+      batteryLabel: battery.label,
+      pilot: 'Test',
+      notes: 'Wird wieder geloescht',
+    );
+
+    container.read(fleetProvider.notifier).addFlight(entry);
+    container.read(fleetProvider.notifier).deleteFlight(entry.id);
+
+    final updatedState = container.read(fleetProvider);
+    final restoredAircraft = updatedState.aircraft.firstWhere(
+      (item) => item.id == aircraft.id,
+    );
+    final restoredBattery = updatedState.batteries.firstWhere(
+      (item) => item.id == battery.id,
+    );
+
+    expect(
+        updatedState.flights.any((flight) => flight.id == entry.id), isFalse);
+    expect(restoredAircraft.totalFlights, aircraft.totalFlights);
+    expect(restoredAircraft.flightHours, closeTo(aircraft.flightHours, 0.0001));
+    expect(restoredBattery.cycles, battery.cycles);
+  });
+
   test('battery photo fields survive json round trip', () {
     const photoDataUri = 'data:image/jpeg;base64,akku-foto';
     const thumbnailDataUri = 'data:image/jpeg;base64,akku-vorschau';
@@ -101,6 +140,64 @@ void main() {
     expect(
       updatedState.totalMinutes,
       initialTotalMinutes - initialAircraft.previousFlightMinutes + 120,
+    );
+  });
+
+  test('saving aircraft syncs multiple selected batteries', () {
+    final container = ProviderContainer();
+    addTearDown(container.dispose);
+
+    final initialState = container.read(fleetProvider);
+    final selectedBatteries =
+        initialState.batteries.where((battery) => battery.cells == 6).toList();
+    expect(selectedBatteries.length, greaterThanOrEqualTo(2));
+
+    final aircraft = initialState.aircraft.first.copyWith(
+      id: 'test-aircraft',
+      name: 'Testmodell',
+      batteryCount: 6,
+      batteryCellOptions: const [6],
+    );
+
+    container.read(fleetProvider.notifier).saveAircraftWithBatteryAssignment(
+      aircraft,
+      selectedBatteryIds: [
+        selectedBatteries[0].id,
+        selectedBatteries[1].id,
+      ],
+    );
+
+    var updatedState = container.read(fleetProvider);
+    expect(updatedState.aircraft.any((item) => item.id == aircraft.id), isTrue);
+    expect(
+      updatedState.batteries
+          .where((battery) =>
+              battery.id == selectedBatteries[0].id ||
+              battery.id == selectedBatteries[1].id)
+          .every((battery) => battery.aircraftIds.contains(aircraft.id)),
+      isTrue,
+    );
+
+    container.read(fleetProvider.notifier).saveAircraftWithBatteryAssignment(
+      aircraft,
+      selectedBatteryIds: [selectedBatteries[0].id],
+    );
+
+    updatedState = container.read(fleetProvider);
+    final keptBattery = updatedState.batteries.firstWhere(
+      (item) => item.id == selectedBatteries[0].id,
+    );
+    final uncheckedBattery = updatedState.batteries.firstWhere(
+      (item) => item.id == selectedBatteries[1].id,
+    );
+
+    expect(keptBattery.aircraftIds, contains(aircraft.id));
+    expect(uncheckedBattery.aircraftIds, isNot(contains(aircraft.id)));
+    expect(
+      updatedState.batteries
+          .where((item) => item.cells != 6)
+          .any((item) => item.aircraftIds.contains(aircraft.id)),
+      isFalse,
     );
   });
 }

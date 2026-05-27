@@ -7,9 +7,14 @@ bool isNetworkMediaSource(String source) {
   return source.startsWith('https://') || source.startsWith('http://');
 }
 
+bool isAssetMediaSource(String source) {
+  return source.replaceAll('\\', '/').startsWith('assets/');
+}
+
 bool isImageMediaSource(String source) {
   final lower = source.toLowerCase();
   return lower.startsWith('data:image/') ||
+      isAssetMediaSource(source) ||
       lower.contains('.jpg') ||
       lower.contains('.jpeg') ||
       lower.contains('.png') ||
@@ -27,6 +32,9 @@ ImageProvider<Object>? maybeMediaImageProvider(String? source) {
 ImageProvider<Object> mediaImageProvider(String source) {
   if (isNetworkMediaSource(source)) {
     return NetworkImage(source);
+  }
+  if (isAssetMediaSource(source)) {
+    return AssetImage(source.replaceAll('\\', '/'));
   }
   return MemoryImage(bytesFromDataUri(source));
 }

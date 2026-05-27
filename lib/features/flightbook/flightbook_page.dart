@@ -6,7 +6,6 @@ import 'package:uuid/uuid.dart';
 import '../../core/widgets/app_scaffold.dart';
 import '../../shared/models/aircraft_model.dart';
 import '../../shared/providers/fleet_provider.dart';
-import '../../shared/utils/flight_time_format.dart';
 import '../../shared/utils/media_source.dart';
 
 class FlightbookPage extends ConsumerWidget {
@@ -21,34 +20,15 @@ class FlightbookPage extends ConsumerWidget {
       title: 'Flugbuch',
       subtitle:
           'Starts, Flugzeiten, Akkusaetze und Beobachtungen direkt nach dem Flug erfassen.',
-      action: FilledButton.icon(
-        onPressed: fleet.aircraft.isEmpty
-            ? null
-            : () => _showFlightDialog(context, ref, fleet.aircraft),
-        icon: const Icon(Icons.add_rounded),
-        label: const Text('Flug eintragen'),
+      action: _FlightbookActions(
+        enabled: fleet.aircraft.isNotEmpty,
+        onQuickEntry: () => _showQuickFlightDialog(context, ref, fleet),
       ),
       children: [
-        Wrap(
-          spacing: 10,
-          runSpacing: 10,
-          children: [
-            _FlightbookMetricCard(
-              icon: Icons.timelapse_rounded,
-              label: 'Gesamtflugzeit',
-              value: formatFlightMinutes(_totalFlightMinutes(fleet.flights)),
-            ),
-            _FlightbookMetricCard(
-              icon: Icons.flight_takeoff_rounded,
-              label: 'Gesamtfluege',
-              value: '${fleet.flights.length}',
-            ),
-          ],
-        ),
-        const SizedBox(height: 12),
         _FlightbookTable(
           flights: fleet.flights,
           aircraftById: aircraftById,
+          batteries: fleet.batteries,
           onEdit: (flight) => _showFlightDialog(
             context,
             ref,
@@ -60,16 +40,61 @@ class FlightbookPage extends ConsumerWidget {
     );
   }
 
+  Future<void> _showQuickFlightDialog(
+    BuildContext context,
+    WidgetRef ref,
+    FleetState fleet,
+  ) async {
+    final result = await showDialog<_QuickFlightResult>(
+      context: context,
+      builder: (context) => _QuickFlightDialog(
+        aircraft: fleet.aircraft,
+        batteries: fleet.batteries,
+        pilotProfile: fleet.pilotProfile,
+      ),
+    );
+
+    if (result == null) {
+      return;
+    }
+
+    ref.read(fleetProvider.notifier).addFlight(
+          result.entry,
+          usedBatteryId: result.usedBatteryId,
+        );
+
+    if (!context.mounted) {
+      return;
+    }
+
+    final aircraftName = fleet.aircraft
+        .cast<AircraftModel?>()
+        .firstWhere(
+          (item) => item?.id == result.entry.aircraftId,
+          orElse: () => null,
+        )
+        ?.name;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          '${aircraftName ?? 'Flug'} gespeichert: ${result.entry.durationMinutes} min.',
+        ),
+      ),
+    );
+  }
+
   void _showFlightDialog(
     BuildContext context,
     WidgetRef ref,
     List<AircraftModel> aircraft, {
     FlightLogEntry? flight,
   }) {
+    final fleet = ref.read(fleetProvider);
     showDialog<void>(
       context: context,
       builder: (context) => _FlightDialog(
         aircraft: aircraft,
+        batteries: fleet.batteries,
         initialFlight: flight,
         onSubmit: (entry) {
           final notifier = ref.read(fleetProvider.notifier);
@@ -79,63 +104,42 @@ class FlightbookPage extends ConsumerWidget {
             notifier.updateFlight(entry);
           }
         },
+        onDelete: flight == null
+            ? null
+            : (entry) {
+                ref.read(fleetProvider.notifier).deleteFlight(entry.id);
+                if (!context.mounted) {
+                  return;
+                }
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Flugbucheintrag gelöscht.')),
+                );
+              },
       ),
     );
   }
 }
 
-class _FlightbookMetricCard extends StatelessWidget {
-  final IconData icon;
-  final String label;
-  final String value;
+class _FlightbookActions extends StatelessWidget {
+  final bool enabled;
+  final VoidCallback onQuickEntry;
 
-  const _FlightbookMetricCard({
-    required this.icon,
-    required this.label,
-    required this.value,
+  const _FlightbookActions({
+    required this.enabled,
+    required this.onQuickEntry,
   });
 
   @override
   Widget build(BuildContext context) {
-    return SizedBox(
-      height: 82,
-      child: IntrinsicWidth(
-        child: Card(
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(icon, color: const Color(0xFF0A84FF), size: 24),
-                const SizedBox(width: 10),
-                Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      value,
-                      style: const TextStyle(
-                        color: Color(0xFF06172E),
-                        fontSize: 17,
-                        fontWeight: FontWeight.w900,
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      label,
-                      style: const TextStyle(
-                        color: Color(0xFF64748B),
-                        fontSize: 11,
-                        fontWeight: FontWeight.w800,
-                      ),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        FilledButton.icon(
+          onPressed: enabled ? onQuickEntry : null,
+          icon: const Icon(Icons.flash_on_rounded),
+          label: const Text('Neuer Eintrag'),
         ),
-      ),
+      ],
     );
   }
 }
@@ -143,11 +147,13 @@ class _FlightbookMetricCard extends StatelessWidget {
 class _FlightbookTable extends StatefulWidget {
   final List<FlightLogEntry> flights;
   final Map<String, AircraftModel> aircraftById;
+  final List<BatteryPack> batteries;
   final ValueChanged<FlightLogEntry> onEdit;
 
   const _FlightbookTable({
     required this.flights,
     required this.aircraftById,
+    required this.batteries,
     required this.onEdit,
   });
 
@@ -175,7 +181,7 @@ class _FlightbookTableState extends State<_FlightbookTable> {
     return LayoutBuilder(
       builder: (context, constraints) {
         final tableWidth =
-            constraints.maxWidth < 1160 ? 1160.0 : constraints.maxWidth;
+            constraints.maxWidth < 1260 ? 1260.0 : constraints.maxWidth;
 
         return SizedBox(
           width: constraints.maxWidth,
@@ -198,92 +204,114 @@ class _FlightbookTableState extends State<_FlightbookTable> {
                         controller: _horizontalController,
                         scrollDirection: Axis.horizontal,
                         child: Padding(
-                          padding: const EdgeInsets.only(top: 30, bottom: 10),
+                          padding: const EdgeInsets.only(top: 52, bottom: 10),
                           child: ConstrainedBox(
                             constraints: BoxConstraints(minWidth: tableWidth),
-                            child: DataTable(
-                              sortColumnIndex: _sortColumnIndex,
-                              sortAscending: _sortAscending,
-                              headingRowColor: WidgetStateProperty.all(
-                                const Color(0xFF0A84FF),
-                              ),
-                              headingTextStyle: const TextStyle(
+                            child: IconTheme.merge(
+                              data: const IconThemeData(
                                 color: Colors.white,
-                                fontSize: 12,
-                                fontWeight: FontWeight.w900,
+                                opacity: 1,
+                                shadows: [
+                                  Shadow(
+                                    color: Color(0x99001E3C),
+                                    blurRadius: 2,
+                                    offset: Offset(0, 1),
+                                  ),
+                                ],
                               ),
-                              headingRowHeight: 40,
-                              dataTextStyle: const TextStyle(
-                                color: Color(0xFF334155),
-                                fontSize: 12,
-                                height: 1.1,
-                                fontWeight: FontWeight.w700,
-                              ),
-                              columnSpacing: 22,
-                              horizontalMargin: 16,
-                              dataRowMinHeight: 72,
-                              dataRowMaxHeight: 82,
-                              columns: [
-                                _sortableColumn(0, 'Nr.'),
-                                _sortableColumn(1, 'Datum'),
-                                _sortableColumn(2, 'Modell'),
-                                _sortableColumn(3, 'Kategorie'),
-                                _sortableColumn(4, 'Dauer'),
-                                _sortableColumn(5, 'Fluggebiet'),
-                                _sortableColumn(6, 'Pilot'),
-                                _sortableColumn(7, 'Notizen'),
-                                const DataColumn(label: _TableHeader('')),
-                              ],
-                              rows:
-                                  List.generate(sortedFlights.length, (index) {
-                                final flight = sortedFlights[index];
-                                final flightNumber =
-                                    flightNumbers[flight.id] ?? index + 1;
+                              child: DataTable(
+                                sortColumnIndex: _sortColumnIndex,
+                                sortAscending: _sortAscending,
+                                headingRowColor: WidgetStateProperty.all(
+                                  const Color(0xFF0A84FF),
+                                ),
+                                headingTextStyle: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w900,
+                                ),
+                                headingRowHeight: 40,
+                                dataTextStyle: const TextStyle(
+                                  color: Color(0xFF334155),
+                                  fontSize: 12,
+                                  height: 1.1,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                                columnSpacing: 16,
+                                horizontalMargin: 12,
+                                dataRowMinHeight: 72,
+                                dataRowMaxHeight: 82,
+                                columns: [
+                                  _sortableColumn(0, 'Nr.'),
+                                  _sortableColumn(1, 'Datum'),
+                                  _sortableColumn(2, 'Modell'),
+                                  _sortableColumn(3, 'Kategorie'),
+                                  _sortableColumn(4, 'Dauer'),
+                                  _sortableColumn(5, 'Akku'),
+                                  _sortableColumn(6, 'Fluggebiet'),
+                                  _sortableColumn(7, 'Pilot'),
+                                  _sortableColumn(8, 'Notizen'),
+                                  const DataColumn(label: _TableHeader('')),
+                                ],
+                                rows: List.generate(sortedFlights.length,
+                                    (index) {
+                                  final flight = sortedFlights[index];
+                                  final flightNumber =
+                                      flightNumbers[flight.id] ?? index + 1;
 
-                                return DataRow(
-                                  cells: [
-                                    DataCell(Text('$flightNumber')),
-                                    DataCell(
-                                        Text(formatter.format(flight.date))),
-                                    DataCell(
-                                      _AircraftModelCell(
-                                        aircraft: widget
-                                            .aircraftById[flight.aircraftId],
-                                      ),
-                                    ),
-                                    DataCell(
-                                      _CategoryCell(
-                                        category: widget
-                                                .aircraftById[flight.aircraftId]
-                                                ?.type ??
-                                            '-',
-                                      ),
-                                    ),
-                                    DataCell(
-                                        Text('${flight.durationMinutes} min')),
-                                    DataCell(Text(flight.location)),
-                                    DataCell(Text(flight.pilot)),
-                                    DataCell(
-                                      SizedBox(
-                                        width: 320,
-                                        child: Text(
-                                          flight.notes,
-                                          maxLines: 2,
-                                          overflow: TextOverflow.ellipsis,
+                                  return DataRow(
+                                    cells: [
+                                      DataCell(Text('$flightNumber')),
+                                      DataCell(
+                                          Text(formatter.format(flight.date))),
+                                      DataCell(
+                                        _AircraftModelCell(
+                                          aircraft: widget
+                                              .aircraftById[flight.aircraftId],
                                         ),
                                       ),
-                                    ),
-                                    DataCell(
-                                      IconButton(
-                                        tooltip: 'Eintrag bearbeiten',
-                                        icon: const Icon(Icons.edit_rounded),
-                                        color: const Color(0xFF0A84FF),
-                                        onPressed: () => widget.onEdit(flight),
+                                      DataCell(
+                                        _CategoryCell(
+                                          category: widget
+                                                  .aircraftById[
+                                                      flight.aircraftId]
+                                                  ?.type ??
+                                              '-',
+                                        ),
                                       ),
-                                    ),
-                                  ],
-                                );
-                              }),
+                                      DataCell(Text(
+                                          '${flight.durationMinutes} min')),
+                                      DataCell(Text(
+                                        _flightBatteryLabel(
+                                          flight,
+                                          widget.batteries,
+                                        ),
+                                      )),
+                                      DataCell(Text(flight.location)),
+                                      DataCell(Text(flight.pilot)),
+                                      DataCell(
+                                        SizedBox(
+                                          width: 320,
+                                          child: Text(
+                                            flight.notes,
+                                            maxLines: 2,
+                                            overflow: TextOverflow.ellipsis,
+                                          ),
+                                        ),
+                                      ),
+                                      DataCell(
+                                        IconButton(
+                                          tooltip: 'Eintrag bearbeiten',
+                                          icon: const Icon(Icons.edit_rounded),
+                                          color: const Color(0xFF0A84FF),
+                                          onPressed: () =>
+                                              widget.onEdit(flight),
+                                        ),
+                                      ),
+                                    ],
+                                  );
+                                }),
+                              ),
                             ),
                           ),
                         ),
@@ -344,9 +372,13 @@ class _FlightbookTableState extends State<_FlightbookTable> {
           ),
         3 => compareString(aircraftA?.type ?? '-', aircraftB?.type ?? '-'),
         4 => a.durationMinutes.compareTo(b.durationMinutes),
-        5 => compareString(a.location, b.location),
-        6 => compareString(a.pilot, b.pilot),
-        7 => compareString(a.notes, b.notes),
+        5 => compareString(
+            _flightBatteryLabel(a, widget.batteries),
+            _flightBatteryLabel(b, widget.batteries),
+          ),
+        6 => compareString(a.location, b.location),
+        7 => compareString(a.pilot, b.pilot),
+        8 => compareString(a.notes, b.notes),
         _ => b.date.compareTo(a.date),
       };
     }
@@ -477,48 +509,57 @@ class _FloatingTableScrollbarState extends State<_FloatingTableScrollbar> {
           widget.controller.jumpTo(maxExtent * nextRatio);
         }
 
-        return Opacity(
-          opacity: 0.55,
-          child: Container(
-            height: 16,
-            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 5),
-            decoration: BoxDecoration(
-              color: Colors.white.withValues(alpha: 0.22),
-              borderRadius: BorderRadius.circular(999),
-              border: Border.all(
-                color: const Color(0xFFCBD5E1).withValues(alpha: 0.55),
-              ),
+        return Container(
+          height: 24,
+          padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 6),
+          decoration: BoxDecoration(
+            color: const Color(0xFFEFF6FF),
+            borderRadius: BorderRadius.circular(999),
+            border: Border.all(
+              color: const Color(0xFF0A84FF),
+              width: 1.4,
             ),
-            child: GestureDetector(
-              behavior: HitTestBehavior.opaque,
-              onTapDown: (details) => jumpFromLocalDx(details.localPosition.dx),
-              onHorizontalDragUpdate: (details) =>
-                  jumpFromLocalDx(details.localPosition.dx),
-              child: SizedBox(
-                height: 18,
-                child: Stack(
-                  alignment: Alignment.centerLeft,
-                  children: [
-                    Container(
-                      height: 3,
-                      decoration: BoxDecoration(
-                        color: const Color(0xFFCBD5E1),
-                        borderRadius: BorderRadius.circular(999),
-                      ),
+            boxShadow: [
+              BoxShadow(
+                color: const Color(0xFF0A84FF).withValues(alpha: 0.18),
+                blurRadius: 10,
+                offset: const Offset(0, 2),
+              ),
+            ],
+          ),
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTapDown: (details) => jumpFromLocalDx(details.localPosition.dx),
+            onHorizontalDragUpdate: (details) =>
+                jumpFromLocalDx(details.localPosition.dx),
+            child: SizedBox(
+              height: 18,
+              child: Stack(
+                alignment: Alignment.centerLeft,
+                children: [
+                  Container(
+                    height: 6,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF93C5FD),
+                      borderRadius: BorderRadius.circular(999),
                     ),
-                    Positioned(
-                      left: left,
-                      child: Container(
-                        width: thumbWidth,
-                        height: 6,
-                        decoration: BoxDecoration(
-                          color: const Color(0xFF64748B),
-                          borderRadius: BorderRadius.circular(999),
+                  ),
+                  Positioned(
+                    left: left,
+                    child: Container(
+                      width: thumbWidth,
+                      height: 12,
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF0A84FF),
+                        borderRadius: BorderRadius.circular(999),
+                        border: Border.all(
+                          color: Colors.white,
+                          width: 1.2,
                         ),
                       ),
                     ),
-                  ],
-                ),
+                  ),
+                ],
               ),
             ),
           ),
@@ -732,22 +773,701 @@ IconData _categoryIcon(String category) {
   return Icons.airplanemode_active_rounded;
 }
 
-int _totalFlightMinutes(List<FlightLogEntry> flights) {
-  return flights.fold<int>(
-    0,
-    (sum, flight) => sum + flight.durationMinutes,
-  );
+String _flightBatteryLabel(
+  FlightLogEntry flight,
+  Iterable<BatteryPack> batteries,
+) {
+  final battery = _batteryForFlight(flight, batteries);
+  if (battery != null) {
+    return _batteryEntryLabel(battery);
+  }
+
+  final label = _normalizeBatteryLabel(flight.batteryLabel);
+  return label.isEmpty ? '-' : label;
+}
+
+class _QuickFlightResult {
+  final FlightLogEntry entry;
+  final String? usedBatteryId;
+
+  const _QuickFlightResult({
+    required this.entry,
+    required this.usedBatteryId,
+  });
+}
+
+class _QuickFlightDialog extends StatefulWidget {
+  final List<AircraftModel> aircraft;
+  final List<BatteryPack> batteries;
+  final PilotProfile pilotProfile;
+
+  const _QuickFlightDialog({
+    required this.aircraft,
+    required this.batteries,
+    required this.pilotProfile,
+  });
+
+  @override
+  State<_QuickFlightDialog> createState() => _QuickFlightDialogState();
+}
+
+class _QuickFlightDialogState extends State<_QuickFlightDialog> {
+  final _formKey = GlobalKey<FormState>();
+  late final TextEditingController _date;
+  late final TextEditingController _batteryLabel;
+  late final TextEditingController _location;
+  late final TextEditingController _pilot;
+  late final TextEditingController _notes;
+  late String _aircraftId;
+  late DateTime _selectedDate;
+  String _selectedBatteryId = '';
+  int _durationMinutes = 10;
+  int _batteryPacks = 1;
+  final _dateFormatter = DateFormat('dd.MM.yyyy HH:mm');
+
+  @override
+  void initState() {
+    super.initState();
+    _selectedDate = DateTime.now();
+    _aircraftId = widget.aircraft.first.id;
+    _date = TextEditingController(text: _dateFormatter.format(_selectedDate));
+    _batteryLabel = TextEditingController();
+    _location = TextEditingController(
+      text: _defaultFlightLocation(widget.pilotProfile),
+    );
+    _pilot = TextEditingController(
+      text: _defaultPilotName(widget.pilotProfile),
+    );
+    _notes = TextEditingController();
+    _selectedBatteryId = _defaultBatteryId(_batteryOptions);
+    if (_selectedBatteryId.isEmpty) {
+      _batteryLabel.text = _customBatteryLabel;
+    } else {
+      _applySelectedBatteryLabel();
+    }
+  }
+
+  @override
+  void dispose() {
+    _date.dispose();
+    _batteryLabel.dispose();
+    _location.dispose();
+    _pilot.dispose();
+    _notes.dispose();
+    super.dispose();
+  }
+
+  List<BatteryPack> get _batteryOptions {
+    final options = [
+      for (final battery in widget.batteries)
+        if (battery.aircraftIds.contains(_aircraftId)) battery,
+    ]..sort(_compareBatteryOptions);
+    return options;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final batteryOptions = _batteryOptions;
+    final selectedBatteryStillAvailable = batteryOptions.any(
+      (battery) => battery.id == _selectedBatteryId,
+    );
+    final selectedBatteryId =
+        selectedBatteryStillAvailable ? _selectedBatteryId : '';
+    if (selectedBatteryId != _selectedBatteryId) {
+      _selectedBatteryId = selectedBatteryId;
+      if (_selectedBatteryId.isEmpty &&
+          _selectedBatteryFromLabel(batteryOptions, _batteryLabel.text) ==
+              null) {
+        _batteryLabel.text = _customBatteryLabel;
+      }
+    }
+
+    return AlertDialog(
+      clipBehavior: Clip.antiAlias,
+      titlePadding: EdgeInsets.zero,
+      title: const _QuickFlightDialogHeader(),
+      content: SizedBox(
+        width: 520,
+        child: Form(
+          key: _formKey,
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                DropdownButtonFormField<String>(
+                  initialValue: _aircraftId,
+                  decoration: const InputDecoration(
+                    labelText: 'Modell',
+                    prefixIcon: Icon(Icons.airplanemode_active_rounded),
+                  ),
+                  items: [
+                    for (final item in widget.aircraft)
+                      DropdownMenuItem(value: item.id, child: Text(item.name)),
+                  ],
+                  onChanged: (value) {
+                    if (value == null) {
+                      return;
+                    }
+                    setState(() {
+                      _aircraftId = value;
+                      _selectedBatteryId = _defaultBatteryId(_batteryOptions);
+                      if (_selectedBatteryId.isEmpty) {
+                        _batteryLabel.text = _customBatteryLabel;
+                      } else {
+                        _applySelectedBatteryLabel();
+                      }
+                    });
+                  },
+                ),
+                const SizedBox(height: 12),
+                TextFormField(
+                  controller: _date,
+                  readOnly: true,
+                  decoration: const InputDecoration(
+                    labelText: 'Datum und Uhrzeit',
+                    prefixIcon: Icon(Icons.calendar_month_rounded),
+                  ),
+                  onTap: _pickDateTime,
+                  validator: (value) => value == null || value.trim().isEmpty
+                      ? 'Bitte Datum eintragen.'
+                      : null,
+                ),
+                const SizedBox(height: 12),
+                _QuickNumberStepper(
+                  label: 'Flugzeit',
+                  value: '$_durationMinutes min',
+                  onDecrement: _durationMinutes <= 1
+                      ? null
+                      : () => setState(() => _durationMinutes--),
+                  onIncrement: _durationMinutes >= 999
+                      ? null
+                      : () => setState(() => _durationMinutes++),
+                ),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    for (final minutes in const [5, 8, 10, 12, 15, 20])
+                      ChoiceChip(
+                        label: Text('$minutes min'),
+                        selected: _durationMinutes == minutes,
+                        onSelected: (_) =>
+                            setState(() => _durationMinutes = minutes),
+                      ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                _QuickBatteryField(
+                  controller: _batteryLabel,
+                  batteries: batteryOptions,
+                  selectedBatteryId: _selectedBatteryId,
+                  onCustomSelected: () {
+                    setState(() {
+                      _selectedBatteryId = '';
+                      if (_batteryLabel.text.trim().isEmpty ||
+                          _selectedBatteryFromLabel(
+                                batteryOptions,
+                                _batteryLabel.text,
+                              ) !=
+                              null) {
+                        _batteryLabel.text = _customBatteryLabel;
+                      }
+                    });
+                  },
+                  onBatterySelected: (battery) {
+                    setState(() {
+                      _selectedBatteryId = battery.id;
+                      _batteryLabel.text = _batteryEntryLabel(battery);
+                    });
+                  },
+                ),
+                const SizedBox(height: 12),
+                _QuickNumberStepper(
+                  label: 'Akkusaetze',
+                  value: '$_batteryPacks',
+                  onDecrement: _batteryPacks <= 1
+                      ? null
+                      : () => setState(() => _batteryPacks--),
+                  onIncrement: _batteryPacks >= 12
+                      ? null
+                      : () => setState(() => _batteryPacks++),
+                ),
+                const SizedBox(height: 12),
+                TextFormField(
+                  controller: _location,
+                  decoration: const InputDecoration(
+                    labelText: 'Flugplatz',
+                    prefixIcon: Icon(Icons.place_rounded),
+                  ),
+                  validator: (value) => value == null || value.trim().isEmpty
+                      ? 'Bitte Flugplatz eintragen.'
+                      : null,
+                ),
+                const SizedBox(height: 12),
+                TextFormField(
+                  controller: _pilot,
+                  decoration: const InputDecoration(
+                    labelText: 'Pilot',
+                    prefixIcon: Icon(Icons.person_rounded),
+                  ),
+                  validator: (value) => value == null || value.trim().isEmpty
+                      ? 'Bitte Pilot eintragen.'
+                      : null,
+                ),
+                const SizedBox(height: 12),
+                TextFormField(
+                  controller: _notes,
+                  minLines: 2,
+                  maxLines: 3,
+                  decoration: const InputDecoration(
+                    labelText: 'Kurze Notiz',
+                    prefixIcon: Icon(Icons.notes_rounded),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Abbrechen'),
+        ),
+        FilledButton.icon(
+          onPressed: _submit,
+          icon: const Icon(Icons.save_rounded),
+          label: const Text('Speichern'),
+        ),
+      ],
+    );
+  }
+
+  void _submit() {
+    if (!_formKey.currentState!.validate()) {
+      return;
+    }
+
+    final notes = _notes.text.trim();
+    final selectedBattery = _batteryById(_batteryOptions, _selectedBatteryId);
+    final batteryLabel = selectedBattery == null
+        ? _normalizeBatteryLabel(_batteryLabel.text)
+        : _batteryEntryLabel(selectedBattery);
+    Navigator.of(context).pop(
+      _QuickFlightResult(
+        entry: FlightLogEntry(
+          id: const Uuid().v4(),
+          aircraftId: _aircraftId,
+          date: _selectedDate,
+          location: _location.text.trim(),
+          durationMinutes: _durationMinutes,
+          batteryPacks: _batteryPacks,
+          batteryId: selectedBattery?.id ?? '',
+          batteryLabel:
+              batteryLabel.isEmpty ? _customBatteryLabel : batteryLabel,
+          pilot: _pilot.text.trim(),
+          notes: notes.isEmpty ? 'Per Schnelleingabe gespeichert.' : notes,
+        ),
+        usedBatteryId: _selectedBatteryIdForCycle(),
+      ),
+    );
+  }
+
+  String? _selectedBatteryIdForCycle() {
+    return _batteryById(_batteryOptions, _selectedBatteryId)?.id;
+  }
+
+  Future<void> _pickDateTime() async {
+    final date = await showDatePicker(
+      context: context,
+      initialDate: _selectedDate,
+      firstDate: DateTime(2000),
+      lastDate: DateTime(2100),
+    );
+    if (date == null || !mounted) {
+      return;
+    }
+
+    final time = await showTimePicker(
+      context: context,
+      initialTime: TimeOfDay.fromDateTime(_selectedDate),
+    );
+    if (time == null || !mounted) {
+      return;
+    }
+
+    setState(() {
+      _selectedDate = DateTime(
+        date.year,
+        date.month,
+        date.day,
+        time.hour,
+        time.minute,
+      );
+      _date.text = _dateFormatter.format(_selectedDate);
+    });
+  }
+
+  void _applySelectedBatteryLabel() {
+    if (_selectedBatteryId.isEmpty) {
+      return;
+    }
+
+    for (final battery in _batteryOptions) {
+      if (battery.id == _selectedBatteryId) {
+        _batteryLabel.text = _batteryEntryLabel(battery);
+        return;
+      }
+    }
+  }
+}
+
+class _QuickFlightDialogHeader extends StatelessWidget {
+  const _QuickFlightDialogHeader();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      color: const Color(0xFF06172E),
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+      child: const Row(
+        children: [
+          Icon(
+            Icons.flight_takeoff_rounded,
+            color: Colors.white,
+          ),
+          SizedBox(width: 10),
+          Text(
+            'Neuer Eintrag',
+            style: TextStyle(
+              color: Colors.white,
+              fontSize: 20,
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _QuickBatteryField extends StatelessWidget {
+  static const _customValue = '__custom__';
+
+  final TextEditingController controller;
+  final List<BatteryPack> batteries;
+  final String selectedBatteryId;
+  final VoidCallback onCustomSelected;
+  final ValueChanged<BatteryPack> onBatterySelected;
+
+  const _QuickBatteryField({
+    required this.controller,
+    required this.batteries,
+    required this.selectedBatteryId,
+    required this.onCustomSelected,
+    required this.onBatterySelected,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final selectedBattery = _batteryById(batteries, selectedBatteryId) ??
+        _selectedBatteryFromLabel(batteries, controller.text);
+    final dropdownValue = selectedBattery?.id ?? _customValue;
+
+    final dropdown = batteries.isEmpty
+        ? null
+        : DropdownButtonFormField<String>(
+            key: ValueKey(
+              'battery-${batteries.map((battery) => '${battery.id}:${battery.label}:${battery.inventoryNumber}:${battery.status.name}').join('|')}-$dropdownValue',
+            ),
+            initialValue: dropdownValue,
+            isExpanded: true,
+            decoration: const InputDecoration(
+              labelText: 'Akku',
+              prefixIcon: Icon(Icons.battery_charging_full_rounded),
+            ),
+            items: [
+              for (final battery in batteries)
+                DropdownMenuItem(
+                  value: battery.id,
+                  child: Text(
+                    _batteryOptionLabel(battery),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              const DropdownMenuItem(
+                value: _customValue,
+                child: Text('Anderer Akku'),
+              ),
+            ],
+            onChanged: (value) {
+              if (value == null) {
+                return;
+              }
+              if (value == _customValue) {
+                onCustomSelected();
+                return;
+              }
+
+              final battery = _batteryById(batteries, value);
+              if (battery != null) {
+                onBatterySelected(battery);
+              }
+            },
+          );
+
+    final customField = TextFormField(
+      controller: controller,
+      decoration: InputDecoration(
+        labelText: batteries.isEmpty ? 'Akku' : 'Akku selbst eintragen',
+        prefixIcon: const Icon(Icons.edit_rounded),
+      ),
+    );
+
+    if (dropdown == null) {
+      return customField;
+    }
+
+    if (dropdownValue != _customValue) {
+      return dropdown;
+    }
+
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        dropdown,
+        const SizedBox(height: 8),
+        customField,
+      ],
+    );
+  }
+}
+
+class _QuickNumberStepper extends StatelessWidget {
+  final String label;
+  final String value;
+  final VoidCallback? onDecrement;
+  final VoidCallback? onIncrement;
+
+  const _QuickNumberStepper({
+    required this.label,
+    required this.value,
+    required this.onDecrement,
+    required this.onIncrement,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF8FAFC),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: const Color(0xFFE2E8F0)),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(
+              label,
+              style: const TextStyle(
+                color: Color(0xFF334155),
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+          ),
+          IconButton.filledTonal(
+            tooltip: '$label verringern',
+            onPressed: onDecrement,
+            icon: const Icon(Icons.remove_rounded),
+          ),
+          SizedBox(
+            width: 86,
+            child: Text(
+              value,
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                color: Color(0xFF06172E),
+                fontSize: 18,
+                fontWeight: FontWeight.w900,
+              ),
+            ),
+          ),
+          IconButton.filled(
+            tooltip: '$label erhoehen',
+            onPressed: onIncrement,
+            icon: const Icon(Icons.add_rounded),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+String _defaultBatteryId(List<BatteryPack> batteries) {
+  for (final battery in batteries) {
+    if (battery.status == BatteryStatus.charged) {
+      return battery.id;
+    }
+  }
+  return batteries.isEmpty ? '' : batteries.first.id;
+}
+
+int _compareBatteryOptions(BatteryPack a, BatteryPack b) {
+  final status = _batteryStatusSortValue(a.status)
+      .compareTo(_batteryStatusSortValue(b.status));
+  if (status != 0) {
+    return status;
+  }
+  final number = a.inventoryNumber.compareTo(b.inventoryNumber);
+  if (number != 0) {
+    return number;
+  }
+  return a.label.toLowerCase().compareTo(b.label.toLowerCase());
+}
+
+int _batteryStatusSortValue(BatteryStatus status) {
+  return switch (status) {
+    BatteryStatus.charged => 0,
+    BatteryStatus.storage => 1,
+    BatteryStatus.discharged => 2,
+    BatteryStatus.service => 3,
+  };
+}
+
+String _batteryOptionLabel(BatteryPack battery) {
+  final number =
+      battery.inventoryNumber > 0 ? 'Akku ${battery.inventoryNumber}: ' : '';
+  return '$number${battery.label} - ${battery.cells}S ${battery.capacityMah} mAh - ${battery.status.label}';
+}
+
+String _batteryEntryLabel(BatteryPack battery) {
+  final number =
+      battery.inventoryNumber > 0 ? 'Akku ${battery.inventoryNumber}: ' : '';
+  return '$number${battery.label}';
+}
+
+const _customBatteryLabel = 'Anderer Akku';
+const _legacyCustomBatteryLabel = 'Eigenangabe';
+
+String _normalizeBatteryLabel(String label) {
+  final cleanLabel = label.trim();
+  if (cleanLabel == _legacyCustomBatteryLabel) {
+    return _customBatteryLabel;
+  }
+  return cleanLabel;
+}
+
+BatteryPack? _selectedBatteryFromLabel(
+  List<BatteryPack> batteries,
+  String label,
+) {
+  final cleanLabel = _normalizeBatteryLabel(label);
+  for (final battery in batteries) {
+    if (_batteryEntryLabel(battery) == cleanLabel) {
+      return battery;
+    }
+  }
+  return null;
+}
+
+BatteryPack? _batteryById(Iterable<BatteryPack> batteries, String batteryId) {
+  final cleanBatteryId = batteryId.trim();
+  if (cleanBatteryId.isEmpty) {
+    return null;
+  }
+
+  for (final battery in batteries) {
+    if (battery.id == cleanBatteryId) {
+      return battery;
+    }
+  }
+  return null;
+}
+
+BatteryPack? _batteryForFlight(
+  FlightLogEntry? flight,
+  Iterable<BatteryPack> batteries,
+) {
+  if (flight == null) {
+    return null;
+  }
+
+  final byId = _batteryById(batteries, flight.batteryId);
+  if (byId != null) {
+    return byId;
+  }
+
+  final batteryList = batteries.toList();
+  final byLabel = _selectedBatteryFromLabel(batteryList, flight.batteryLabel);
+  if (byLabel != null) {
+    return byLabel;
+  }
+
+  final inventoryNumber = _batteryInventoryNumberFromLabel(flight.batteryLabel);
+  if (inventoryNumber == null) {
+    return null;
+  }
+
+  for (final battery in batteryList) {
+    if (battery.inventoryNumber == inventoryNumber) {
+      return battery;
+    }
+  }
+  return null;
+}
+
+int? _batteryInventoryNumberFromLabel(String label) {
+  final match = RegExp(r'^Akku\s+(\d+)\s*:').firstMatch(label.trim());
+  if (match == null) {
+    return null;
+  }
+  return int.tryParse(match.group(1) ?? '');
+}
+
+String _initialCustomBatteryLabel(String? label) {
+  final cleanLabel = _normalizeBatteryLabel(label ?? '');
+  return cleanLabel.isEmpty ? _customBatteryLabel : cleanLabel;
+}
+
+String _defaultFlightLocation(PilotProfile profile) {
+  final homeAirfield = profile.homeAirfield.trim();
+  if (homeAirfield.isNotEmpty) {
+    return homeAirfield;
+  }
+
+  for (final area in profile.flightAreas) {
+    final cleanArea = area.trim();
+    if (cleanArea.isNotEmpty) {
+      return cleanArea;
+    }
+  }
+
+  return 'Flugplatz';
+}
+
+String _defaultPilotName(PilotProfile profile) {
+  final name = profile.name.trim();
+  return name.isEmpty ? 'Pilot' : name;
 }
 
 class _FlightDialog extends StatefulWidget {
   final List<AircraftModel> aircraft;
+  final List<BatteryPack> batteries;
   final FlightLogEntry? initialFlight;
   final ValueChanged<FlightLogEntry> onSubmit;
+  final ValueChanged<FlightLogEntry>? onDelete;
 
   const _FlightDialog({
     required this.aircraft,
+    required this.batteries,
     this.initialFlight,
     required this.onSubmit,
+    this.onDelete,
   });
 
   @override
@@ -760,9 +1480,11 @@ class _FlightDialogState extends State<_FlightDialog> {
   late final TextEditingController _location;
   late final TextEditingController _duration;
   late final TextEditingController _batteries;
+  late final TextEditingController _batteryLabel;
   late final TextEditingController _pilot;
   late final TextEditingController _notes;
   late String _aircraftId;
+  late String _selectedBatteryId;
   late DateTime _selectedDate;
   final _dateFormatter = DateFormat('dd.MM.yyyy HH:mm');
 
@@ -778,6 +1500,15 @@ class _FlightDialogState extends State<_FlightDialog> {
       text: '${flight?.durationMinutes ?? 12}',
     );
     _batteries = TextEditingController(text: '${flight?.batteryPacks ?? 1}');
+    final initialBattery = flight == null
+        ? _batteryById(_batteryOptions, _defaultBatteryId(_batteryOptions))
+        : _batteryForFlight(flight, _batteryOptions);
+    _selectedBatteryId = initialBattery?.id ?? '';
+    _batteryLabel = TextEditingController(
+      text: initialBattery == null
+          ? _initialCustomBatteryLabel(flight?.batteryLabel)
+          : _batteryEntryLabel(initialBattery),
+    );
     _pilot = TextEditingController(text: flight?.pilot ?? 'Teddy');
     _notes = TextEditingController(text: flight?.notes ?? '');
   }
@@ -788,6 +1519,7 @@ class _FlightDialogState extends State<_FlightDialog> {
     _date.dispose();
     _duration.dispose();
     _batteries.dispose();
+    _batteryLabel.dispose();
     _pilot.dispose();
     _notes.dispose();
     super.dispose();
@@ -796,6 +1528,7 @@ class _FlightDialogState extends State<_FlightDialog> {
   @override
   Widget build(BuildContext context) {
     final isEditing = widget.initialFlight != null;
+    final batteryOptions = _batteryOptions;
 
     return AlertDialog(
       title: Text(isEditing ? 'Flug bearbeiten' : 'Flug eintragen'),
@@ -816,8 +1549,17 @@ class _FlightDialogState extends State<_FlightDialog> {
                     for (final item in widget.aircraft)
                       DropdownMenuItem(value: item.id, child: Text(item.name)),
                   ],
-                  onChanged: (value) =>
-                      setState(() => _aircraftId = value ?? _aircraftId),
+                  onChanged: (value) {
+                    if (value == null) {
+                      return;
+                    }
+                    setState(() {
+                      _aircraftId = value;
+                      _normalizeBatteryLabelForCurrentModel(
+                        useDefaultBattery: true,
+                      );
+                    });
+                  },
                 ),
               ),
               SizedBox(
@@ -838,6 +1580,33 @@ class _FlightDialogState extends State<_FlightDialog> {
               _TextField(controller: _location, label: 'Ort'),
               _TextField(controller: _duration, label: 'Minuten'),
               _TextField(controller: _batteries, label: 'Akkusaetze'),
+              SizedBox(
+                width: 248,
+                child: _QuickBatteryField(
+                  controller: _batteryLabel,
+                  batteries: batteryOptions,
+                  selectedBatteryId: _selectedBatteryId,
+                  onCustomSelected: () {
+                    setState(() {
+                      _selectedBatteryId = '';
+                      if (_batteryLabel.text.trim().isEmpty ||
+                          _selectedBatteryFromLabel(
+                                batteryOptions,
+                                _batteryLabel.text,
+                              ) !=
+                              null) {
+                        _batteryLabel.text = _customBatteryLabel;
+                      }
+                    });
+                  },
+                  onBatterySelected: (battery) {
+                    setState(() {
+                      _selectedBatteryId = battery.id;
+                      _batteryLabel.text = _batteryEntryLabel(battery);
+                    });
+                  },
+                ),
+              ),
               _TextField(controller: _pilot, label: 'Pilot'),
               SizedBox(
                 width: 508,
@@ -853,6 +1622,15 @@ class _FlightDialogState extends State<_FlightDialog> {
         ),
       ),
       actions: [
+        if (isEditing)
+          TextButton.icon(
+            onPressed: _confirmDelete,
+            style: TextButton.styleFrom(
+              foregroundColor: const Color(0xFFDC2626),
+            ),
+            icon: const Icon(Icons.delete_outline_rounded),
+            label: const Text('Löschen'),
+          ),
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
           child: const Text('Abbrechen'),
@@ -865,11 +1643,91 @@ class _FlightDialogState extends State<_FlightDialog> {
     );
   }
 
+  Future<void> _confirmDelete() async {
+    final flight = widget.initialFlight;
+    final onDelete = widget.onDelete;
+    if (flight == null || onDelete == null) {
+      return;
+    }
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Eintrag löschen?'),
+        content: const Text(
+          'Dieser Flugbucheintrag wird dauerhaft entfernt.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Abbrechen'),
+          ),
+          FilledButton.icon(
+            onPressed: () => Navigator.of(context).pop(true),
+            style: FilledButton.styleFrom(
+              backgroundColor: const Color(0xFFDC2626),
+              foregroundColor: Colors.white,
+            ),
+            icon: const Icon(Icons.delete_outline_rounded),
+            label: const Text('Löschen'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) {
+      return;
+    }
+
+    onDelete(flight);
+    Navigator.of(context).pop();
+  }
+
+  List<BatteryPack> get _batteryOptions {
+    final options = [
+      for (final battery in widget.batteries)
+        if (battery.aircraftIds.contains(_aircraftId)) battery,
+    ]..sort(_compareBatteryOptions);
+    return options;
+  }
+
+  void _normalizeBatteryLabelForCurrentModel({
+    required bool useDefaultBattery,
+  }) {
+    final selectedBattery = _batteryById(_batteryOptions, _selectedBatteryId) ??
+        _selectedBatteryFromLabel(
+          _batteryOptions,
+          _batteryLabel.text,
+        );
+    if (selectedBattery != null) {
+      _selectedBatteryId = selectedBattery.id;
+      _batteryLabel.text = _batteryEntryLabel(selectedBattery);
+      return;
+    }
+
+    if (useDefaultBattery) {
+      final defaultBatteryId = _defaultBatteryId(_batteryOptions);
+      for (final battery in _batteryOptions) {
+        if (battery.id == defaultBatteryId) {
+          _selectedBatteryId = battery.id;
+          _batteryLabel.text = _batteryEntryLabel(battery);
+          return;
+        }
+      }
+    }
+
+    _selectedBatteryId = '';
+    _batteryLabel.text = _customBatteryLabel;
+  }
+
   void _submit() {
     if (!_formKey.currentState!.validate()) {
       return;
     }
 
+    final selectedBattery = _batteryById(_batteryOptions, _selectedBatteryId);
+    final batteryLabel = selectedBattery == null
+        ? _normalizeBatteryLabel(_batteryLabel.text)
+        : _batteryEntryLabel(selectedBattery);
     widget.onSubmit(
       FlightLogEntry(
         id: widget.initialFlight?.id ?? const Uuid().v4(),
@@ -878,6 +1736,8 @@ class _FlightDialogState extends State<_FlightDialog> {
         location: _location.text.trim(),
         durationMinutes: int.parse(_duration.text),
         batteryPacks: int.parse(_batteries.text),
+        batteryId: selectedBattery?.id ?? '',
+        batteryLabel: batteryLabel.isEmpty ? _customBatteryLabel : batteryLabel,
         pilot: _pilot.text.trim(),
         notes: _notes.text.trim().isEmpty
             ? 'Keine besonderen Vorkommnisse.'

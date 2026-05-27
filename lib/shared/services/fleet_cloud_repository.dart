@@ -306,6 +306,7 @@ class FleetCloudRepository {
     required FleetState state,
     required String flightId,
     required List<AircraftModel> changedAircraft,
+    List<BatteryPack> changedBatteries = const [],
   }) {
     return _writeWithUserTouch(user, state, (batch) {
       batch.delete(_flights(user.uid).doc(flightId));
@@ -313,6 +314,13 @@ class FleetCloudRepository {
         batch.set(
           _aircraft(user.uid).doc(aircraft.id),
           _withDocumentMeta(aircraft.toJson()),
+          SetOptions(merge: true),
+        );
+      }
+      for (final battery in changedBatteries) {
+        batch.set(
+          _batteries(user.uid).doc(battery.id),
+          _withDocumentMeta(battery.toJson()),
           SetOptions(merge: true),
         );
       }

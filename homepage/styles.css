@@ -218,7 +218,7 @@ h3 {
 .intro-band {
   background: var(--ink);
   color: #ffffff;
-  padding: 20px 4px 16px 40px;
+  padding: 12px 4px 10px 40px;
 }
 
 .intro-grid {
@@ -230,26 +230,28 @@ h3 {
 }
 
 .quick-facts {
-  width: fit-content;
+  width: 100%;
   max-width: 100%;
-  display: grid;
-  grid-template-columns: repeat(8, auto);
-  justify-content: end;
-  justify-items: end;
-  gap: 14px;
+  display: flex;
+  flex-wrap: nowrap;
+  justify-content: flex-end;
+  gap: clamp(7px, 0.9vw, 12px);
   margin: 0 0 0 auto;
+  overflow-x: auto;
+  scrollbar-width: thin;
 }
 
 .quick-fact-link {
   border-right: 2px solid var(--blue);
-  padding: 3px 8px 3px 0;
+  flex: 0 0 auto;
+  padding: 2px 7px 2px 0;
   text-align: right;
   transition: color 160ms ease, border-color 160ms ease, transform 160ms ease;
 }
 
 .quick-fact-title {
   display: block;
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 900;
   white-space: nowrap;
 }
@@ -265,6 +267,7 @@ h3 {
 #modelle,
 #statistik,
 #webcam-wetter,
+#flugbuch,
 #konfiguration,
 #chat-wetter,
 #akkus,
@@ -305,6 +308,25 @@ h3 {
   color: var(--muted);
   font-size: 15px;
   font-weight: 650;
+}
+
+.reveal-ready .reveal-copy {
+  opacity: 0;
+  transform: translateY(16px);
+  transition: opacity 900ms ease, transform 900ms ease;
+}
+
+.reveal-ready .reveal-copy.is-visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .reveal-ready .reveal-copy {
+    opacity: 1;
+    transform: none;
+    transition: none;
+  }
 }
 
 .feature-icon {
@@ -561,6 +583,19 @@ h3 {
   object-fit: contain;
 }
 
+.flightbook-screen-visual {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.flightbook-screen-image {
+  width: 100%;
+  height: auto;
+  border-radius: 8px;
+  object-fit: contain;
+}
+
 .model-preview-head {
   display: grid;
   grid-template-columns: 150px minmax(0, 1fr);
@@ -667,9 +702,11 @@ h3 {
 }
 
 .feature-table td {
-  color: var(--ink);
-  font-size: 13px;
-  font-weight: 750;
+  color: var(--muted);
+  font-family: inherit;
+  font-size: 17px;
+  font-weight: 650;
+  line-height: 1.5;
 }
 
 .feature-table td::before {

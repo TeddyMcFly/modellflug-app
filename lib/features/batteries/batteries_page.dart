@@ -1465,11 +1465,7 @@ class _BatteryDialogState extends State<_BatteryDialog> {
     final inventoryNumber =
         widget.battery?.inventoryNumber ?? widget.suggestedInventoryNumber;
     final selectableAircraft = widget.aircraft
-        .where(
-          (aircraft) =>
-              aircraft.status != AircraftStatus.destroyed ||
-              _aircraftIds.contains(aircraft.id),
-        )
+        .where((aircraft) => _canAssignBatteryToAircraft(aircraft))
         .toList();
 
     return AlertDialog(
@@ -1524,7 +1520,11 @@ class _BatteryDialogState extends State<_BatteryDialog> {
                     isRequired: false,
                   ),
                   _TextField(controller: _chemistry, label: 'Chemie'),
-                  _TextField(controller: _cells, label: 'Zellen'),
+                  _TextField(
+                    controller: _cells,
+                    label: 'Zellen',
+                    onChanged: (_) => setState(() {}),
+                  ),
                   _TextField(controller: _capacity, label: 'Kapazitaet mAh'),
                   _TextField(
                     controller: _cRate,
@@ -1568,7 +1568,7 @@ class _BatteryDialogState extends State<_BatteryDialog> {
                     child: _AircraftMultiSelect(
                       aircraft: selectableAircraft,
                       selectedIds: _aircraftIds,
-                      emptyMessage: 'Keine aktiven Modelle vorhanden',
+                      emptyMessage: 'Keine passenden Modelle vorhanden',
                       onChanged: (ids) => setState(() => _aircraftIds = ids),
                     ),
                   ),
@@ -1673,6 +1673,25 @@ class _BatteryDialogState extends State<_BatteryDialog> {
       photoStoragePath: !embeddedPhoto && hasPhoto ? _photoStoragePath : null,
       photoDownloadUrl: !embeddedPhoto && hasPhoto ? photoSource : null,
     );
+  }
+
+  bool _canAssignBatteryToAircraft(AircraftModel aircraft) {
+    final alreadySelected = _aircraftIds.contains(aircraft.id);
+    final activeOrSelected =
+        aircraft.status != AircraftStatus.destroyed || alreadySelected;
+    if (!activeOrSelected) {
+      return false;
+    }
+    return alreadySelected || _batteryCellsFitAircraft(aircraft);
+  }
+
+  bool _batteryCellsFitAircraft(AircraftModel aircraft) {
+    final cellCount = int.tryParse(_cells.text.trim());
+    if (cellCount == null || cellCount <= 0) {
+      return true;
+    }
+    final aircraftCells = aircraft.batteryCells;
+    return aircraftCells.isEmpty || aircraftCells.contains(cellCount);
   }
 
   Future<void> _pickPhoto() async {
@@ -1952,11 +1971,13 @@ class _TextField extends StatelessWidget {
   final TextEditingController controller;
   final String label;
   final bool isRequired;
+  final ValueChanged<String>? onChanged;
 
   const _TextField({
     required this.controller,
     required this.label,
     this.isRequired = true,
+    this.onChanged,
   });
 
   @override
@@ -1965,6 +1986,7 @@ class _TextField extends StatelessWidget {
       width: 260,
       child: TextFormField(
         controller: controller,
+        onChanged: onChanged,
         decoration: InputDecoration(labelText: label),
         validator: isRequired
             ? (value) =>

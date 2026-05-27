@@ -13,62 +13,12 @@ class StatisticsPage extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final fleet = ref.watch(fleetProvider);
-    final flightsThisMonth = _flightsInCurrentMonth(fleet.flights);
-    final flightsPreviousMonth = _flightsInPreviousMonth(fleet.flights);
-    final hoursThisMonth = _totalHours(flightsThisMonth);
-    final hoursPreviousMonth = _totalHours(flightsPreviousMonth);
-    final aircraftById = {
-      for (final aircraft in fleet.aircraft) aircraft.id: aircraft,
-    };
-    final longestFlight = _longestFlight(fleet.flights);
-    final longestFlightAircraft =
-        longestFlight == null ? null : aircraftById[longestFlight.aircraftId];
 
     return AppScaffold(
       title: 'Statistiken',
       subtitle: 'Flugzeiten, Starts und Einsatzbereitschaft auswerten.',
       children: [
-        Wrap(
-          spacing: 10,
-          runSpacing: 10,
-          children: [
-            _StatTile(
-              icon: Icons.flight_takeoff_rounded,
-              label: 'Anzahl der Fluege',
-              value: '${fleet.totalFlights}',
-              helper: _percentChangeText(
-                flightsThisMonth.length.toDouble(),
-                flightsPreviousMonth.length.toDouble(),
-              ),
-            ),
-            _StatTile(
-              icon: Icons.timer_rounded,
-              label: 'Gesamtflugzeit',
-              value: formatFlightMinutes(fleet.totalMinutes),
-              helper: _percentChangeText(hoursThisMonth, hoursPreviousMonth),
-            ),
-            _StatTile(
-              icon: Icons.hourglass_bottom_rounded,
-              label: 'Laengster Flug',
-              value: longestFlight == null
-                  ? '-'
-                  : '${longestFlight.durationMinutes} min',
-              helper: longestFlightAircraft?.name ?? 'Noch keine Fluege',
-            ),
-            _StatTile(
-              icon: Icons.airplanemode_active_rounded,
-              label: 'Vorhandene Modelle',
-              value: '${fleet.aircraft.length}',
-              helper: '${fleet.readyCount} einsatzfaehig',
-            ),
-            _StatTile(
-              icon: Icons.battery_charging_full_rounded,
-              label: 'Vorhandene Akkus',
-              value: '${fleet.batteries.length}',
-              helper: '${fleet.chargedBatteryCount} top',
-            ),
-          ],
-        ),
+        _YearOverviewCard(fleet: fleet),
         const SizedBox(height: 10),
         Wrap(
           spacing: 10,
@@ -99,70 +49,184 @@ class StatisticsPage extends ConsumerWidget {
   }
 }
 
-class _StatTile extends StatelessWidget {
-  final IconData icon;
-  final String label;
-  final String value;
-  final String helper;
+class _YearOverviewCard extends StatefulWidget {
+  final FleetState fleet;
 
-  const _StatTile({
-    required this.icon,
-    required this.label,
-    required this.value,
-    required this.helper,
-  });
+  const _YearOverviewCard({required this.fleet});
+
+  @override
+  State<_YearOverviewCard> createState() => _YearOverviewCardState();
+}
+
+class _YearOverviewCardState extends State<_YearOverviewCard> {
+  int? _selectedYear;
 
   @override
   Widget build(BuildContext context) {
-    return IntrinsicWidth(
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(minWidth: 168, maxWidth: 218),
-        child: Card(
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(icon, color: const Color(0xFF0A84FF), size: 32),
-                const SizedBox(width: 10),
-                Flexible(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        value,
-                        style: _numberTextStyle(
-                          fontSize: 20,
-                          fontWeight: FontWeight.w900,
-                        ),
-                      ),
-                      Text(
-                        label,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          color: Color(0xFF64748B),
-                          fontSize: 10.5,
-                          fontWeight: FontWeight.w900,
-                        ),
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        helper,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          color: Color(0xFF94A3B8),
-                          fontSize: 9.5,
-                          fontWeight: FontWeight.w800,
-                        ),
-                      ),
-                    ],
+    final years = _availableOverviewYears(widget.fleet.flights);
+    final selectedYear = _selectedYear;
+    final year = selectedYear != null && years.contains(selectedYear)
+        ? selectedYear
+        : _defaultOverviewYear(years);
+    final flightsThisYear = _flightsInYear(widget.fleet.flights, year);
+    final minutesThisYear = _totalMinutes(flightsThisYear);
+    final aircraftById = {
+      for (final aircraft in widget.fleet.aircraft) aircraft.id: aircraft,
+    };
+    final longestFlight = _longestFlight(flightsThisYear);
+    final longestFlightAircraft =
+        longestFlight == null ? null : aircraftById[longestFlight.aircraftId];
+    final favoriteAircraft = _topUsageByLabel(
+      flightsThisYear,
+      (flight) => aircraftById[flight.aircraftId]?.name ?? 'Unbekannt',
+    );
+    final favoriteLocation = _topUsageByLabel(
+      flightsThisYear,
+      (flight) => flight.location,
+    );
+    final batteryCyclesThisYear = _batteryCyclesUsedInFlights(flightsThisYear);
+    final metrics = [
+      _YearOverviewMetric(
+        icon: Icons.flight_takeoff_rounded,
+        label: 'Anzahl der Flüge',
+        value: '${flightsThisYear.length}',
+        helper: 'Im Jahr $year',
+      ),
+      _YearOverviewMetric(
+        icon: Icons.timer_rounded,
+        label: 'Gesamtflugzeit',
+        value: formatFlightMinutes(minutesThisYear),
+        helper: 'Im Jahr $year',
+      ),
+      _YearOverviewMetric(
+        icon: Icons.hourglass_bottom_rounded,
+        label: 'Längster Flug',
+        value: longestFlight == null
+            ? '-'
+            : '${longestFlight.durationMinutes} min',
+        helper: longestFlightAircraft?.name ?? 'Noch keine Flüge',
+      ),
+      _YearOverviewMetric(
+        icon: Icons.airplanemode_active_rounded,
+        label: 'Vorhandene Modelle',
+        value: '${widget.fleet.aircraft.length}',
+        helper: '${widget.fleet.readyCount} einsatzfähig',
+      ),
+      _YearOverviewMetric(
+        icon: Icons.battery_charging_full_rounded,
+        label: 'Vorhandene Akkus',
+        value: '${widget.fleet.batteries.length}',
+        helper: '${widget.fleet.chargedBatteryCount} top',
+      ),
+      _YearOverviewMetric(
+        icon: Icons.favorite_rounded,
+        label: 'Lieblingsmodell',
+        value: favoriteAircraft?.label ?? '-',
+        helper: favoriteAircraft == null
+            ? 'Noch keine Flüge'
+            : _flightCountText(favoriteAircraft.flights),
+      ),
+      _YearOverviewMetric(
+        icon: Icons.place_rounded,
+        label: 'Meistgenutzter Flugplatz',
+        value: favoriteLocation?.label ?? '-',
+        helper: favoriteLocation == null
+            ? 'Noch keine Flüge'
+            : _flightCountText(favoriteLocation.flights),
+      ),
+      _YearOverviewMetric(
+        icon: Icons.battery_charging_full_rounded,
+        label: 'Akku-Zyklen',
+        value: '$batteryCyclesThisYear',
+        helper: 'Im Jahr $year genutzt',
+      ),
+    ];
+
+    return SizedBox(
+      width: 900,
+      child: Card(
+        child: Padding(
+          padding: const EdgeInsets.all(18),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  const Icon(
+                    Icons.calendar_month_rounded,
+                    color: Color(0xFF0A84FF),
+                    size: 24,
                   ),
-                ),
-              ],
-            ),
+                  const SizedBox(width: 10),
+                  const Text(
+                    'Jahresübersicht',
+                    style: _sectionTitleStyle,
+                  ),
+                  const Spacer(),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 2,
+                    ),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFEAF3FF),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: DropdownButtonHideUnderline(
+                      child: DropdownButton<int>(
+                        value: year,
+                        isDense: true,
+                        icon: const Icon(
+                          Icons.keyboard_arrow_down_rounded,
+                          color: Color(0xFF0A65C7),
+                        ),
+                        dropdownColor: Colors.white,
+                        style: const TextStyle(
+                          color: Color(0xFF0A65C7),
+                          fontSize: 12,
+                          fontWeight: FontWeight.w900,
+                        ),
+                        items: [
+                          for (final item in years)
+                            DropdownMenuItem<int>(
+                              value: item,
+                              child: Text('$item'),
+                            ),
+                        ],
+                        onChanged: (value) {
+                          if (value == null) {
+                            return;
+                          }
+                          setState(() => _selectedYear = value);
+                        },
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 14),
+              LayoutBuilder(
+                builder: (context, constraints) {
+                  final tileWidth = constraints.maxWidth < 560
+                      ? constraints.maxWidth
+                      : constraints.maxWidth < 780
+                          ? (constraints.maxWidth - 10) / 2
+                          : (constraints.maxWidth - 20) / 3;
+
+                  return Wrap(
+                    spacing: 10,
+                    runSpacing: 10,
+                    children: [
+                      for (final metric in metrics)
+                        SizedBox(
+                          width: tileWidth,
+                          child: _YearOverviewTile(metric: metric),
+                        ),
+                    ],
+                  );
+                },
+              ),
+            ],
           ),
         ),
       ),
@@ -170,20 +234,120 @@ class _StatTile extends StatelessWidget {
   }
 }
 
-class _AircraftHoursChart extends StatelessWidget {
+class _YearOverviewMetric {
+  final IconData icon;
+  final String label;
+  final String value;
+  final String helper;
+
+  const _YearOverviewMetric({
+    required this.icon,
+    required this.label,
+    required this.value,
+    required this.helper,
+  });
+}
+
+class _YearOverviewTile extends StatelessWidget {
+  final _YearOverviewMetric metric;
+
+  const _YearOverviewTile({required this.metric});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      constraints: const BoxConstraints(minHeight: 82),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF8FAFC),
+        border: Border.all(color: const Color(0xFFE2E8F0)),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 38,
+            height: 38,
+            decoration: BoxDecoration(
+              color: const Color(0xFFEAF3FF),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Icon(metric.icon, color: const Color(0xFF0A84FF), size: 22),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  metric.value,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: _numberTextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  metric.label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: Color(0xFF64748B),
+                    fontSize: 10.5,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  metric.helper,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: Color(0xFF94A3B8),
+                    fontSize: 9.5,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _AircraftHoursChart extends StatefulWidget {
   final FleetState fleet;
 
   const _AircraftHoursChart({required this.fleet});
 
   @override
+  State<_AircraftHoursChart> createState() => _AircraftHoursChartState();
+}
+
+class _AircraftHoursChartState extends State<_AircraftHoursChart> {
+  _AircraftHoursStatusFilter _statusFilter = _AircraftHoursStatusFilter.all;
+
+  @override
   Widget build(BuildContext context) {
-    final aircraftWithHours = [
-      for (final aircraft in fleet.aircraft)
-        if (aircraft.totalFlightMinutes > 0) aircraft,
-    ];
+    final selectedStatus = _statusFilter.status;
+    final aircraftWithHours = <_AircraftFlightTime>[];
+    for (final aircraft in widget.fleet.aircraft) {
+      final minutes = widget.fleet.flightMinutesForAircraft(aircraft);
+      if (minutes > 0 &&
+          (selectedStatus == null || aircraft.status == selectedStatus)) {
+        aircraftWithHours.add(
+          _AircraftFlightTime(aircraft: aircraft, minutes: minutes),
+        );
+      }
+    }
     final totalHours = aircraftWithHours.fold<double>(
       0,
-      (sum, aircraft) => sum + aircraft.totalFlightHours,
+      (sum, item) => sum + item.hours,
     );
 
     return SizedBox(
@@ -195,15 +359,65 @@ class _AircraftHoursChart extends StatelessWidget {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text(
-                'Gesamtflugzeit je Modell',
-                style: _sectionTitleStyle,
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Expanded(
+                    child: Text(
+                      'Gesamtflugzeit je Modell',
+                      style: _sectionTitleStyle,
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 2,
+                    ),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFEAF3FF),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: DropdownButtonHideUnderline(
+                      child: DropdownButton<_AircraftHoursStatusFilter>(
+                        value: _statusFilter,
+                        isDense: true,
+                        icon: const Icon(
+                          Icons.keyboard_arrow_down_rounded,
+                          color: Color(0xFF0A65C7),
+                        ),
+                        dropdownColor: Colors.white,
+                        style: const TextStyle(
+                          color: Color(0xFF0A65C7),
+                          fontSize: 12,
+                          fontWeight: FontWeight.w900,
+                        ),
+                        items: [
+                          for (final filter
+                              in _AircraftHoursStatusFilter.values)
+                            DropdownMenuItem<_AircraftHoursStatusFilter>(
+                              value: filter,
+                              child: Text(filter.label),
+                            ),
+                        ],
+                        onChanged: (value) {
+                          if (value == null) {
+                            return;
+                          }
+                          setState(() => _statusFilter = value);
+                        },
+                      ),
+                    ),
+                  ),
+                ],
               ),
               const SizedBox(height: 22),
               if (aircraftWithHours.isEmpty)
-                const Text(
-                  'Noch keine Flugzeit vorhanden.',
-                  style: TextStyle(
+                Text(
+                  _statusFilter == _AircraftHoursStatusFilter.all
+                      ? 'Noch keine Flugzeit vorhanden.'
+                      : 'Für diese Auswahl ist noch keine Flugzeit vorhanden.',
+                  style: const TextStyle(
                     color: Color(0xFF64748B),
                     fontWeight: FontWeight.w800,
                   ),
@@ -228,8 +442,7 @@ class _AircraftHoursChart extends StatelessWidget {
                                     i < aircraftWithHours.length;
                                     i++)
                                   PieChartSectionData(
-                                    value:
-                                        aircraftWithHours[i].totalFlightHours,
+                                    value: aircraftWithHours[i].hours,
                                     color: _aircraftChartColor(i),
                                     title: '',
                                     radius: 44,
@@ -280,8 +493,20 @@ class _AircraftHoursChart extends StatelessWidget {
   }
 }
 
+enum _AircraftHoursStatusFilter {
+  all('Alle Modelle', null),
+  ready('Flugbereit', AircraftStatus.ready),
+  maintenance('Reparatur', AircraftStatus.maintenance),
+  destroyed('Ausgemustert', AircraftStatus.destroyed);
+
+  final String label;
+  final AircraftStatus? status;
+
+  const _AircraftHoursStatusFilter(this.label, this.status);
+}
+
 class _AircraftHoursLegend extends StatelessWidget {
-  final List<AircraftModel> aircraft;
+  final List<_AircraftFlightTime> aircraft;
   final double totalHours;
 
   const _AircraftHoursLegend({
@@ -298,11 +523,9 @@ class _AircraftHoursLegend extends StatelessWidget {
         for (var i = 0; i < aircraft.length; i++)
           _AircraftHoursLegendItem(
             color: _aircraftChartColor(i),
-            name: aircraft[i].name,
-            hours: aircraft[i].totalFlightHours,
-            percent: totalHours == 0
-                ? 0
-                : aircraft[i].totalFlightHours / totalHours * 100,
+            name: aircraft[i].aircraft.name,
+            hours: aircraft[i].hours,
+            percent: totalHours == 0 ? 0 : aircraft[i].hours / totalHours * 100,
           ),
       ],
     );
@@ -359,6 +582,18 @@ class _AircraftHoursLegendItem extends StatelessWidget {
       ),
     );
   }
+}
+
+class _AircraftFlightTime {
+  final AircraftModel aircraft;
+  final int minutes;
+
+  const _AircraftFlightTime({
+    required this.aircraft,
+    required this.minutes,
+  });
+
+  double get hours => minutes / 60;
 }
 
 enum _FlightTimeRange {
@@ -730,7 +965,7 @@ class _TopModelsTable extends StatelessWidget {
           aircraft: model,
           flights:
               flights.where((flight) => flight.aircraftId == model.id).length,
-          minutes: model.totalFlightMinutes,
+          minutes: _aircraftFlightMinutes(model, flights),
         ),
     ]..sort((a, b) {
         final flightCompare = b.flights.compareTo(a.flights);
@@ -1730,38 +1965,116 @@ String _monthLabel(DateTime date) {
   return months[date.month - 1];
 }
 
-List<FlightLogEntry> _flightsInCurrentMonth(List<FlightLogEntry> flights) {
-  final now = DateTime.now();
-  final monthStart = DateTime(now.year, now.month);
-  final nextMonthStart = DateTime(now.year, now.month + 1);
+class _YearUsage {
+  final String label;
+  final int flights;
+  final int minutes;
+
+  const _YearUsage({
+    required this.label,
+    required this.flights,
+    required this.minutes,
+  });
+
+  _YearUsage add(int minutesToAdd) {
+    return _YearUsage(
+      label: label,
+      flights: flights + 1,
+      minutes: minutes + minutesToAdd,
+    );
+  }
+}
+
+List<FlightLogEntry> _flightsInYear(List<FlightLogEntry> flights, int year) {
+  final yearStart = DateTime(year);
+  final nextYearStart = DateTime(year + 1);
 
   return [
     for (final flight in flights)
-      if (!flight.date.isBefore(monthStart) &&
-          flight.date.isBefore(nextMonthStart))
+      if (!flight.date.isBefore(yearStart) &&
+          flight.date.isBefore(nextYearStart))
         flight,
   ];
 }
 
-List<FlightLogEntry> _flightsInPreviousMonth(List<FlightLogEntry> flights) {
-  final now = DateTime.now();
-  final monthStart = DateTime(now.year, now.month);
-  final previousMonthStart = DateTime(now.year, now.month - 1);
+List<int> _availableOverviewYears(List<FlightLogEntry> flights) {
+  final years = {
+    DateTime.now().year,
+    for (final flight in flights) flight.date.year,
+  }.toList()
+    ..sort((a, b) => b.compareTo(a));
 
-  return [
-    for (final flight in flights)
-      if (!flight.date.isBefore(previousMonthStart) &&
-          flight.date.isBefore(monthStart))
-        flight,
-  ];
+  return years;
 }
 
-double _totalHours(List<FlightLogEntry> flights) {
-  final minutes = flights.fold<int>(
+int _defaultOverviewYear(List<int> years) {
+  final currentYear = DateTime.now().year;
+  if (years.contains(currentYear)) {
+    return currentYear;
+  }
+  return years.first;
+}
+
+int _totalMinutes(List<FlightLogEntry> flights) {
+  return flights.fold<int>(
     0,
     (sum, flight) => sum + flight.durationMinutes,
   );
-  return minutes / 60;
+}
+
+int _aircraftFlightMinutes(
+  AircraftModel aircraft,
+  List<FlightLogEntry> flights,
+) {
+  final flightbookMinutes = flights.fold<int>(
+    0,
+    (sum, flight) =>
+        flight.aircraftId == aircraft.id ? sum + flight.durationMinutes : sum,
+  );
+  final previousMinutes =
+      aircraft.previousFlightMinutes < 0 ? 0 : aircraft.previousFlightMinutes;
+  return flightbookMinutes + previousMinutes;
+}
+
+int _batteryCyclesUsedInFlights(List<FlightLogEntry> flights) {
+  return flights.fold<int>(
+    0,
+    (sum, flight) => sum + (flight.batteryPacks < 0 ? 0 : flight.batteryPacks),
+  );
+}
+
+_YearUsage? _topUsageByLabel(
+  List<FlightLogEntry> flights,
+  String Function(FlightLogEntry flight) labelFor,
+) {
+  final usageByLabel = <String, _YearUsage>{};
+
+  for (final flight in flights) {
+    final rawLabel = labelFor(flight).trim();
+    final label = rawLabel.isEmpty ? 'Unbekannt' : rawLabel;
+    final current =
+        usageByLabel[label] ?? _YearUsage(label: label, flights: 0, minutes: 0);
+    usageByLabel[label] = current.add(flight.durationMinutes);
+  }
+
+  final usage = usageByLabel.values.toList()
+    ..sort((a, b) {
+      final flightCompare = b.flights.compareTo(a.flights);
+      if (flightCompare != 0) {
+        return flightCompare;
+      }
+      final minutesCompare = b.minutes.compareTo(a.minutes);
+      if (minutesCompare != 0) {
+        return minutesCompare;
+      }
+      return a.label.compareTo(b.label);
+    });
+
+  return usage.isEmpty ? null : usage.first;
+}
+
+String _flightCountText(int flights) {
+  return flights == 1 ? '1 Flug' : '$flights Flüge';
 }
 
 FlightLogEntry? _longestFlight(List<FlightLogEntry> flights) {
@@ -1772,19 +2085,6 @@ FlightLogEntry? _longestFlight(List<FlightLogEntry> flights) {
   return ([...flights]
         ..sort((a, b) => b.durationMinutes.compareTo(a.durationMinutes)))
       .first;
-}
-
-String _percentChangeText(double current, double previous) {
-  if (previous == 0 && current == 0) {
-    return '0% zum Vormonat';
-  }
-  if (previous == 0) {
-    return '+100% zum Vormonat';
-  }
-
-  final change = ((current - previous) / previous) * 100;
-  final prefix = change > 0 ? '+' : '';
-  return '$prefix${change.toStringAsFixed(0)}% zum Vormonat';
 }
 
 int _weekNumber(DateTime date) {

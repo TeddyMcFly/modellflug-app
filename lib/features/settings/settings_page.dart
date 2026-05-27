@@ -7,18 +7,23 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:image/image.dart' as img;
 import 'package:image_picker/image_picker.dart';
+import 'package:pdf/pdf.dart';
+import 'package:pdf/widgets.dart' as pw;
 
 import '../../core/widgets/app_scaffold.dart';
 import '../../shared/models/aircraft_model.dart';
 import '../../shared/providers/app_info_provider.dart';
 import '../../shared/providers/fleet_provider.dart';
 import '../../shared/services/auth_service.dart';
+import '../../shared/services/subscription_service.dart';
 import '../../shared/utils/download_helper.dart';
 import '../../shared/utils/image_thumbnail.dart';
 import '../../shared/utils/media_source.dart';
 
 const _tabAccentColor = Colors.white;
 final settingsProfileHasUnsavedChanges = ValueNotifier<bool>(false);
+
+enum _FlightbookExportFormat { pdf, csv }
 
 Future<bool> confirmLeaveSettingsProfile(BuildContext context) async {
   if (!settingsProfileHasUnsavedChanges.value) {
@@ -62,6 +67,7 @@ class SettingsPage extends ConsumerWidget {
           data: (user) => user,
           orElse: () => null,
         );
+    final accountAccess = ref.watch(accountAccessProvider);
     final userEmail = authUser?.email;
 
     return AppScaffold(
@@ -101,7 +107,10 @@ class SettingsPage extends ConsumerWidget {
                             userEmail: userEmail,
                             emailVerified: authUser?.emailVerified ?? false,
                             syncStatus: fleet.syncStatus,
+                            accountAccess: accountAccess,
                             onSyncNow: () => _syncNow(context, ref),
+                            onRequestActivation: () =>
+                                _requestPaidActivation(context, ref),
                             onPasswordChange: () =>
                                 _sendPasswordReset(context, ref, userEmail),
                             onVerifyEmail: () =>
@@ -120,6 +129,10 @@ class SettingsPage extends ConsumerWidget {
                         syncStatus: fleet.syncStatus,
                         userEmail: userEmail,
                         onCreateBackup: () => _showBackupDialog(
+                          context,
+                          ref,
+                        ),
+                        onExportFlightbook: () => _showFlightbookExportDialog(
                           context,
                           ref,
                         ),
@@ -148,6 +161,71 @@ class SettingsPage extends ConsumerWidget {
         ),
       ],
     );
+  }
+
+  Future<void> _requestPaidActivation(
+    BuildContext context,
+    WidgetRef ref,
+  ) async {
+    final messenger = ScaffoldMessenger.of(context);
+    final user = ref.read(firebaseAuthProvider).currentUser;
+    final subscriptionService = ref.read(subscriptionServiceProvider);
+    if (user == null || subscriptionService == null) {
+      messenger.showSnackBar(
+        const SnackBar(
+          content: Text('Die Freischaltung braucht ein angemeldetes Konto.'),
+        ),
+      );
+      return;
+    }
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Bezahlversion aktivieren'),
+        content: const Text(
+          'Die App merkt sich in deinem Konto, dass du die Bezahlversion aktivieren moechtest. Die eigentliche Zahlung oder manuelle Freischaltung kann danach angeschlossen werden.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Abbrechen'),
+          ),
+          FilledButton.icon(
+            onPressed: () => Navigator.of(context).pop(true),
+            icon: const Icon(Icons.workspace_premium_rounded),
+            label: const Text('Aktivierung anfragen'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true) {
+      return;
+    }
+
+    try {
+      await subscriptionService.requestActivation(user);
+      if (!context.mounted) {
+        return;
+      }
+      messenger.showSnackBar(
+        const SnackBar(
+          content: Text('Die Aktivierungsanfrage wurde gespeichert.'),
+        ),
+      );
+    } on Object {
+      if (!context.mounted) {
+        return;
+      }
+      messenger.showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Die Aktivierungsanfrage konnte nicht gespeichert werden.',
+          ),
+        ),
+      );
+    }
   }
 
   Future<void> _signOut(BuildContext context, WidgetRef ref) async {
@@ -393,6 +471,167 @@ class SettingsPage extends ConsumerWidget {
     fileNameController.dispose();
   }
 
+  Future<void> _showFlightbookExportDialog(
+    BuildContext context,
+    WidgetRef ref,
+  ) async {
+    final messenger = ScaffoldMessenger.of(context);
+    final fleet = ref.read(fleetProvider);
+    if (fleet.flights.isEmpty) {
+      messenger.showSnackBar(
+        const SnackBar(
+          content: Text('Im Flugbuch sind noch keine Eintraege vorhanden.'),
+        ),
+      );
+      return;
+    }
+
+    final selectedFormat = await showDialog<_FlightbookExportFormat>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Flugbuch exportieren'),
+        content: const SizedBox(
+          width: 420,
+          child: Text(
+            'Waehle das Format fuer den Export. CSV kann direkt mit Excel geoeffnet werden.',
+            style: TextStyle(
+              color: Color(0xFF475569),
+              fontWeight: FontWeight.w600,
+              height: 1.35,
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Abbrechen'),
+          ),
+          OutlinedButton.icon(
+            onPressed: () =>
+                Navigator.of(context).pop(_FlightbookExportFormat.csv),
+            icon: const Icon(Icons.table_chart_rounded),
+            label: const Text('Excel / CSV'),
+          ),
+          FilledButton.icon(
+            onPressed: () =>
+                Navigator.of(context).pop(_FlightbookExportFormat.pdf),
+            icon: const Icon(Icons.picture_as_pdf_rounded),
+            label: const Text('PDF'),
+          ),
+        ],
+      ),
+    );
+
+    if (selectedFormat == null || !context.mounted) {
+      return;
+    }
+
+    final now = DateTime.now();
+    final stamp = _exportFileStamp(now);
+    switch (selectedFormat) {
+      case _FlightbookExportFormat.csv:
+        final content = _buildFlightbookCsv(fleet);
+        await _saveFlightbookExport(
+          context,
+          fileName: 'modellflug_flugbuch_$stamp.csv',
+          bytes: Uint8List.fromList(utf8.encode('\ufeff$content')),
+          mimeType: 'text/csv;charset=utf-8',
+          allowedExtensions: const ['csv'],
+          description: 'Modellflug Flugbuch CSV',
+          textContent: '\ufeff$content',
+        );
+      case _FlightbookExportFormat.pdf:
+        final bytes = await _buildFlightbookPdf(fleet);
+        if (!context.mounted) {
+          return;
+        }
+        await _saveFlightbookExport(
+          context,
+          fileName: 'modellflug_flugbuch_$stamp.pdf',
+          bytes: bytes,
+          mimeType: 'application/pdf',
+          allowedExtensions: const ['pdf'],
+          description: 'Modellflug Flugbuch PDF',
+        );
+    }
+  }
+
+  Future<bool> _saveFlightbookExport(
+    BuildContext context, {
+    required String fileName,
+    required Uint8List bytes,
+    required String mimeType,
+    required List<String> allowedExtensions,
+    required String description,
+    String? textContent,
+  }) async {
+    final messenger = ScaffoldMessenger.of(context);
+
+    if (kIsWeb) {
+      final saved = textContent == null
+          ? await saveBytesFile(
+              fileName: fileName,
+              bytes: bytes,
+              mimeType: mimeType,
+              allowedExtensions: allowedExtensions,
+              description: description,
+            )
+          : await saveTextFile(
+              fileName: fileName,
+              content: textContent,
+              mimeType: mimeType,
+              allowedExtensions: allowedExtensions,
+              description: description,
+            );
+
+      if (!saved) {
+        if (textContent == null) {
+          downloadBytesFile(
+            fileName: fileName,
+            bytes: bytes,
+            mimeType: mimeType,
+          );
+        } else {
+          downloadTextFile(
+            fileName: fileName,
+            content: textContent,
+            mimeType: mimeType,
+          );
+        }
+      }
+
+      if (context.mounted) {
+        messenger.showSnackBar(
+          SnackBar(content: Text('Flugbuch wurde als $fileName exportiert.')),
+        );
+      }
+      return true;
+    }
+
+    final savedPath = await FilePicker.platform.saveFile(
+      dialogTitle: 'Flugbuch exportieren',
+      fileName: fileName,
+      type: FileType.custom,
+      allowedExtensions: allowedExtensions,
+      bytes: bytes,
+    );
+
+    if (!context.mounted) {
+      return savedPath != null;
+    }
+
+    messenger.showSnackBar(
+      SnackBar(
+        content: Text(
+          savedPath == null
+              ? 'Export abgebrochen.'
+              : 'Flugbuch wurde als $fileName exportiert.',
+        ),
+      ),
+    );
+    return savedPath != null;
+  }
+
   Future<void> _syncNow(BuildContext context, WidgetRef ref) async {
     final messenger = ScaffoldMessenger.of(context);
     final syncResult = await ref.read(fleetProvider.notifier).syncNow();
@@ -474,6 +713,188 @@ class SettingsPage extends ConsumerWidget {
   }
 }
 
+class _FlightbookExportRow {
+  final String date;
+  final String aircraftName;
+  final String location;
+  final int durationMinutes;
+  final int batteryPacks;
+  final String batteryLabel;
+  final String pilot;
+  final String notes;
+
+  const _FlightbookExportRow({
+    required this.date,
+    required this.aircraftName,
+    required this.location,
+    required this.durationMinutes,
+    required this.batteryPacks,
+    required this.batteryLabel,
+    required this.pilot,
+    required this.notes,
+  });
+}
+
+String _buildFlightbookCsv(FleetState fleet) {
+  final buffer = StringBuffer()
+    ..writeln(
+      [
+        'Datum',
+        'Modell',
+        'Ort',
+        'Dauer Minuten',
+        'Akkus',
+        'Akku',
+        'Pilot',
+        'Notizen',
+      ].map(_csvCell).join(';'),
+    );
+
+  for (final row in _flightbookExportRows(fleet)) {
+    buffer.writeln(
+      [
+        row.date,
+        row.aircraftName,
+        row.location,
+        '${row.durationMinutes}',
+        '${row.batteryPacks}',
+        row.batteryLabel,
+        row.pilot,
+        row.notes,
+      ].map(_csvCell).join(';'),
+    );
+  }
+
+  return buffer.toString();
+}
+
+Future<Uint8List> _buildFlightbookPdf(FleetState fleet) async {
+  final rows = _flightbookExportRows(fleet);
+  final totalMinutes = rows.fold<int>(
+    0,
+    (sum, row) => sum + row.durationMinutes,
+  );
+  final document = pw.Document();
+
+  document.addPage(
+    pw.MultiPage(
+      pageFormat: PdfPageFormat.a4.landscape,
+      margin: const pw.EdgeInsets.all(24),
+      build: (context) => [
+        pw.Text(
+          'Flugbuch',
+          style: pw.TextStyle(
+            fontSize: 22,
+            fontWeight: pw.FontWeight.bold,
+          ),
+        ),
+        pw.SizedBox(height: 4),
+        pw.Text('Exportiert am ${_formatExportDateTime(DateTime.now())}'),
+        pw.Text(
+          '${rows.length} Fluege, ${_formatExportDuration(totalMinutes)} Gesamtflugzeit',
+        ),
+        pw.SizedBox(height: 14),
+        if (rows.isEmpty)
+          pw.Text('Keine Flugbucheintraege vorhanden.')
+        else
+          pw.TableHelper.fromTextArray(
+            headers: const [
+              'Datum',
+              'Modell',
+              'Ort',
+              'Dauer',
+              'Akkus',
+              'Akku',
+              'Pilot',
+              'Notizen',
+            ],
+            data: [
+              for (final row in rows)
+                [
+                  row.date,
+                  row.aircraftName,
+                  row.location,
+                  '${row.durationMinutes} min',
+                  '${row.batteryPacks}',
+                  row.batteryLabel,
+                  row.pilot,
+                  row.notes,
+                ],
+            ],
+            border: pw.TableBorder.all(color: PdfColors.grey400, width: 0.4),
+            headerDecoration: const pw.BoxDecoration(
+              color: PdfColors.blue50,
+            ),
+            headerStyle: pw.TextStyle(
+              fontSize: 8.5,
+              fontWeight: pw.FontWeight.bold,
+            ),
+            cellStyle: const pw.TextStyle(fontSize: 7.5),
+            cellPadding: const pw.EdgeInsets.all(4),
+            oddRowDecoration: const pw.BoxDecoration(
+              color: PdfColors.grey100,
+            ),
+          ),
+      ],
+    ),
+  );
+
+  return document.save();
+}
+
+List<_FlightbookExportRow> _flightbookExportRows(FleetState fleet) {
+  final aircraftNamesById = {
+    for (final aircraft in fleet.aircraft) aircraft.id: aircraft.name,
+  };
+  final sortedFlights = [...fleet.flights]
+    ..sort((a, b) => b.date.compareTo(a.date));
+
+  return [
+    for (final flight in sortedFlights)
+      _FlightbookExportRow(
+        date: _formatExportDate(flight.date),
+        aircraftName:
+            aircraftNamesById[flight.aircraftId] ?? 'Unbekanntes Modell',
+        location: flight.location,
+        durationMinutes: flight.durationMinutes,
+        batteryPacks: flight.batteryPacks,
+        batteryLabel: flight.batteryLabel,
+        pilot: flight.pilot,
+        notes: flight.notes,
+      ),
+  ];
+}
+
+String _csvCell(String value) {
+  final escaped = value.replaceAll('"', '""').replaceAll('\r\n', '\n');
+  return '"$escaped"';
+}
+
+String _exportFileStamp(DateTime value) {
+  final local = value.toLocal();
+  return '${local.year}${_twoDigits(local.month)}${_twoDigits(local.day)}_'
+      '${_twoDigits(local.hour)}${_twoDigits(local.minute)}';
+}
+
+String _formatExportDate(DateTime value) {
+  final local = value.toLocal();
+  return '${_twoDigits(local.day)}.${_twoDigits(local.month)}.${local.year}';
+}
+
+String _formatExportDateTime(DateTime value) {
+  final local = value.toLocal();
+  return '${_formatExportDate(local)} ${_twoDigits(local.hour)}:${_twoDigits(local.minute)}';
+}
+
+String _formatExportDuration(int totalMinutes) {
+  final hours = totalMinutes ~/ 60;
+  final minutes = totalMinutes % 60;
+  if (hours == 0) {
+    return '$minutes min';
+  }
+  return '$hours h ${_twoDigits(minutes)} min';
+}
+
 class _SettingsTabs extends StatelessWidget {
   const _SettingsTabs();
 
@@ -533,7 +954,9 @@ class _AccountCard extends StatelessWidget {
   final String? userEmail;
   final bool emailVerified;
   final FleetSyncStatus syncStatus;
+  final AsyncValue<AccountAccess> accountAccess;
   final Future<void> Function() onSyncNow;
+  final Future<void> Function() onRequestActivation;
   final Future<void> Function() onPasswordChange;
   final Future<void> Function() onVerifyEmail;
   final Future<void> Function() onDeleteAccount;
@@ -543,7 +966,9 @@ class _AccountCard extends StatelessWidget {
     required this.userEmail,
     required this.emailVerified,
     required this.syncStatus,
+    required this.accountAccess,
     required this.onSyncNow,
+    required this.onRequestActivation,
     required this.onPasswordChange,
     required this.onVerifyEmail,
     required this.onDeleteAccount,
@@ -555,6 +980,7 @@ class _AccountCard extends StatelessWidget {
     final account = userEmail?.trim();
     final hasAccount = account != null && account.isNotEmpty;
     final cloudStatus = _accountCloudStatus(syncStatus, hasAccount);
+    final access = accountAccess.valueOrNull;
 
     return Card(
       margin: EdgeInsets.zero,
@@ -605,6 +1031,12 @@ class _AccountCard extends StatelessWidget {
                         detail: cloudStatus.detail,
                       ),
                     ),
+                    SizedBox(
+                      width: width,
+                      child: _SubscriptionInfoTile(
+                        accountAccess: accountAccess,
+                      ),
+                    ),
                   ],
                 );
               },
@@ -618,6 +1050,14 @@ class _AccountCard extends StatelessWidget {
                   onPressed: cloudStatus.canSync ? onSyncNow : null,
                   icon: const Icon(Icons.sync_rounded),
                   label: const Text('Jetzt synchronisieren'),
+                ),
+                FilledButton.icon(
+                  onPressed:
+                      hasAccount && (access?.canRequestActivation ?? false)
+                          ? onRequestActivation
+                          : null,
+                  icon: const Icon(Icons.workspace_premium_rounded),
+                  label: const Text('Bezahlversion aktivieren'),
                 ),
                 OutlinedButton.icon(
                   onPressed: hasAccount ? onPasswordChange : null,
@@ -650,6 +1090,48 @@ class _AccountCard extends StatelessWidget {
       ),
     );
   }
+}
+
+class _SubscriptionInfoTile extends StatelessWidget {
+  final AsyncValue<AccountAccess> accountAccess;
+
+  const _SubscriptionInfoTile({required this.accountAccess});
+
+  @override
+  Widget build(BuildContext context) {
+    return accountAccess.when(
+      data: (access) => _AccountInfoTile(
+        icon: _subscriptionIcon(access.status),
+        title: 'Testversion / Bezahlversion',
+        value: access.title,
+        detail: access.detail,
+      ),
+      loading: () => const _AccountInfoTile(
+        icon: Icons.hourglass_top_rounded,
+        title: 'Testversion / Bezahlversion',
+        value: 'wird geprueft',
+        detail: 'Die Konto-Freischaltung wird geladen.',
+      ),
+      error: (_, __) => const _AccountInfoTile(
+        icon: Icons.warning_amber_rounded,
+        title: 'Testversion / Bezahlversion',
+        value: 'nicht pruefbar',
+        detail: 'Bitte Internet und Anmeldung pruefen.',
+      ),
+    );
+  }
+}
+
+IconData _subscriptionIcon(AccountAccessStatus status) {
+  return switch (status) {
+    AccountAccessStatus.owner => Icons.verified_user_rounded,
+    AccountAccessStatus.active => Icons.workspace_premium_rounded,
+    AccountAccessStatus.activationRequested => Icons.mark_email_read_rounded,
+    AccountAccessStatus.expired => Icons.lock_clock_rounded,
+    AccountAccessStatus.trial => Icons.hourglass_top_rounded,
+    AccountAccessStatus.localDevelopment => Icons.developer_mode_rounded,
+    AccountAccessStatus.signedOut => Icons.account_circle_rounded,
+  };
 }
 
 class _AccountInfoTile extends StatelessWidget {
@@ -1896,6 +2378,7 @@ class _AppSettingsCard extends StatelessWidget {
   final FleetSyncStatus syncStatus;
   final String? userEmail;
   final Future<void> Function() onCreateBackup;
+  final Future<void> Function() onExportFlightbook;
   final Future<void> Function() onRestoreBackup;
   final ValueChanged<bool> onLocationSharingChanged;
   final ValueChanged<bool> onChatReachabilityChanged;
@@ -1907,6 +2390,7 @@ class _AppSettingsCard extends StatelessWidget {
     required this.syncStatus,
     required this.userEmail,
     required this.onCreateBackup,
+    required this.onExportFlightbook,
     required this.onRestoreBackup,
     required this.onLocationSharingChanged,
     required this.onChatReachabilityChanged,
@@ -2114,6 +2598,11 @@ class _AppSettingsCard extends StatelessWidget {
                       icon: Icons.backup_rounded,
                       label: 'Jetzt sichern',
                       onPressed: onCreateBackup,
+                    ),
+                    _ButtonSettingTile(
+                      icon: Icons.ios_share_rounded,
+                      label: 'Flugbuch exportieren',
+                      onPressed: onExportFlightbook,
                     ),
                   ],
                 ),

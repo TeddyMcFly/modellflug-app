@@ -99,6 +99,27 @@ class FleetNotifier extends StateNotifier<FleetState> {
     );
   }
 
+  void saveAircraftWithBatteryAssignment(
+    AircraftModel aircraft, {
+    required Iterable<String> selectedBatteryIds,
+  }) {
+    final aircraftExists = state.aircraft.any((item) => item.id == aircraft.id);
+    state = state.copyWith(
+      aircraft: aircraftExists
+          ? [
+              for (final item in state.aircraft)
+                if (item.id == aircraft.id) aircraft else item,
+            ]
+          : [aircraft, ...state.aircraft],
+      batteries: _batteriesWithAircraftAssignment(
+        state.batteries,
+        aircraftId: aircraft.id,
+        selectedBatteryIds: selectedBatteryIds,
+      ),
+    );
+    _persistLater();
+  }
+
   void deleteAircraft(String id) {
     final deletedFlightIds = [
       for (final item in state.flights)
@@ -342,6 +363,7 @@ class FleetNotifier extends StateNotifier<FleetState> {
   }
 
   void addFlight(FlightLogEntry entry, {String? usedBatteryId}) {
+    final countedBatteryId = usedBatteryId ?? entry.batteryId.trim();
     final updatedAircraft = [
       for (final item in state.aircraft)
         if (item.id == entry.aircraftId)
@@ -354,7 +376,7 @@ class FleetNotifier extends StateNotifier<FleetState> {
     ];
     final updatedBatteries = [
       for (final item in state.batteries)
-        if (item.id == usedBatteryId)
+        if (item.id == countedBatteryId)
           item.copyWith(cycles: item.cycles + 1, lastUsed: entry.date)
         else
           item,
@@ -371,7 +393,7 @@ class FleetNotifier extends StateNotifier<FleetState> {
     ];
     final changedBatteries = [
       for (final battery in updatedBatteries)
-        if (battery.id == usedBatteryId) battery,
+        if (battery.id == countedBatteryId) battery,
     ];
     _persistLater(
       (repository, user, snapshot) => repository.saveFlight(
@@ -438,6 +460,97 @@ class FleetNotifier extends StateNotifier<FleetState> {
     );
   }
 
+  void deleteFlight(String flightId) {
+    final deleted = state.flights.cast<FlightLogEntry?>().firstWhere(
+          (item) => item?.id == flightId,
+          orElse: () => null,
+        );
+    if (deleted == null) {
+      return;
+    }
+
+    final remainingFlights = [
+      for (final item in state.flights)
+        if (item.id != flightId) item,
+    ];
+    final updatedAircraft = [
+      for (final item in state.aircraft)
+        if (item.id == deleted.aircraftId)
+          item.copyWith(
+            totalFlights: item.totalFlights > 0 ? item.totalFlights - 1 : 0,
+            flightHours: item.flightHours > deleted.durationMinutes / 60
+                ? item.flightHours - deleted.durationMinutes / 60
+                : 0,
+          )
+        else
+          item,
+    ];
+
+    final deletedBatteryId = deleted.batteryId.trim();
+    final updatedBatteries = deletedBatteryId.isEmpty
+        ? state.batteries
+        : [
+            for (final item in state.batteries)
+              if (item.id == deletedBatteryId)
+                item.copyWith(
+                  cycles: item.cycles > 0 ? item.cycles - 1 : 0,
+                  lastUsed: _lastUsedAfterFlightDelete(
+                    item,
+                    deleted,
+                    remainingFlights,
+                  ),
+                )
+              else
+                item,
+          ];
+
+    state = state.copyWith(
+      aircraft: updatedAircraft,
+      batteries: updatedBatteries,
+      flights: remainingFlights,
+    );
+
+    final changedAircraft = [
+      for (final aircraft in updatedAircraft)
+        if (aircraft.id == deleted.aircraftId) aircraft,
+    ];
+    final changedBatteries = [
+      for (final battery in updatedBatteries)
+        if (battery.id == deletedBatteryId) battery,
+    ];
+    _persistLater(
+      (repository, user, snapshot) => repository.deleteFlight(
+        user: user,
+        state: snapshot,
+        flightId: flightId,
+        changedAircraft: changedAircraft,
+        changedBatteries: changedBatteries,
+      ),
+    );
+  }
+
+  DateTime _lastUsedAfterFlightDelete(
+    BatteryPack battery,
+    FlightLogEntry deleted,
+    List<FlightLogEntry> remainingFlights,
+  ) {
+    DateTime? latest;
+    for (final flight in remainingFlights) {
+      if (flight.batteryId.trim() != battery.id) {
+        continue;
+      }
+      if (latest == null || flight.date.isAfter(latest)) {
+        latest = flight.date;
+      }
+    }
+    if (latest != null) {
+      return latest;
+    }
+    return battery.lastUsed == deleted.date
+        ? battery.purchaseDate
+        : battery.lastUsed;
+  }
+
   void _persistAppSettingsLater() {
     _persistLater(
       (repository, user, snapshot) => repository.saveAppSettings(
@@ -488,10 +601,10 @@ class FleetNotifier extends StateNotifier<FleetState> {
 
     final accountLocalState =
         await _readLocalState(_storageKeyForUid(user.uid));
-    final legacyLocalState = await _readLocalState(_legacyStorageKey);
-    final localState = accountLocalState ??
-        legacyLocalState ??
-        _initialState.copyWith(isLoaded: true);
+    final localState =
+        accountLocalState == null || _isOldUntouchedDemoState(accountLocalState)
+            ? _starterStateForUser()
+            : _withStarterDemoModelPhotos(accountLocalState);
     if (!_disposed && _activeUid == user.uid) {
       state = localState.copyWith(
         isLoaded: true,
@@ -511,16 +624,28 @@ class FleetNotifier extends StateNotifier<FleetState> {
         return;
       }
 
-      if (cloudState == null) {
+      final preparedCloudState =
+          cloudState == null ? null : _withStarterDemoModelPhotos(cloudState);
+      if (preparedCloudState == null ||
+          _isOldUntouchedDemoState(preparedCloudState)) {
+        if (_isOldUntouchedDemoState(state)) {
+          state = _starterStateForUser().copyWith(
+            syncStatus: FleetSyncStatus.syncing,
+          );
+        }
         await _saveCloudState(state, null);
         await _saveLocalState(state);
       } else {
+        final migratedDemoPhotos = !identical(preparedCloudState, cloudState);
         _hasUnsyncedLocalChanges = false;
-        state = cloudState.copyWith(
+        state = preparedCloudState.copyWith(
           isLoaded: true,
           syncStatus: FleetSyncStatus.cloudActive,
         );
         await _saveLocalState(state);
+        if (migratedDemoPhotos) {
+          await _saveCloudState(state, null);
+        }
       }
 
       _cloudSubscription = repository.watchFleetMeta(user.uid).listen(
@@ -557,11 +682,16 @@ class FleetNotifier extends StateNotifier<FleetState> {
           _shouldIgnoreCloudRefresh) {
         return;
       }
-      state = cloudState.copyWith(
+      final preparedCloudState = _withStarterDemoModelPhotos(cloudState);
+      final migratedDemoPhotos = !identical(preparedCloudState, cloudState);
+      state = preparedCloudState.copyWith(
         isLoaded: true,
         syncStatus: FleetSyncStatus.cloudActive,
       );
       await _saveLocalState(state);
+      if (migratedDemoPhotos) {
+        await _saveCloudState(state, null);
+      }
       _publishMemberProfileLater();
     } catch (_) {
       state = state.copyWith(syncStatus: FleetSyncStatus.cloudPaused);
@@ -631,6 +761,9 @@ class FleetNotifier extends StateNotifier<FleetState> {
     try {
       final decoded = jsonDecode(rawState) as Map<String, dynamic>;
       var loadedState = FleetState.fromJson(decoded).copyWith(isLoaded: true);
+      final stateWithDemoPhotos = _withStarterDemoModelPhotos(loadedState);
+      final migratedDemoPhotos = !identical(stateWithDemoPhotos, loadedState);
+      loadedState = stateWithDemoPhotos;
       final migratedSurfaceSettings =
           !loadedState.appSettings.surfaceSettingsInitialized;
       if (migratedSurfaceSettings) {
@@ -641,14 +774,7 @@ class FleetNotifier extends StateNotifier<FleetState> {
           ),
         );
       }
-      final missingDemoFlights = [
-        for (final flight in _initialState.flights)
-          if (!loadedState.flights.any((item) => item.id == flight.id)) flight,
-      ];
-      if (missingDemoFlights.isNotEmpty || migratedSurfaceSettings) {
-        loadedState = loadedState.copyWith(
-          flights: [...missingDemoFlights, ...loadedState.flights],
-        );
+      if (migratedDemoPhotos || migratedSurfaceSettings) {
         await preferences.setString(
             storageKey, jsonEncode(loadedState.toJson()));
       }
@@ -993,6 +1119,304 @@ Future<String?> _thumbnailFromNetworkImage(String source) async {
     return null;
   }
 }
+
+List<BatteryPack> _batteriesWithAircraftAssignment(
+  List<BatteryPack> batteries, {
+  required String aircraftId,
+  required Iterable<String> selectedBatteryIds,
+}) {
+  final selectedIds = {
+    for (final id in selectedBatteryIds)
+      if (id.trim().isNotEmpty) id.trim(),
+  };
+  return [
+    for (final battery in batteries)
+      _batteryWithAircraftAssignment(
+        battery,
+        aircraftId: aircraftId,
+        selected: selectedIds.contains(battery.id),
+      ),
+  ];
+}
+
+BatteryPack _batteryWithAircraftAssignment(
+  BatteryPack battery, {
+  required String aircraftId,
+  required bool selected,
+}) {
+  final ids = [
+    for (final id in battery.aircraftIds)
+      if (id != aircraftId) id,
+  ];
+  if (selected) {
+    ids.add(aircraftId);
+  }
+  if (_sameStringList(ids, battery.aircraftIds)) {
+    return battery;
+  }
+  return battery.copyWith(
+    assignedAircraftId: ids.isEmpty ? '' : ids.first,
+    assignedAircraftIds: List.unmodifiable(ids),
+  );
+}
+
+bool _sameStringList(List<String> a, List<String> b) {
+  if (a.length != b.length) {
+    return false;
+  }
+  for (var index = 0; index < a.length; index++) {
+    if (a[index] != b[index]) {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool _isOldUntouchedDemoState(FleetState state) {
+  final aircraftIds = {for (final aircraft in state.aircraft) aircraft.id};
+  final batteryIds = {for (final battery in state.batteries) battery.id};
+  final flightIds = {for (final flight in state.flights) flight.id};
+
+  return state.pilotProfile.name == 'Teddy' &&
+      !state.appSettings.shareLocationWithFriends &&
+      state.aircraft.length == 3 &&
+      state.batteries.length == 4 &&
+      state.flights.length >= 20 &&
+      aircraftIds.containsAll({'asw28', 'extra300', 'quadx4'}) &&
+      batteryIds.containsAll({
+        'akku-6s-5000-a',
+        'akku-6s-5000-b',
+        'akku-4s-2200-q1',
+        'akku-2s-rx-asw',
+      }) &&
+      flightIds.contains('f1') &&
+      flightIds.contains('f23');
+}
+
+FleetState _starterStateForUser() {
+  return _starterDemoState.copyWith(isLoaded: true);
+}
+
+const _demoSeglerPhotoAsset = 'assets/aircraft/beispiel_segler.png';
+const _demoKunstflugPhotoAsset = 'assets/aircraft/beispiel_kunstflieger.png';
+
+FleetState _withStarterDemoModelPhotos(FleetState state) {
+  var changed = false;
+  final aircraft = [
+    for (final item in state.aircraft)
+      switch (item.id) {
+        'demo-segler' => _withStarterDemoModelPhoto(
+            item,
+            expectedName: 'Beispiel Segler',
+            photoAsset: _demoSeglerPhotoAsset,
+            onChanged: () => changed = true,
+          ),
+        'demo-kunstflug' => _withStarterDemoModelPhoto(
+            item,
+            expectedName: 'Beispiel Kunstflug',
+            photoAsset: _demoKunstflugPhotoAsset,
+            onChanged: () => changed = true,
+          ),
+        _ => item,
+      },
+  ];
+
+  return changed ? state.copyWith(aircraft: aircraft) : state;
+}
+
+AircraftModel _withStarterDemoModelPhoto(
+  AircraftModel aircraft, {
+  required String expectedName,
+  required String photoAsset,
+  required void Function() onChanged,
+}) {
+  if (aircraft.photos.isNotEmpty || aircraft.name.trim() != expectedName) {
+    return aircraft;
+  }
+  onChanged();
+  return aircraft.copyWith(
+    photoDataUri: null,
+    photoDataUris: [photoAsset],
+    photoStoragePaths: const [],
+    photoDownloadUrls: const [],
+  );
+}
+
+final _starterDemoState = FleetState(
+  appSettings: const AppSettings(
+    shareLocationWithFriends: true,
+    reachableByChat: true,
+    presenceStatus: LocationPresenceStatus.atField,
+    timeZone: 'Europe/Berlin',
+    distanceUnit: 'km',
+    windUnit: 'km/h',
+    temperatureUnit: 'Celsius',
+    language: 'Deutsch',
+  ),
+  pilotProfile: const PilotProfile(
+    name: '',
+    homeAirfield: '',
+    flightAreas: [],
+    club: '',
+    licenseNumber: '',
+    phone: '',
+    email: '',
+    transmitters: [],
+    notes: '',
+  ),
+  aircraft: [
+    AircraftModel(
+      id: 'demo-segler',
+      name: 'Beispiel Segler',
+      type: 'Segelflugzeug',
+      manufacturer: 'Beispiel',
+      registration: '',
+      wingspanMeters: 2.4,
+      lengthMeters: 1.18,
+      weightKg: 2.1,
+      transmitter: 'Mein Sender',
+      transmitterMemorySlot: 'SEG-01',
+      receiver: 'Beispiel RX',
+      propeller: 'Klapp 12x6',
+      materialFuselageWing: 'GFK / Schaum',
+      wingLoading: '42 g/dm2',
+      recommendedDriveBattery: '3S 2200 mAh LiPo',
+      servos: '4x Standard-Micro',
+      purchaseDate: DateTime(2026, 5, 1),
+      drive: 'Elektrosegler',
+      batteryCount: 3,
+      batteryCellOptions: const [3],
+      totalFlights: 1,
+      flightHours: 25 / 60,
+      status: AircraftStatus.ready,
+      lastService: DateTime(2026, 5, 1),
+      nextService: DateTime(2026, 7, 1),
+      photoDataUris: const [_demoSeglerPhotoAsset],
+      notes:
+          'Beispielmodell: Hier kannst du spaeter dein eigenes Segelflugzeug eintragen.',
+    ),
+    AircraftModel(
+      id: 'demo-kunstflug',
+      name: 'Beispiel Kunstflug',
+      type: 'Kunstflieger',
+      manufacturer: 'Beispiel',
+      registration: '',
+      wingspanMeters: 1.35,
+      lengthMeters: 1.25,
+      weightKg: 1.9,
+      transmitter: 'Mein Sender',
+      transmitterMemorySlot: 'KUNST-01',
+      receiver: 'Beispiel RX',
+      propeller: '13x6.5',
+      materialFuselageWing: 'Balsa / Folie',
+      wingLoading: '55 g/dm2',
+      recommendedDriveBattery: '4S 2600 mAh LiPo',
+      servos: '4x Digital-Micro',
+      purchaseDate: DateTime(2026, 5, 1),
+      drive: 'Brushless 4S',
+      batteryCount: 4,
+      batteryCellOptions: const [4],
+      totalFlights: 1,
+      flightHours: 9 / 60,
+      status: AircraftStatus.ready,
+      lastService: DateTime(2026, 5, 1),
+      nextService: DateTime(2026, 7, 1),
+      photoDataUris: const [_demoKunstflugPhotoAsset],
+      notes:
+          'Beispielmodell: Nutze diesen Eintrag zum Ausprobieren oder loesche ihn.',
+    ),
+  ],
+  batteries: [
+    BatteryPack(
+      id: 'demo-akku-1s-450',
+      inventoryNumber: 1,
+      label: 'Beispiel 1S 450',
+      chemistry: 'LiPo',
+      cells: 1,
+      capacityMah: 450,
+      chargePercent: 100,
+      cycles: 1,
+      status: BatteryStatus.charged,
+      purchaseDate: DateTime(2026, 5, 1),
+      lastUsed: DateTime(2026, 5, 18),
+      assignedAircraftId: '',
+      notes: 'Beispielakku fuer kleine Indoor-Modelle.',
+    ),
+    BatteryPack(
+      id: 'demo-akku-2s-850',
+      inventoryNumber: 2,
+      label: 'Beispiel 2S 850',
+      chemistry: 'LiPo',
+      cells: 2,
+      capacityMah: 850,
+      chargePercent: 75,
+      cycles: 1,
+      status: BatteryStatus.storage,
+      purchaseDate: DateTime(2026, 5, 1),
+      lastUsed: DateTime(2026, 5, 19),
+      assignedAircraftId: '',
+      notes: 'Beispielakku fuer Parkflyer oder Empfaenger-Test.',
+    ),
+    BatteryPack(
+      id: 'demo-akku-3s-2200',
+      inventoryNumber: 3,
+      label: 'Beispiel 3S 2200',
+      chemistry: 'LiPo',
+      cells: 3,
+      capacityMah: 2200,
+      chargePercent: 100,
+      cycles: 1,
+      status: BatteryStatus.charged,
+      purchaseDate: DateTime(2026, 5, 1),
+      lastUsed: DateTime(2026, 5, 20),
+      assignedAircraftId: 'demo-segler',
+      assignedAircraftIds: const ['demo-segler'],
+      notes: 'Beispielakku fuer den Segler.',
+    ),
+    BatteryPack(
+      id: 'demo-akku-4s-2600',
+      inventoryNumber: 4,
+      label: 'Beispiel 4S 2600',
+      chemistry: 'LiPo',
+      cells: 4,
+      capacityMah: 2600,
+      chargePercent: 62,
+      cycles: 1,
+      status: BatteryStatus.storage,
+      purchaseDate: DateTime(2026, 5, 1),
+      lastUsed: DateTime(2026, 5, 21),
+      assignedAircraftId: 'demo-kunstflug',
+      assignedAircraftIds: const ['demo-kunstflug'],
+      notes: 'Beispielakku fuer das Kunstflugmodell.',
+    ),
+  ],
+  flights: [
+    FlightLogEntry(
+      id: 'demo-flug-segler',
+      aircraftId: 'demo-segler',
+      date: DateTime(2026, 5, 20, 17, 15),
+      location: 'Mein Flugplatz',
+      durationMinutes: 25,
+      batteryPacks: 1,
+      batteryId: 'demo-akku-3s-2200',
+      batteryLabel: 'Beispiel 3S 2200',
+      pilot: 'Neuer Pilot',
+      notes: 'Beispielflug: ruhige Platzrunde und erste Landung.',
+    ),
+    FlightLogEntry(
+      id: 'demo-flug-kunstflug',
+      aircraftId: 'demo-kunstflug',
+      date: DateTime(2026, 5, 21, 18, 30),
+      location: 'Mein Flugplatz',
+      durationMinutes: 9,
+      batteryPacks: 1,
+      batteryId: 'demo-akku-4s-2600',
+      batteryLabel: 'Beispiel 4S 2600',
+      pilot: 'Neuer Pilot',
+      notes: 'Beispielflug: Looping, Rollen und kurze Motorkontrolle.',
+    ),
+  ],
+);
 
 final _initialState = FleetState(
   appSettings: const AppSettings(

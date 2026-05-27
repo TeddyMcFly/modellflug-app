@@ -211,6 +211,9 @@ class _ModelPhotoOverviewState extends State<_ModelPhotoOverview> {
                       width: 122,
                       child: _AircraftPhotoTile(
                         aircraft: aircraft[index],
+                        flightMinutes: widget.fleet.flightMinutesForAircraft(
+                          aircraft[index],
+                        ),
                         onTap: () =>
                             context.go('/models?model=${aircraft[index].id}'),
                       ),
@@ -227,10 +230,12 @@ class _ModelPhotoOverviewState extends State<_ModelPhotoOverview> {
 
 class _AircraftPhotoTile extends StatelessWidget {
   final AircraftModel aircraft;
+  final int flightMinutes;
   final VoidCallback onTap;
 
   const _AircraftPhotoTile({
     required this.aircraft,
+    required this.flightMinutes,
     required this.onTap,
   });
 
@@ -290,7 +295,7 @@ class _AircraftPhotoTile extends StatelessWidget {
               ),
               const SizedBox(height: 2),
               Text(
-                '${aircraft.status.label} - ${formatFlightMinutes(aircraft.totalFlightMinutes)}',
+                '${aircraft.status.label} - ${formatFlightMinutes(flightMinutes)}',
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: TextStyle(

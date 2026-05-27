@@ -34,7 +34,8 @@ class MemberChatService {
         for (final doc in snapshot.docs)
           if (doc.id != currentUid) MemberProfile.fromSnapshot(doc),
       ];
-      members.removeWhere((member) => member.isLegacyProfile);
+      members.removeWhere(
+          (member) => member.isLegacyProfile || !_isVisibleFriend(member));
       members.sort((a, b) {
         if (a.visibleInMemberList != b.visibleInMemberList) {
           return a.visibleInMemberList ? -1 : 1;
@@ -640,6 +641,10 @@ class MemberProfile {
   bool get isLegacyProfile {
     return !active && memberSchemaVersion == 0;
   }
+}
+
+bool _isVisibleFriend(MemberProfile member) {
+  return member.displayName.trim().toLowerCase() == 'ted droste';
 }
 
 class ChatMessage {
