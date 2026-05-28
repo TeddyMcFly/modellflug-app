@@ -16,9 +16,11 @@ import '../../shared/providers/app_info_provider.dart';
 import '../../shared/providers/fleet_provider.dart';
 import '../../shared/services/auth_service.dart';
 import '../../shared/services/subscription_service.dart';
+import '../../shared/services/webcam_url_diagnostics.dart';
 import '../../shared/utils/download_helper.dart';
 import '../../shared/utils/image_thumbnail.dart';
 import '../../shared/utils/media_source.dart';
+import '../webcam/webcam_page.dart';
 
 const _tabAccentColor = Colors.white;
 final settingsProfileHasUnsavedChanges = ValueNotifier<bool>(false);
@@ -2991,35 +2993,15 @@ class _WebcamSourcesEditorState extends State<_WebcamSourcesEditor> {
 
   Future<void> _editUrl(int index) async {
     final controller = _urlControllers[index];
-    final editor = TextEditingController(text: controller.text);
     final result = await showDialog<String>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: Text('Internet-Adresse ${index + 1}'),
-        content: SizedBox(
-          width: 460,
-          child: TextField(
-            controller: editor,
-            decoration: const InputDecoration(
-              labelText: 'Webcam-URL',
-              hintText: 'https://...',
-              prefixIcon: Icon(Icons.link_rounded),
-            ),
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('Abbrechen'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(context).pop(editor.text.trim()),
-            child: const Text('Speichern'),
-          ),
-        ],
+      builder: (context) => _WebcamUrlDialog(
+        webcamName: _controllers[index].text.trim().isEmpty
+            ? 'Webcam ${index + 1}'
+            : _controllers[index].text.trim(),
+        initialUrl: controller.text,
       ),
     );
-    editor.dispose();
     if (result == null) {
       return;
     }
@@ -3079,12 +3061,12 @@ class _WebcamSourcesEditorState extends State<_WebcamSourcesEditor> {
                 ),
                 const SizedBox(width: 6),
                 IconButton(
-                  tooltip: 'Internet-Adresse eingeben',
+                  tooltip: 'Internet-Adresse pruefen',
                   onPressed: () => _editUrl(index),
                   icon: Icon(
                     _urlControllers[index].text.trim().isEmpty
-                        ? Icons.link_rounded
-                        : Icons.link_rounded,
+                        ? Icons.manage_search_rounded
+                        : Icons.fact_check_rounded,
                     color: _urlControllers[index].text.trim().isEmpty
                         ? const Color(0xFF64748B)
                         : const Color(0xFF0A84FF),
@@ -3112,6 +3094,246 @@ class _WebcamSourcesEditorState extends State<_WebcamSourcesEditor> {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _WebcamUrlDialog extends StatefulWidget {
+  final String webcamName;
+  final String initialUrl;
+
+  const _WebcamUrlDialog({
+    required this.webcamName,
+    required this.initialUrl,
+  });
+
+  @override
+  State<_WebcamUrlDialog> createState() => _WebcamUrlDialogState();
+}
+
+class _WebcamUrlDialogState extends State<_WebcamUrlDialog> {
+  late final TextEditingController _controller;
+  WebcamUrlDiagnostic? _diagnostic;
+  int _previewSerial = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = TextEditingController(text: widget.initialUrl);
+    if (widget.initialUrl.trim().isNotEmpty) {
+      _diagnostic = diagnoseWebcamUrl(widget.initialUrl);
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _runCheck() {
+    setState(() {
+      _diagnostic = diagnoseWebcamUrl(_controller.text);
+      _previewSerial++;
+    });
+  }
+
+  void _useSuggestedUrl() {
+    final suggestedUrl = _diagnostic?.suggestedUrl;
+    if (suggestedUrl == null) {
+      return;
+    }
+    setState(() {
+      _controller.text = suggestedUrl;
+      _diagnostic = diagnoseWebcamUrl(suggestedUrl);
+      _previewSerial++;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final diagnostic = _diagnostic;
+    return AlertDialog(
+      title: Text('${widget.webcamName} pruefen'),
+      content: SizedBox(
+        width: 680,
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              TextField(
+                controller: _controller,
+                decoration: const InputDecoration(
+                  labelText: 'Webcam-URL',
+                  hintText: 'https://...',
+                  prefixIcon: Icon(Icons.link_rounded),
+                ),
+                onChanged: (_) => setState(() => _diagnostic = null),
+                onSubmitted: (_) => _runCheck(),
+              ),
+              const SizedBox(height: 12),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  FilledButton.icon(
+                    onPressed: _runCheck,
+                    icon: const Icon(Icons.manage_search_rounded),
+                    label: const Text('Pruefen'),
+                  ),
+                  if (diagnostic?.suggestedUrl != null)
+                    OutlinedButton.icon(
+                      onPressed: _useSuggestedUrl,
+                      icon: const Icon(Icons.auto_fix_high_rounded),
+                      label: const Text('bessere Adresse einsetzen'),
+                    ),
+                ],
+              ),
+              if (diagnostic != null) ...[
+                const SizedBox(height: 12),
+                _WebcamDiagnosticPanel(diagnostic: diagnostic),
+                if (diagnostic.hasPreview) ...[
+                  const SizedBox(height: 12),
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(8),
+                    child: AspectRatio(
+                      aspectRatio: 16 / 9,
+                      child: WebcamLivePreview(
+                        title: widget.webcamName,
+                        sourceUrl: _controller.text,
+                        refreshSerial: _previewSerial,
+                      ),
+                    ),
+                  ),
+                ],
+              ],
+            ],
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Abbrechen'),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.of(context).pop(_controller.text.trim()),
+          child: const Text('Speichern'),
+        ),
+      ],
+    );
+  }
+}
+
+class _WebcamDiagnosticPanel extends StatelessWidget {
+  final WebcamUrlDiagnostic diagnostic;
+
+  const _WebcamDiagnosticPanel({required this.diagnostic});
+
+  @override
+  Widget build(BuildContext context) {
+    final color = switch (diagnostic.level) {
+      WebcamDiagnosticLevel.success => const Color(0xFF0F8A4B),
+      WebcamDiagnosticLevel.warning => const Color(0xFFD97706),
+      WebcamDiagnosticLevel.error => const Color(0xFFDC2626),
+    };
+    final icon = switch (diagnostic.level) {
+      WebcamDiagnosticLevel.success => Icons.check_circle_rounded,
+      WebcamDiagnosticLevel.warning => Icons.info_rounded,
+      WebcamDiagnosticLevel.error => Icons.error_rounded,
+    };
+
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: color.withValues(alpha: 0.22)),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Icon(icon, color: color, size: 20),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        diagnostic.title,
+                        style: TextStyle(
+                          color: color,
+                          fontSize: 13,
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
+                      const SizedBox(height: 3),
+                      Text(
+                        diagnostic.message,
+                        style: const TextStyle(
+                          color: Color(0xFF334155),
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          height: 1.35,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            if (diagnostic.details.isNotEmpty) ...[
+              const SizedBox(height: 8),
+              for (final detail in diagnostic.details)
+                Padding(
+                  padding: const EdgeInsets.only(top: 3),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        '- ',
+                        style: TextStyle(
+                          color: color,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
+                      Expanded(
+                        child: Text(
+                          detail,
+                          style: const TextStyle(
+                            color: Color(0xFF475569),
+                            fontSize: 12,
+                            fontWeight: FontWeight.w500,
+                            height: 1.3,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+            ],
+            if (diagnostic.suggestedUrl != null) ...[
+              const SizedBox(height: 8),
+              Text(
+                'Vorschlag: ${diagnostic.suggestedUrl}',
+                maxLines: 3,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  color: Color(0xFF0F172A),
+                  fontSize: 11,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ],
+          ],
+        ),
       ),
     );
   }

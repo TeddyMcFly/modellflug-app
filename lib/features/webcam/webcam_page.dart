@@ -9,14 +9,8 @@ import '../../core/widgets/app_scaffold.dart';
 import '../../shared/models/aircraft_model.dart';
 import '../../shared/providers/fleet_provider.dart';
 import '../../shared/services/open_meteo_service.dart';
+import '../../shared/services/webcam_url_diagnostics.dart';
 import 'webcam_embed_view.dart';
-
-const _lmfcWebcamImageUrl =
-    'https://www.lmfc.de/fileadmin/Modellflug/cam/bilder/webcam.jpg';
-const _brouwersdamYoutubeVideoId = 'KjK02QIm4ZI';
-const _brouwersdamWebcamEmbedUrl =
-    'https://g0.ipcamlive.com/player/player.php?alias=6878d928bbb14&autoplay=1&mute=1&disableautofullscreen=1&disablefullscreen=1&disablezoombutton=1&disableframecapture=1&disabletimelapseplayer=1&disablestorageplayer=1&disabledownloadbutton=1&disableplaybackspeedbutton=1&disablenavigation=1&disableuserpause=1&websocketenabled=1';
-const _naturalHighBrouwersdamEmbedUrl = _brouwersdamWebcamEmbedUrl;
 
 class WebcamPage extends ConsumerStatefulWidget {
   const WebcamPage({super.key});
@@ -41,11 +35,11 @@ class WebcamLivePreview extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final settingsUrl = _normalizedWebcamUrl(sourceUrl);
+    final settingsUrl = normalizedWebcamUrl(sourceUrl);
     final displayUrl =
-        settingsUrl == null ? null : _displayWebcamUrl(settingsUrl);
+        settingsUrl == null ? null : displayWebcamUrl(settingsUrl);
     final hasUrl = displayUrl != null;
-    final isDirectImage = displayUrl != null && _isDirectImageFeed(displayUrl);
+    final isDirectImage = displayUrl != null && isDirectImageFeed(displayUrl);
     final statusText =
         hasUrl ? 'Quelle aus Einstellungen' : 'Keine Webadresse hinterlegt';
 
@@ -57,12 +51,12 @@ class WebcamLivePreview extends StatelessWidget {
             icon: Icons.link_off_rounded,
             message: 'Keine Webadresse hinterlegt',
           )
-        else if (_isDirectVideoFeed(displayUrl))
+        else if (isDirectVideoFeed(displayUrl))
           _VideoCameraFeed(
             key: ValueKey(displayUrl),
             url: displayUrl,
           )
-        else if (_isDirectImageFeed(displayUrl))
+        else if (isDirectImageFeed(displayUrl))
           _NetworkCameraImage(
             key: ValueKey(displayUrl),
             url: displayUrl,
@@ -484,7 +478,7 @@ String? _knownWeatherLocationForWebcam(String webcam, String? sourceUrl) {
       normalized.contains('natural high') ||
       normalized.contains('ouddorp') ||
       normalized.contains('6878d928bbb14') ||
-      normalized.contains(_brouwersdamYoutubeVideoId.toLowerCase()) ||
+      normalized.contains(brouwersdamYoutubeVideoId.toLowerCase()) ||
       normalized.contains('bfbmydcnawfcqtjju11hwj8vjqljxehjoknafoyf')) {
     return 'Ouddorp';
   }
@@ -515,180 +509,6 @@ String? _webcamUrlFor(AppSettings settings, String webcam) {
 
   final url = settings.webcamUrls[index].trim();
   return url.isEmpty ? null : url;
-}
-
-String? _normalizedWebcamUrl(String? value) {
-  final url = value?.trim() ?? '';
-  if (url.isEmpty) {
-    return null;
-  }
-
-  final lower = url.toLowerCase();
-  if (lower.startsWith('http://') || lower.startsWith('https://')) {
-    return url;
-  }
-
-  return 'https://$url';
-}
-
-String _displayWebcamUrl(String url) {
-  final knownEmbedUrl = _knownWebcamEmbedUrl(url);
-  if (knownEmbedUrl != null) {
-    return knownEmbedUrl;
-  }
-
-  final youtubeEmbedUrl = _youtubeEmbedUrl(url);
-  if (youtubeEmbedUrl != null) {
-    return youtubeEmbedUrl;
-  }
-
-  final uri = Uri.tryParse(url);
-  if (uri == null || !uri.hasScheme) {
-    return url;
-  }
-
-  final host = uri.host.toLowerCase();
-  final path = uri.path.toLowerCase().replaceFirst(RegExp(r'/$'), '');
-  final isLmfcWebcamPage = (host == 'lmfc.de' || host == 'www.lmfc.de') &&
-      (path.isEmpty || path == '/webcam');
-
-  if (isLmfcWebcamPage) {
-    return _lmfcWebcamImageUrl;
-  }
-
-  return url;
-}
-
-String? _knownWebcamEmbedUrl(String url) {
-  final uri = Uri.tryParse(url);
-  if (uri == null || !uri.hasScheme) {
-    return null;
-  }
-
-  final host = uri.host.toLowerCase();
-  final path = uri.path.toLowerCase();
-  final isBrouwersdam = host == 'brouwersdam.nl' ||
-      host == 'www.brouwersdam.nl' ||
-      host == 'brouwersdam.com' ||
-      host == 'www.brouwersdam.com';
-  if (isBrouwersdam &&
-      (path.contains('/brouwersdam/webcam') ||
-          path.contains('/live-view/') ||
-          path.endsWith('/webcam'))) {
-    return _brouwersdamWebcamEmbedUrl;
-  }
-
-  final isNaturalHigh = host == 'natural-high.nl' ||
-      host == 'www.natural-high.nl' ||
-      host == 'surfshop.natural-high.nl';
-  if (isNaturalHigh && path.contains('webcam-brouwersdam')) {
-    return _naturalHighBrouwersdamEmbedUrl;
-  }
-
-  final isNaturalHighViewer = host == 'live.netcamviewer.nl' &&
-      path.contains('natural-high-brouwersdam-webcam');
-  if (isNaturalHighViewer) {
-    return _naturalHighBrouwersdamEmbedUrl;
-  }
-
-  final isCamStreamerBrouwersdam = host == 'camstreamer.com' &&
-      (path.contains('597679676-live-camera-brouwersdam') ||
-          path.contains('live-camera-brouwersdam') ||
-          (path.startsWith('/embed/') &&
-              url.toLowerCase().contains(
-                    'bfbmydcnawfcqtjju11hwj8vjqljxehjoknafoyf',
-                  )));
-  if (isCamStreamerBrouwersdam) {
-    return _brouwersdamWebcamEmbedUrl;
-  }
-
-  return null;
-}
-
-String? _youtubeEmbedUrl(String url) {
-  final uri = Uri.tryParse(url);
-  if (uri == null || !uri.hasScheme) {
-    return null;
-  }
-
-  final host = uri.host.toLowerCase();
-  String? videoId;
-  if (host == 'youtu.be' && uri.pathSegments.isNotEmpty) {
-    videoId = uri.pathSegments.first;
-  } else if (host == 'youtube.com' ||
-      host == 'www.youtube.com' ||
-      host == 'm.youtube.com') {
-    if (uri.pathSegments.isNotEmpty) {
-      final firstSegment = uri.pathSegments.first;
-      if (firstSegment == 'watch') {
-        videoId = uri.queryParameters['v'];
-      } else if ((firstSegment == 'embed' || firstSegment == 'shorts') &&
-          uri.pathSegments.length > 1) {
-        videoId = uri.pathSegments[1];
-      }
-    }
-  }
-
-  if (videoId == null || videoId.trim().isEmpty) {
-    return null;
-  }
-
-  if (videoId.trim() == _brouwersdamYoutubeVideoId) {
-    return _brouwersdamWebcamEmbedUrl;
-  }
-
-  final query = <String, String>{
-    'autoplay': '1',
-    'mute': '1',
-    'playsinline': '1',
-    'rel': '0',
-    if (uri.queryParameters['start'] != null)
-      'start': uri.queryParameters['start']!,
-  };
-  return Uri.https('www.youtube.com', '/embed/${videoId.trim()}', query)
-      .toString();
-}
-
-bool _isDirectImageFeed(String url) {
-  final lower = url.toLowerCase();
-  return lower.contains('.jpg') ||
-      lower.contains('.jpeg') ||
-      lower.contains('.png') ||
-      lower.contains('.webp') ||
-      lower.contains('.gif') ||
-      lower.contains('.mjpg') ||
-      lower.contains('.mjpeg') ||
-      lower.contains('snapshot') ||
-      lower.contains('image');
-}
-
-bool _isDirectVideoFeed(String url) {
-  final lower = url.toLowerCase();
-  return lower.contains('.m3u8') ||
-      lower.contains('.mp4') ||
-      lower.contains('.webm') ||
-      lower.contains('.mov');
-}
-
-bool _isLiveVideoStream(String url) {
-  final lower = url.toLowerCase();
-  return lower.contains('.m3u8') ||
-      lower.contains('playlist') ||
-      lower.contains('live') ||
-      lower.contains('stream');
-}
-
-Duration _videoRetryDelay(int attempt) {
-  if (attempt <= 0) {
-    return const Duration(seconds: 4);
-  }
-  if (attempt == 1) {
-    return const Duration(seconds: 10);
-  }
-  if (attempt == 2) {
-    return const Duration(seconds: 20);
-  }
-  return const Duration(seconds: 30);
 }
 
 int _imageRefreshTokenSerial = 0;
@@ -723,11 +543,11 @@ class _CameraPreview extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final settingsUrl = _normalizedWebcamUrl(sourceUrl);
+    final settingsUrl = normalizedWebcamUrl(sourceUrl);
     final displayUrl =
-        settingsUrl == null ? null : _displayWebcamUrl(settingsUrl);
+        settingsUrl == null ? null : displayWebcamUrl(settingsUrl);
     final hasUrl = displayUrl != null;
-    final isDirectImage = displayUrl != null && _isDirectImageFeed(displayUrl);
+    final isDirectImage = displayUrl != null && isDirectImageFeed(displayUrl);
     final previewAspectRatio = isDirectImage ? 4 / 3 : 8 / 5;
     final statusText =
         hasUrl ? 'Quelle aus Einstellungen' : 'Keine Webadresse hinterlegt';
@@ -744,12 +564,12 @@ class _CameraPreview extends StatelessWidget {
                 icon: Icons.link_off_rounded,
                 message: 'Keine Webadresse hinterlegt',
               )
-            else if (_isDirectVideoFeed(displayUrl))
+            else if (isDirectVideoFeed(displayUrl))
               _VideoCameraFeed(
                 key: ValueKey(displayUrl),
                 url: displayUrl,
               )
-            else if (_isDirectImageFeed(displayUrl))
+            else if (isDirectImageFeed(displayUrl))
               _NetworkCameraImage(
                 key: ValueKey(displayUrl),
                 url: displayUrl,
@@ -1063,7 +883,7 @@ class _VideoCameraFeedState extends State<_VideoCameraFeed> {
     try {
       nextController = VideoPlayerController.networkUrl(uri);
       await nextController.initialize().timeout(const Duration(seconds: 20));
-      await nextController.setLooping(!_isLiveVideoStream(widget.url));
+      await nextController.setLooping(!isLiveVideoStream(widget.url));
       await nextController.setVolume(0);
       await nextController.play();
       if (!mounted || loadGeneration != _loadGeneration) {
@@ -1119,7 +939,7 @@ class _VideoCameraFeedState extends State<_VideoCameraFeed> {
     if (_retryTimer?.isActive ?? false) {
       return;
     }
-    final delay = _videoRetryDelay(_retryAttempt);
+    final delay = videoRetryDelay(_retryAttempt);
     _retryAttempt++;
     _retryTimer = Timer(delay, () {
       if (!mounted) {
