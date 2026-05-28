@@ -51,6 +51,7 @@ class FleetNotifier extends StateNotifier<FleetState> {
   StreamSubscription<User?>? _authSubscription;
   StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>?
       _cloudSubscription;
+  Timer? _memberPresenceTimer;
   Future<void> _saveQueue = Future.value();
   String? _activeUid;
   int _pendingCloudWrites = 0;
@@ -575,6 +576,7 @@ class FleetNotifier extends StateNotifier<FleetState> {
     }
 
     if (user == null) {
+      _stopMemberPresenceHeartbeat();
       _activeUid = null;
       _hasUnsyncedLocalChanges = false;
       await _cloudSubscription?.cancel();
@@ -615,6 +617,8 @@ class FleetNotifier extends StateNotifier<FleetState> {
     final repository = _ref.read(fleetCloudRepositoryProvider);
     if (repository == null) {
       state = state.copyWith(syncStatus: FleetSyncStatus.localOnly);
+      _publishMemberProfileLater();
+      _startMemberPresenceHeartbeat();
       return;
     }
 
@@ -658,10 +662,12 @@ class FleetNotifier extends StateNotifier<FleetState> {
       );
       unawaited(_createAutomaticBackupIfNeeded());
       _publishMemberProfileLater();
+      _startMemberPresenceHeartbeat();
     } catch (_) {
       state = state.copyWith(syncStatus: FleetSyncStatus.cloudPaused);
       await _saveLocalState(state);
       _publishMemberProfileLater();
+      _startMemberPresenceHeartbeat();
     }
   }
 
@@ -749,6 +755,40 @@ class FleetNotifier extends StateNotifier<FleetState> {
     } catch (_) {
       _lastPublishedMemberSignature = null;
     }
+  }
+
+  void _startMemberPresenceHeartbeat() {
+    _memberPresenceTimer?.cancel();
+    _touchMemberPresenceLater();
+    _memberPresenceTimer = Timer.periodic(
+      const Duration(seconds: 60),
+      (_) => _touchMemberPresenceLater(),
+    );
+  }
+
+  void _stopMemberPresenceHeartbeat() {
+    _memberPresenceTimer?.cancel();
+    _memberPresenceTimer = null;
+  }
+
+  void _touchMemberPresenceLater() {
+    unawaited(_touchMemberPresence());
+  }
+
+  Future<void> _touchMemberPresence() async {
+    if (Firebase.apps.isEmpty || _activeUid == null) {
+      return;
+    }
+
+    final user = FirebaseAuth.instance.currentUser;
+    final service = _ref.read(memberChatServiceProvider);
+    if (user == null || user.uid != _activeUid || service == null) {
+      return;
+    }
+
+    try {
+      await service.touchCurrentMemberPresence(user: user);
+    } catch (_) {}
   }
 
   Future<FleetState?> _readLocalState(String storageKey) async {
@@ -1044,6 +1084,7 @@ class FleetNotifier extends StateNotifier<FleetState> {
   @override
   void dispose() {
     _disposed = true;
+    _stopMemberPresenceHeartbeat();
     unawaited(_authSubscription?.cancel());
     unawaited(_cloudSubscription?.cancel());
     super.dispose();

@@ -113,6 +113,19 @@ class MemberChatService {
         );
   }
 
+  Future<void> touchCurrentMemberPresence({
+    required User user,
+  }) {
+    return _members.doc(user.uid).set(
+      {
+        'uid': user.uid,
+        'lastSeen': FieldValue.serverTimestamp(),
+        'lastSeenClient': DateTime.now().toUtc().toIso8601String(),
+      },
+      SetOptions(merge: true),
+    );
+  }
+
   String chatIdFor(String firstUid, String secondUid) {
     final ids = [firstUid, secondUid]..sort();
     return ids.join('_');
@@ -644,7 +657,7 @@ class MemberProfile {
 }
 
 bool _isVisibleFriend(MemberProfile member) {
-  return member.displayName.trim().toLowerCase() == 'ted droste';
+  return member.visibleInMemberList;
 }
 
 class ChatMessage {

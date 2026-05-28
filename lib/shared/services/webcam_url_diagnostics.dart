@@ -307,6 +307,13 @@ String? knownWebcamEmbedUrl(String url) {
     return brouwersdamWebcamEmbedUrl;
   }
 
+  final isBrouwersdamStreamlock = host.endsWith('streamlock.net') &&
+      path.contains('/771/771.stream/') &&
+      path.contains('playlist.m3u8');
+  if (isBrouwersdamStreamlock) {
+    return brouwersdamWebcamEmbedUrl;
+  }
+
   return null;
 }
 
@@ -383,15 +390,37 @@ bool isLiveVideoStream(String url) {
       lower.contains('stream');
 }
 
+bool isKnownSlowWebcam(String url) {
+  final lower = url.toLowerCase();
+  return lower.contains('brouwersdam') ||
+      lower.contains('natural-high') ||
+      lower.contains('natural_high') ||
+      lower.contains('6878d928bbb14') ||
+      lower.contains('ipcamlive.com') ||
+      lower.contains('camstreamer.com') ||
+      lower.contains(brouwersdamYoutubeVideoId.toLowerCase()) ||
+      lower.contains('bfbmydcnawfcqtjju11hwj8vjqljxehjoknafoyf');
+}
+
+Duration videoInitializeTimeout(String url) {
+  if (isKnownSlowWebcam(url)) {
+    return const Duration(seconds: 75);
+  }
+  if (isLiveVideoStream(url)) {
+    return const Duration(seconds: 45);
+  }
+  return const Duration(seconds: 25);
+}
+
 Duration videoRetryDelay(int attempt) {
   if (attempt <= 0) {
-    return const Duration(seconds: 4);
-  }
-  if (attempt == 1) {
     return const Duration(seconds: 10);
   }
-  if (attempt == 2) {
-    return const Duration(seconds: 20);
+  if (attempt == 1) {
+    return const Duration(seconds: 25);
   }
-  return const Duration(seconds: 30);
+  if (attempt == 2) {
+    return const Duration(seconds: 45);
+  }
+  return const Duration(seconds: 60);
 }

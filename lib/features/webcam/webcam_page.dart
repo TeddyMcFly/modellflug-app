@@ -63,10 +63,10 @@ class WebcamLivePreview extends StatelessWidget {
             externalRefreshSerial: refreshSerial,
           )
         else
-          WebcamEmbedView(
+          _EmbeddedCameraFeed(
             key: ValueKey(displayUrl),
             url: displayUrl,
-            refreshSerial: refreshSerial,
+            externalRefreshSerial: refreshSerial,
           ),
         Container(
           decoration: BoxDecoration(
@@ -576,10 +576,10 @@ class _CameraPreview extends StatelessWidget {
                 externalRefreshSerial: refreshSerial,
               )
             else
-              WebcamEmbedView(
+              _EmbeddedCameraFeed(
                 key: ValueKey(displayUrl),
                 url: displayUrl,
-                refreshSerial: refreshSerial,
+                externalRefreshSerial: refreshSerial,
               ),
             Container(
               decoration: BoxDecoration(
@@ -683,6 +683,93 @@ class _CameraTitleBadge extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+class _EmbeddedCameraFeed extends StatefulWidget {
+  final String url;
+  final int externalRefreshSerial;
+
+  const _EmbeddedCameraFeed({
+    super.key,
+    required this.url,
+    required this.externalRefreshSerial,
+  });
+
+  @override
+  State<_EmbeddedCameraFeed> createState() => _EmbeddedCameraFeedState();
+}
+
+class _EmbeddedCameraFeedState extends State<_EmbeddedCameraFeed> {
+  int _localRefreshSerial = 0;
+
+  @override
+  void didUpdateWidget(covariant _EmbeddedCameraFeed oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.url != widget.url ||
+        oldWidget.externalRefreshSerial != widget.externalRefreshSerial) {
+      _localRefreshSerial = 0;
+    }
+  }
+
+  void _reload() {
+    setState(() => _localRefreshSerial++);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final refreshSerial = widget.externalRefreshSerial + _localRefreshSerial;
+    final isSlowSource = isKnownSlowWebcam(widget.url);
+
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        WebcamEmbedView(
+          url: widget.url,
+          refreshSerial: refreshSerial,
+        ),
+        Positioned(
+          top: 12,
+          right: 12,
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              color: Colors.black.withValues(alpha: 0.45),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: IconButton(
+              tooltip: 'Webcam neu laden',
+              onPressed: _reload,
+              icon: const Icon(Icons.refresh_rounded, color: Colors.white),
+            ),
+          ),
+        ),
+        if (isSlowSource)
+          Positioned(
+            left: 14,
+            right: 14,
+            top: 70,
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                color: Colors.black.withValues(alpha: 0.45),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: const Padding(
+                padding: EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                child: Text(
+                  'Diese Webcam braucht manchmal laenger zum Starten.',
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ),
+            ),
+          ),
+      ],
     );
   }
 }
@@ -882,7 +969,9 @@ class _VideoCameraFeedState extends State<_VideoCameraFeed> {
     VideoPlayerController? nextController;
     try {
       nextController = VideoPlayerController.networkUrl(uri);
-      await nextController.initialize().timeout(const Duration(seconds: 20));
+      await nextController
+          .initialize()
+          .timeout(videoInitializeTimeout(widget.url));
       await nextController.setLooping(!isLiveVideoStream(widget.url));
       await nextController.setVolume(0);
       await nextController.play();

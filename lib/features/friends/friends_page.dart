@@ -13,6 +13,7 @@ import '../../shared/utils/media_source.dart';
 
 const _chatFrameColor = Color(0xFF06172E);
 const _flightRadioAsset = 'assets/icons/flight_radio_header_logo.png';
+const _memberOnlineWindow = Duration(minutes: 3);
 
 class FriendsPage extends ConsumerStatefulWidget {
   const FriendsPage({super.key});
@@ -138,7 +139,15 @@ class _MemberList extends StatefulWidget {
 
 class _MemberListState extends State<_MemberList> {
   final Set<String> _knownUnreadMessageKeys = {};
+  OverlayEntry? _unreadNotificationOverlay;
+  Timer? _unreadNotificationTimer;
   bool _unreadNotificationsPrimed = false;
+
+  @override
+  void dispose() {
+    _dismissUnreadNotification();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -180,7 +189,9 @@ class _MemberListState extends State<_MemberList> {
             final chatsByPeer = _directChatsByPeer(chats);
             final flightRoomChat = _flightRoomChatFrom(chats);
             final privateGroupChats = _privateGroupChatsFrom(chats);
-            final tableMembers = _membersSortedForTable(members, chatsByPeer);
+            final displayMembers = _membersWithChatFallbacks(members, chats);
+            final tableMembers =
+                _membersSortedForTable(displayMembers, chatsByPeer);
             final reachableMembers = [
               for (final member in members)
                 if (member.reachableByChat && member.visibleInMemberList)
@@ -191,13 +202,13 @@ class _MemberListState extends State<_MemberList> {
               (sum, chat) => sum + chat.unreadCountFor(widget.currentUser.uid),
             );
 
-            _notifyAboutNewUnreadMessages(context, chats, members);
+            _notifyAboutNewUnreadMessages(context, chats, displayMembers);
 
             return Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 _MembersToolbar(
-                  membersCount: members.length,
+                  membersCount: displayMembers.length,
                   chatReachableCount: chatReachableCount,
                   unreadCount: unreadCount,
                 ),
@@ -224,7 +235,7 @@ class _MemberListState extends State<_MemberList> {
                     reachablePeerCount: reachableMembers.length,
                     chats: privateGroupChats,
                     currentUid: widget.currentUser.uid,
-                    members: members,
+                    members: displayMembers,
                     onCreate: reachableMembers.length >= 2
                         ? () =>
                             _openCreatePrivateGroup(context, reachableMembers)
@@ -232,12 +243,12 @@ class _MemberListState extends State<_MemberList> {
                     onOpen: (chat) => _openExistingGroup(
                       context,
                       chat,
-                      members,
+                      displayMembers,
                     ),
                   ),
                 ),
                 const SizedBox(height: 12),
-                if (members.isEmpty)
+                if (displayMembers.isEmpty)
                   _InfoCard(
                     icon: Icons.group_add_rounded,
                     title: 'Noch keine anderen Mitglieder',
@@ -265,6 +276,26 @@ class _MemberListState extends State<_MemberList> {
         if (chat.isDirect && chat.peerUidFor(widget.currentUser.uid).isNotEmpty)
           chat.peerUidFor(widget.currentUser.uid): chat,
     };
+  }
+
+  List<MemberProfile> _membersWithChatFallbacks(
+    List<MemberProfile> members,
+    List<ChatSummary> chats,
+  ) {
+    final knownUids = {for (final member in members) member.uid};
+    final displayMembers = [...members];
+    for (final chat in chats) {
+      if (!chat.isDirect) {
+        continue;
+      }
+      final peerUid = chat.peerUidFor(widget.currentUser.uid);
+      if (peerUid.isEmpty || knownUids.contains(peerUid)) {
+        continue;
+      }
+      displayMembers.add(_memberForChatParticipant(peerUid, chat, members));
+      knownUids.add(peerUid);
+    }
+    return displayMembers;
   }
 
   ChatSummary? _flightRoomChatFrom(List<ChatSummary> chats) {
@@ -461,43 +492,146 @@ class _MemberListState extends State<_MemberList> {
       if (!mounted) {
         return;
       }
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Neue Nachricht in $chatName'),
-          action: SnackBarAction(
-            label: 'Oeffnen',
-            onPressed: () {
-              if (newestChat.isFlightRoom) {
-                final reachableMembers = [
-                  for (final member in members)
-                    if (member.reachableByChat && member.visibleInMemberList)
-                      member,
-                ];
-                _openFlightRoom(context, reachableMembers);
-                return;
-              }
-              if (newestChat.isDirect) {
-                final peer = members.where(
-                  (member) =>
-                      member.uid ==
-                      newestChat.peerUidFor(widget.currentUser.uid),
-                );
-                if (peer.isNotEmpty) {
-                  _openChat(context, peer.first);
-                }
-                return;
-              }
-              _openExistingGroup(context, newestChat, members);
-            },
-          ),
-        ),
+      _showCenteredUnreadNotification(
+        context: context,
+        message: 'Neue Nachricht in $chatName',
+        onOpen: () {
+          if (newestChat.isFlightRoom) {
+            final reachableMembers = [
+              for (final member in members)
+                if (member.reachableByChat && member.visibleInMemberList)
+                  member,
+            ];
+            _openFlightRoom(context, reachableMembers);
+            return;
+          }
+          if (newestChat.isDirect) {
+            final peerUid = newestChat.peerUidFor(widget.currentUser.uid);
+            if (peerUid.isNotEmpty) {
+              _openChat(
+                context,
+                _memberForChatParticipant(peerUid, newestChat, members),
+              );
+            }
+            return;
+          }
+          _openExistingGroup(context, newestChat, members);
+        },
       );
     });
+  }
+
+  void _showCenteredUnreadNotification({
+    required BuildContext context,
+    required String message,
+    required VoidCallback onOpen,
+  }) {
+    final overlay = Overlay.maybeOf(context, rootOverlay: true);
+    if (overlay == null) {
+      return;
+    }
+
+    _dismissUnreadNotification();
+
+    void openChat() {
+      _dismissUnreadNotification();
+      onOpen();
+    }
+
+    _unreadNotificationOverlay = OverlayEntry(
+      builder: (context) => _CenteredChatNotification(
+        message: message,
+        onOpen: openChat,
+      ),
+    );
+    overlay.insert(_unreadNotificationOverlay!);
+
+    _unreadNotificationTimer = Timer(
+      const Duration(seconds: 6),
+      _dismissUnreadNotification,
+    );
+  }
+
+  void _dismissUnreadNotification() {
+    _unreadNotificationTimer?.cancel();
+    _unreadNotificationTimer = null;
+    _unreadNotificationOverlay?.remove();
+    _unreadNotificationOverlay = null;
   }
 
   String _notificationKeyFor(ChatSummary chat) {
     final date = chat.lastMessageAt ?? chat.updatedAt;
     return '${chat.id}:${date?.toIso8601String() ?? chat.lastMessage}';
+  }
+}
+
+class _CenteredChatNotification extends StatelessWidget {
+  final String message;
+  final VoidCallback onOpen;
+
+  const _CenteredChatNotification({
+    required this.message,
+    required this.onOpen,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    final textTheme = Theme.of(context).textTheme;
+
+    return SafeArea(
+      child: Center(
+        child: Padding(
+          padding: const EdgeInsets.all(20),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 420),
+            child: Material(
+              color: colors.surface,
+              elevation: 14,
+              shadowColor: Colors.black.withValues(alpha: 0.22),
+              borderRadius: BorderRadius.circular(8),
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  border: Border.all(
+                    color: colors.primary.withValues(alpha: 0.18),
+                  ),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(18, 16, 14, 16),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        Icons.mark_chat_unread_rounded,
+                        color: colors.primary,
+                        size: 28,
+                      ),
+                      const SizedBox(width: 14),
+                      Expanded(
+                        child: Text(
+                          message,
+                          style: textTheme.titleSmall?.copyWith(
+                            color: colors.onSurface,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      TextButton.icon(
+                        onPressed: onOpen,
+                        icon: const Icon(Icons.open_in_new_rounded, size: 18),
+                        label: const Text('Oeffnen'),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
   }
 }
 
@@ -1186,7 +1320,7 @@ class _CreateGroupDialogState extends State<_CreateGroupDialog> {
 enum _MemberTableSortColumn {
   member,
   club,
-  lastSeen,
+  status,
   lastChat,
   flightRadio,
 }
@@ -1212,11 +1346,23 @@ class _MembersTable extends StatefulWidget {
 
 class _MembersTableState extends State<_MembersTable> {
   final ScrollController _horizontalController = ScrollController();
+  Timer? _clockTimer;
   _MemberTableSortColumn? _sortColumn;
   var _sortAscending = true;
 
   @override
+  void initState() {
+    super.initState();
+    _clockTimer = Timer.periodic(const Duration(seconds: 30), (_) {
+      if (mounted) {
+        setState(() {});
+      }
+    });
+  }
+
+  @override
   void dispose() {
+    _clockTimer?.cancel();
     _horizontalController.dispose();
     super.dispose();
   }
@@ -1287,7 +1433,7 @@ class _MembersTableState extends State<_MembersTable> {
       _sortAscending = switch (column) {
         _MemberTableSortColumn.member => true,
         _MemberTableSortColumn.club => true,
-        _MemberTableSortColumn.lastSeen => false,
+        _MemberTableSortColumn.status => false,
         _MemberTableSortColumn.lastChat => false,
         _MemberTableSortColumn.flightRadio => false,
       };
@@ -1326,7 +1472,7 @@ class _MembersTableState extends State<_MembersTable> {
           b.displayName,
         ),
       _MemberTableSortColumn.club => _compareText(a.club, b.club),
-      _MemberTableSortColumn.lastSeen => _compareDates(a.lastSeen, b.lastSeen),
+      _MemberTableSortColumn.status => _compareMemberStatus(a, b),
       _MemberTableSortColumn.lastChat => _compareDates(
           _chatDateFor(a.uid),
           _chatDateFor(b.uid),
@@ -1336,6 +1482,15 @@ class _MembersTableState extends State<_MembersTable> {
           _flightRadioSortValue(b),
         ),
     };
+  }
+
+  int _compareMemberStatus(MemberProfile a, MemberProfile b) {
+    final byStatus =
+        _compareNumbers(_memberStatusRank(a), _memberStatusRank(b));
+    if (byStatus != 0) {
+      return byStatus;
+    }
+    return _compareDates(a.lastSeen, b.lastSeen);
   }
 
   DateTime? _chatDateFor(String uid) {
@@ -1390,9 +1545,9 @@ class _MembersTableHeader extends StatelessWidget {
               onSort: onSort,
             ),
             _TableHeaderCell(
-              label: 'Zuletzt aktiv',
+              label: 'Status',
               flex: 2,
-              column: _MemberTableSortColumn.lastSeen,
+              column: _MemberTableSortColumn.status,
               activeColumn: sortColumn,
               ascending: sortAscending,
               onSort: onSort,
@@ -1466,7 +1621,7 @@ class _MemberTableRow extends StatelessWidget {
               flex: 2,
               child: Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 16),
-                child: _TableBodyText(_lastSeenLabel(member.lastSeen)),
+                child: _MemberStatusCell(member: member),
               ),
             ),
             Expanded(
@@ -1581,6 +1736,86 @@ class _TableBodyText extends StatelessWidget {
         fontSize: 12,
         fontWeight: FontWeight.w700,
       ),
+    );
+  }
+}
+
+class _MemberStatusCell extends StatelessWidget {
+  final MemberProfile member;
+
+  const _MemberStatusCell({required this.member});
+
+  @override
+  Widget build(BuildContext context) {
+    final online = _isMemberOnline(member);
+    final chatEnabled = member.reachableByChat;
+    final color = online
+        ? const Color(0xFF16A34A)
+        : chatEnabled
+            ? const Color(0xFF64748B)
+            : const Color(0xFF94A3B8);
+    final label = online
+        ? 'Online'
+        : chatEnabled
+            ? 'Offline'
+            : 'Chat aus';
+    final detail = online
+        ? 'jetzt erreichbar'
+        : chatEnabled
+            ? 'zuletzt ${_lastSeenLabel(member.lastSeen)}'
+            : 'nicht erreichbar';
+
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: 10,
+          height: 10,
+          decoration: BoxDecoration(
+            color: color,
+            shape: BoxShape.circle,
+            boxShadow: online
+                ? [
+                    BoxShadow(
+                      color: color.withValues(alpha: 0.28),
+                      blurRadius: 8,
+                      spreadRadius: 2,
+                    ),
+                  ]
+                : null,
+          ),
+        ),
+        const SizedBox(width: 8),
+        Flexible(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: color,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                detail,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  color: Color(0xFF64748B),
+                  fontSize: 10,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
     );
   }
 }
@@ -2853,6 +3088,22 @@ String _lastSeenLabel(DateTime? lastSeen) {
     return 'gestern ${_twoDigits(localSeen.hour)}:${_twoDigits(localSeen.minute)}';
   }
   return '${_twoDigits(localSeen.day)}.${_twoDigits(localSeen.month)}.${localSeen.year}';
+}
+
+bool _isMemberOnline(MemberProfile member) {
+  if (!member.reachableByChat || member.lastSeen == null) {
+    return false;
+  }
+
+  final age = DateTime.now().difference(member.lastSeen!.toLocal());
+  return age <= _memberOnlineWindow;
+}
+
+int _memberStatusRank(MemberProfile member) {
+  if (_isMemberOnline(member)) {
+    return 2;
+  }
+  return member.reachableByChat ? 1 : 0;
 }
 
 String _timeLabel(DateTime date) {
