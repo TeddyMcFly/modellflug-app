@@ -5,6 +5,7 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/widgets.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../features/admin/admin_page.dart';
 import '../../features/auth/login_page.dart';
 import '../../features/batteries/batteries_page.dart';
 import '../../features/dashboard/dashboard_page.dart';
@@ -15,14 +16,16 @@ import '../../features/models/models_page.dart';
 import '../../features/settings/settings_page.dart';
 import '../../features/statistics/statistics_page.dart';
 import '../../features/webcam/webcam_page.dart';
+import '../../shared/services/admin_access.dart';
 
 GoRouter createAppRouter() {
   return GoRouter(
     refreshListenable: _GoRouterRefreshStream(_authStateChanges()),
     redirect: (context, state) {
       final location = state.matchedLocation;
-      final signedIn =
-          Firebase.apps.isNotEmpty && FirebaseAuth.instance.currentUser != null;
+      final user =
+          Firebase.apps.isEmpty ? null : FirebaseAuth.instance.currentUser;
+      final signedIn = user != null;
       final publicRoute = location == '/' || location == '/login';
 
       if (!signedIn && !publicRoute) {
@@ -32,6 +35,10 @@ GoRouter createAppRouter() {
 
       if (signedIn && location == '/login') {
         return _safeRedirect(state.uri.queryParameters['from']) ?? '/dashboard';
+      }
+
+      if (signedIn && location == '/admin' && !isAdminEmail(user.email)) {
+        return '/dashboard';
       }
 
       return null;
@@ -112,6 +119,13 @@ GoRouter createAppRouter() {
         pageBuilder: (context, state) => _noTransitionPage(
           state: state,
           child: const SettingsPage(),
+        ),
+      ),
+      GoRoute(
+        path: '/admin',
+        pageBuilder: (context, state) => _noTransitionPage(
+          state: state,
+          child: const AdminPage(),
         ),
       ),
     ],

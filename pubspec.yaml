@@ -80,6 +80,7 @@ flutter:
   assets:
     - assets/splash/
     - assets/aircraft/
+    - assets/demo/
     - assets/webcam/
     - assets/icons/
     - assets/widgets/

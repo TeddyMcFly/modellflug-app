@@ -14,6 +14,7 @@ import '../../core/widgets/app_scaffold.dart';
 import '../../shared/models/aircraft_model.dart';
 import '../../shared/providers/app_info_provider.dart';
 import '../../shared/providers/fleet_provider.dart';
+import '../../shared/services/admin_access.dart';
 import '../../shared/services/auth_service.dart';
 import '../../shared/services/subscription_service.dart';
 import '../../shared/services/webcam_url_diagnostics.dart';
@@ -71,6 +72,7 @@ class SettingsPage extends ConsumerWidget {
         );
     final accountAccess = ref.watch(accountAccessProvider);
     final userEmail = authUser?.email;
+    final canOpenAdmin = isAdminEmail(userEmail);
 
     return AppScaffold(
       title: 'Einstellungen',
@@ -130,6 +132,7 @@ class SettingsPage extends ConsumerWidget {
                         settings: fleet.appSettings,
                         syncStatus: fleet.syncStatus,
                         userEmail: userEmail,
+                        canOpenAdmin: canOpenAdmin,
                         onCreateBackup: () => _showBackupDialog(
                           context,
                           ref,
@@ -2379,6 +2382,7 @@ class _AppSettingsCard extends StatelessWidget {
   final AppSettings settings;
   final FleetSyncStatus syncStatus;
   final String? userEmail;
+  final bool canOpenAdmin;
   final Future<void> Function() onCreateBackup;
   final Future<void> Function() onExportFlightbook;
   final Future<void> Function() onRestoreBackup;
@@ -2391,6 +2395,7 @@ class _AppSettingsCard extends StatelessWidget {
     required this.settings,
     required this.syncStatus,
     required this.userEmail,
+    required this.canOpenAdmin,
     required this.onCreateBackup,
     required this.onExportFlightbook,
     required this.onRestoreBackup,
@@ -2721,6 +2726,13 @@ class _AppSettingsCard extends StatelessWidget {
                       value: 'Aenderungen anzeigen',
                       onTap: () => _showWhatsNewDialog(context),
                     ),
+                    if (canOpenAdmin)
+                      _ActionSettingTile(
+                        icon: Icons.admin_panel_settings_rounded,
+                        title: 'Admin-Seite',
+                        value: 'Starter-Datei verwalten',
+                        onTap: () => context.go('/admin'),
+                      ),
                     _ActionSettingTile(
                       icon: Icons.help_center_rounded,
                       title: 'Programm-Hilfe',

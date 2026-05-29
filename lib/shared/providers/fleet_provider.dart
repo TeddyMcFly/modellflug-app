@@ -14,6 +14,7 @@ import '../models/fleet_state.dart';
 import '../services/fleet_cloud_repository.dart';
 import '../services/fleet_storage_service.dart';
 import '../services/member_chat_service.dart';
+import '../services/starter_fleet_service.dart';
 import '../utils/image_thumbnail.dart';
 
 export '../models/fleet_state.dart';
@@ -605,7 +606,7 @@ class FleetNotifier extends StateNotifier<FleetState> {
         await _readLocalState(_storageKeyForUid(user.uid));
     final localState =
         accountLocalState == null || _isOldUntouchedDemoState(accountLocalState)
-            ? _starterStateForUser()
+            ? await _starterStateForUser()
             : _withStarterDemoModelPhotos(accountLocalState);
     if (!_disposed && _activeUid == user.uid) {
       state = localState.copyWith(
@@ -633,7 +634,7 @@ class FleetNotifier extends StateNotifier<FleetState> {
       if (preparedCloudState == null ||
           _isOldUntouchedDemoState(preparedCloudState)) {
         if (_isOldUntouchedDemoState(state)) {
-          state = _starterStateForUser().copyWith(
+          state = (await _starterStateForUser()).copyWith(
             syncStatus: FleetSyncStatus.syncing,
           );
         }
@@ -1234,8 +1235,14 @@ bool _isOldUntouchedDemoState(FleetState state) {
       flightIds.contains('f23');
 }
 
-FleetState _starterStateForUser() {
-  return _starterDemoState.copyWith(isLoaded: true);
+Future<FleetState> _starterStateForUser() async {
+  try {
+    return _withStarterDemoModelPhotos(
+      await loadStarterFleetState(),
+    ).copyWith(isLoaded: true);
+  } catch (_) {
+    return _starterDemoState.copyWith(isLoaded: true);
+  }
 }
 
 const _demoSeglerPhotoAsset = 'assets/aircraft/beispiel_segler.png';

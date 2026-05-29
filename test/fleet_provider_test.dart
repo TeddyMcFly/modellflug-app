@@ -1,3 +1,6 @@
+import 'dart:convert';
+
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:modellflug_app/shared/models/aircraft_model.dart';
@@ -5,8 +8,33 @@ import 'package:modellflug_app/shared/providers/fleet_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+
   setUp(() {
     SharedPreferences.setMockInitialValues({});
+  });
+
+  test('starter fleet asset can be loaded and parsed', () async {
+    final rawState = await rootBundle.loadString(
+      'assets/demo/starter_fleet.json',
+    );
+    final decoded = jsonDecode(rawState) as Map<String, dynamic>;
+    final starterState = FleetState.fromJson(decoded);
+
+    expect(starterState.pilotProfile.name, isEmpty);
+    expect(starterState.appSettings.shareLocationWithFriends, isTrue);
+    expect(
+        starterState.aircraft.map((item) => item.id), contains('demo-segler'));
+    expect(
+      starterState.aircraft.map((item) => item.id),
+      contains('demo-kunstflug'),
+    );
+    expect(
+      starterState.appSettings.webcamUrls.first,
+      'https://www.lmfc.de/fileadmin/Modellflug/cam/bilder/webcam.jpg',
+    );
+    expect(starterState.batteries.length, 4);
+    expect(starterState.flights.length, 2);
   });
 
   test('addFlight increments selected battery cycles', () {

@@ -963,7 +963,7 @@ const defaultWebcams = [
 ];
 
 const defaultWebcamUrls = [
-  '',
+  'https://www.lmfc.de/fileadmin/Modellflug/cam/bilder/webcam.jpg',
   '',
   '',
 ];

@@ -681,6 +681,7 @@ h3 {
   width: min(620px, 100%);
   justify-self: end;
   overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 .feature-table {
@@ -1036,6 +1037,23 @@ h3 {
 }
 
 @media (max-width: 900px) {
+  body,
+  body.legal-page {
+    background-attachment: scroll, scroll, scroll;
+    background-position:
+      top center,
+      top center,
+      top center;
+    background-size:
+      auto,
+      auto,
+      100% auto;
+    background-repeat:
+      no-repeat,
+      no-repeat,
+      repeat-y;
+  }
+
   .site-header {
     position: absolute;
     padding: 14px 22px;
@@ -1124,6 +1142,29 @@ h3 {
 }
 
 @media (max-width: 620px) {
+  .feature-table-card {
+    overflow-x: visible;
+  }
+
+  .feature-table {
+    min-width: 0;
+    table-layout: fixed;
+  }
+
+  .feature-table td {
+    padding: 10px 12px 10px 36px;
+    font-size: 15px;
+    overflow-wrap: anywhere;
+    word-break: normal;
+    hyphens: auto;
+  }
+
+  .feature-table td::before {
+    left: 12px;
+    width: 14px;
+    height: 14px;
+  }
+
   .legal-card {
     padding: 24px 20px;
   }

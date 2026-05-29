@@ -1088,7 +1088,7 @@ class _HeaderSunsetBadge extends StatelessWidget {
     );
 
     return Tooltip(
-      message: 'Sonnenuntergang am $homeAirfield',
+      message: 'Sonnenuntergang am $homeAirfield: $sunset Uhr ($sourceLabel)',
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -1102,21 +1102,21 @@ class _HeaderSunsetBadge extends StatelessWidget {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
-                sunset,
-                style: const TextStyle(
-                  color: _navigationColor,
-                  fontSize: 12,
+              const Text(
+                'Sonnenuntergang',
+                style: TextStyle(
+                  color: Color(0xFF475569),
+                  fontSize: 10,
                   fontWeight: FontWeight.w900,
                 ),
               ),
               Text(
-                sourceLabel,
+                '$sunset Uhr',
                 overflow: TextOverflow.ellipsis,
                 style: const TextStyle(
-                  color: Color(0xFF475569),
-                  fontSize: 10,
-                  fontWeight: FontWeight.w800,
+                  color: _navigationColor,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w900,
                 ),
               ),
             ],
@@ -1726,10 +1726,135 @@ class _BrandIcon extends StatelessWidget {
   }
 }
 
-class _TopNav extends StatelessWidget {
+const _topNavItems = [
+  _TopNavItem(
+    icon: Icons.dashboard_rounded,
+    label: 'Dashboard',
+    path: '/dashboard',
+  ),
+  _TopNavItem(
+    icon: Icons.airplanemode_active_rounded,
+    label: 'Modelle',
+    path: '/models',
+  ),
+  _TopNavItem(
+    icon: Icons.battery_charging_full_rounded,
+    label: 'Akkus',
+    path: '/batteries',
+  ),
+  _TopNavItem(
+    icon: Icons.query_stats_rounded,
+    label: 'Statistiken',
+    path: '/statistics',
+  ),
+  _TopNavItem(
+    icon: Icons.videocam_rounded,
+    label: 'Webcams/Wetter',
+    path: '/webcam',
+  ),
+  _TopNavItem(
+    icon: Icons.menu_book_rounded,
+    label: 'Flugbuch',
+    path: '/flightbook',
+  ),
+  _TopNavItem(
+    icon: Icons.group_rounded,
+    label: 'Freunde',
+    path: '/friends',
+  ),
+  _TopNavItem(
+    icon: Icons.tune_rounded,
+    label: 'Einstellungen',
+    path: '/settings',
+  ),
+];
+
+const _centeredTopNavPaths = {
+  '/batteries',
+  '/statistics',
+  '/webcam',
+  '/flightbook',
+  '/friends',
+};
+
+class _TopNavItem {
+  final IconData icon;
+  final String label;
+  final String path;
+
+  const _TopNavItem({
+    required this.icon,
+    required this.label,
+    required this.path,
+  });
+}
+
+class _TopNav extends StatefulWidget {
   final String location;
 
   const _TopNav({required this.location});
+
+  @override
+  State<_TopNav> createState() => _TopNavState();
+}
+
+class _TopNavState extends State<_TopNav> {
+  final ScrollController _controller = ScrollController();
+  late final Map<String, GlobalKey> _chipKeys = {
+    for (final item in _topNavItems) item.path: GlobalKey(),
+  };
+  String? _lastCenteredPath;
+
+  @override
+  void initState() {
+    super.initState();
+    _scheduleSelectedChipCentering();
+  }
+
+  @override
+  void didUpdateWidget(covariant _TopNav oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.location != widget.location) {
+      _scheduleSelectedChipCentering();
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _scheduleSelectedChipCentering() {
+    final path = _centeredTopNavPath(widget.location);
+    if (path == null) {
+      _lastCenteredPath = null;
+      return;
+    }
+    if (path == _lastCenteredPath) {
+      return;
+    }
+    _lastCenteredPath = path;
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_controller.hasClients) {
+        return;
+      }
+
+      final targetContext = _chipKeys[path]?.currentContext;
+      if (targetContext == null) {
+        return;
+      }
+
+      Scrollable.ensureVisible(
+        targetContext,
+        duration: const Duration(milliseconds: 260),
+        curve: Curves.easeOutCubic,
+        alignment: 0.5,
+        alignmentPolicy: ScrollPositionAlignmentPolicy.explicit,
+      );
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -1742,62 +1867,33 @@ class _TopNav extends StatelessWidget {
         ),
       ),
       child: SingleChildScrollView(
+        controller: _controller,
         scrollDirection: Axis.horizontal,
         child: Row(
           children: [
-            _NavChip(
-              icon: Icons.dashboard_rounded,
-              label: 'Dashboard',
-              path: '/dashboard',
-              location: location,
-            ),
-            _NavChip(
-              icon: Icons.airplanemode_active_rounded,
-              label: 'Modelle',
-              path: '/models',
-              location: location,
-            ),
-            _NavChip(
-              icon: Icons.battery_charging_full_rounded,
-              label: 'Akkus',
-              path: '/batteries',
-              location: location,
-            ),
-            _NavChip(
-              icon: Icons.query_stats_rounded,
-              label: 'Statistiken',
-              path: '/statistics',
-              location: location,
-            ),
-            _NavChip(
-              icon: Icons.videocam_rounded,
-              label: 'Webcams/Wetter',
-              path: '/webcam',
-              location: location,
-            ),
-            _NavChip(
-              icon: Icons.menu_book_rounded,
-              label: 'Flugbuch',
-              path: '/flightbook',
-              location: location,
-            ),
-            _NavChip(
-              icon: Icons.group_rounded,
-              label: 'Freunde',
-              path: '/friends',
-              location: location,
-            ),
-            _NavChip(
-              icon: Icons.tune_rounded,
-              label: 'Einstellungen',
-              path: '/settings',
-              location: location,
-            ),
+            for (final item in _topNavItems)
+              _NavChip(
+                key: _chipKeys[item.path],
+                icon: item.icon,
+                label: item.label,
+                path: item.path,
+                location: widget.location,
+              ),
           ],
         ),
       ),
     );
   }
+}
+
+String? _centeredTopNavPath(String location) {
+  for (final item in _topNavItems) {
+    if (_isSelectedLocation(location, item.path) &&
+        _centeredTopNavPaths.contains(item.path)) {
+      return item.path;
+    }
+  }
+  return null;
 }
 
 class _NavTile extends StatelessWidget {
@@ -1873,6 +1969,7 @@ class _NavChip extends StatelessWidget {
   final String location;
 
   const _NavChip({
+    super.key,
     required this.icon,
     required this.label,
     required this.path,
