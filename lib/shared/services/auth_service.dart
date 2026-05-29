@@ -2,6 +2,8 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'fleet_cloud_repository.dart';
+
 final firebaseAuthProvider = Provider<FirebaseAuth>((ref) {
   return FirebaseAuth.instance;
 });
@@ -14,13 +16,17 @@ final authStateProvider = StreamProvider<User?>((ref) {
 });
 
 final authControllerProvider = Provider<AuthController>((ref) {
-  return AuthController(ref.watch(firebaseAuthProvider));
+  return AuthController(
+    ref.watch(firebaseAuthProvider),
+    ref.watch(fleetCloudRepositoryProvider),
+  );
 });
 
 class AuthController {
   final FirebaseAuth _auth;
+  final FleetCloudRepository? _cloudRepository;
 
-  const AuthController(this._auth);
+  const AuthController(this._auth, this._cloudRepository);
 
   Future<void> signIn({
     required String email,
@@ -59,8 +65,16 @@ class AuthController {
     await user.sendEmailVerification();
   }
 
-  Future<void> signOut() {
-    return _auth.signOut();
+  Future<void> signOut() async {
+    final user = _auth.currentUser;
+    if (user != null) {
+      try {
+        await _cloudRepository?.markPresenceOffline(user);
+      } catch (_) {
+        // Abmelden soll trotzdem funktionieren, auch wenn Firebase kurz hakt.
+      }
+    }
+    await _auth.signOut();
   }
 }
 

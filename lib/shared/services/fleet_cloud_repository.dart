@@ -94,6 +94,22 @@ class FleetCloudRepository {
     return _fleetMeta(uid).snapshots(includeMetadataChanges: true);
   }
 
+  Future<void> markPresenceOffline(User user) async {
+    final now = DateTime.now().toUtc().toIso8601String();
+    final batch = _firestore.batch();
+    final data = {
+      'presenceStatus': 'offline',
+      'lastSeen': FieldValue.serverTimestamp(),
+      'lastSeenClient': now,
+      'updatedAt': FieldValue.serverTimestamp(),
+      'updatedAtClient': now,
+    };
+
+    batch.set(_userDoc(user.uid), data, SetOptions(merge: true));
+    batch.set(_memberDoc(user.uid), data, SetOptions(merge: true));
+    await batch.commit();
+  }
+
   Future<FleetState?> loadState(String uid) async {
     final results = await Future.wait([
       _aircraft(uid).get(),

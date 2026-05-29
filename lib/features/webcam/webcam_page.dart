@@ -1460,11 +1460,11 @@ class _WindCompassInstrumentState extends State<_WindCompassInstrument>
     _gustSideEnd = _nextRandomGustSideFactor(oppositeOf: _gustSideStart);
     _swayController = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 9200),
+      duration: const Duration(milliseconds: 12800),
     )..repeat();
     _directionController = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 900),
+      duration: const Duration(milliseconds: 1200),
     )..value = 1;
     _gustLengthController = AnimationController(
       vsync: this,
@@ -1556,19 +1556,19 @@ class _WindCompassInstrumentState extends State<_WindCompassInstrument>
   }
 
   double _gustSwayDegrees(double phase) {
-    final mixedSway = math.sin(phase * 1.0 + 0.4) * 3.2 +
-        math.sin(phase * 3.0 + 1.1) * 1.5 +
-        math.sin(phase * 7.0 + 2.6) * 0.8;
-    return mixedSway.clamp(-6.0, 6.0).toDouble();
+    final mixedSway = math.sin(phase * 1.0 + 0.4) * 1.7 +
+        math.sin(phase * 2.2 + 1.1) * 0.65 +
+        math.sin(phase * 4.5 + 2.6) * 0.25;
+    return mixedSway.clamp(-3.0, 3.0).toDouble();
   }
 
   double _gustLengthFactor(double phase) {
     final eased = Curves.easeInOutCubic.transform(_gustLengthController.value);
     final randomLength =
         _gustLengthStart + (_gustLengthEnd - _gustLengthStart) * eased;
-    final turbulence = math.sin(phase * 8.0 + 1.7) * 0.06 +
-        math.sin(phase * 13.0 + 4.2) * 0.04;
-    return (randomLength + turbulence).clamp(0.48, 1.28).toDouble();
+    final turbulence = math.sin(phase * 4.0 + 1.7) * 0.025 +
+        math.sin(phase * 7.0 + 4.2) * 0.015;
+    return (randomLength + turbulence).clamp(0.62, 1.12).toDouble();
   }
 
   double _gustSideOffsetFactor() {
@@ -1577,11 +1577,11 @@ class _WindCompassInstrumentState extends State<_WindCompassInstrument>
   }
 
   double _nextRandomGustLengthFactor() {
-    return 0.5 + _gustRandom.nextDouble() * 0.74;
+    return 0.68 + _gustRandom.nextDouble() * 0.34;
   }
 
   double _nextRandomGustSideFactor({double? oppositeOf}) {
-    final magnitude = 0.75 + _gustRandom.nextDouble() * 0.5;
+    final magnitude = 0.3 + _gustRandom.nextDouble() * 0.3;
     if (oppositeOf != null && oppositeOf != 0) {
       return oppositeOf.isNegative ? magnitude : -magnitude;
     }
@@ -1589,7 +1589,7 @@ class _WindCompassInstrumentState extends State<_WindCompassInstrument>
   }
 
   Duration _nextRandomGustLengthDuration() {
-    return Duration(milliseconds: 650 + _gustRandom.nextInt(1350));
+    return Duration(milliseconds: 2600 + _gustRandom.nextInt(2200));
   }
 
   void _startNextRandomGustLength() {
@@ -1635,7 +1635,7 @@ class _WindDirectionArrowPainter extends CustomPainter {
       lengthFactor: gustLengthFactor,
       maxLengthFactor: 0.9,
       color: const Color(0xFFE11D2E),
-      offset: 6.2 * gustSideOffsetFactor,
+      offset: 4.2 * gustSideOffsetFactor,
       strokeWidth: 6.4,
     );
     _drawSpeedArrow(

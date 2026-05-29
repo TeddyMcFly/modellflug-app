@@ -118,8 +118,8 @@ img {
   display: flex;
   align-items: center;
   background:
-    linear-gradient(90deg, rgba(3, 14, 27, 0.84), rgba(3, 14, 27, 0.58) 42%, rgba(3, 14, 27, 0.18) 70%, rgba(3, 14, 27, 0.06)),
-    url("assets/landingpage_heaven.png") center center / cover no-repeat;
+    linear-gradient(90deg, rgba(3, 14, 27, 0.62), rgba(3, 14, 27, 0.38) 42%, rgba(3, 14, 27, 0.10) 70%, rgba(3, 14, 27, 0.02)),
+    url("assets/bg_heaven.png") center center / cover no-repeat;
   background-color: #06172e;
   color: #ffffff;
 }
@@ -1076,8 +1076,8 @@ h3 {
     padding: 120px 22px 64px;
     align-items: flex-end;
     background:
-      linear-gradient(180deg, rgba(3, 14, 27, 0.22), rgba(3, 14, 27, 0.86)),
-      url("assets/landingpage_heaven.png") center top / cover no-repeat;
+      linear-gradient(180deg, rgba(3, 14, 27, 0.10), rgba(3, 14, 27, 0.66)),
+      url("assets/bg_handy.png") center top / cover no-repeat;
     background-color: #06172e;
   }
 
