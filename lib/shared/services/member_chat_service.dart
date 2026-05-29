@@ -641,7 +641,7 @@ class MemberProfile {
       club: (data['club'] as String? ?? '').trim(),
       reachableByChat: data['reachableByChat'] as bool? ?? false,
       shareLocation: data['shareLocation'] as bool? ?? false,
-      presenceStatus: data['presenceStatus'] as String? ?? 'offline',
+      presenceStatus: _cleanPresenceStatus(data['presenceStatus']),
       photoSource: (data['photoSource'] as String?)?.trim(),
       lastSeen:
           _dateFrom(data['lastSeen']) ?? _dateFrom(data['lastSeenClient']),
@@ -660,6 +660,15 @@ class MemberProfile {
 
 bool _isVisibleFriend(MemberProfile member) {
   return member.visibleInMemberList;
+}
+
+String _cleanPresenceStatus(Object? value) {
+  final text = (value as String? ?? '').trim().toLowerCase();
+  return switch (text) {
+    'atfield' => 'atField',
+    'flying' => 'flying',
+    _ => 'offline',
+  };
 }
 
 class ChatMessage {

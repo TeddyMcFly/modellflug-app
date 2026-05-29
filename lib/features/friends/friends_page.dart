@@ -206,13 +206,13 @@ class _MemberListState extends State<_MemberList> {
             final privateGroupChats = _privateGroupChatsFrom(chats);
             final displayMembers = members;
             final chatReachableCount =
-                displayMembers.where((member) => member.reachableByChat).length;
+                displayMembers.where(_isMemberOnline).length;
             final filteredMembers = _filterMembersForTable(displayMembers);
             final tableMembers =
                 _membersSortedForTable(filteredMembers, chatsByPeer);
             final reachableMembers = [
               for (final member in members)
-                if (member.reachableByChat && member.visibleInMemberList)
+                if (_isMemberOnline(member) && member.visibleInMemberList)
                   member,
             ];
             final unreadCount = chats.fold<int>(
@@ -528,7 +528,7 @@ class _MemberListState extends State<_MemberList> {
           if (newestChat.isFlightRoom) {
             final reachableMembers = [
               for (final member in members)
-                if (member.reachableByChat && member.visibleInMemberList)
+                if (_isMemberOnline(member) && member.visibleInMemberList)
                   member,
             ];
             _openFlightRoom(context, reachableMembers);
@@ -1696,7 +1696,7 @@ class _MembersTableState extends State<_MembersTable> {
   int _flightRadioSortValue(MemberProfile member) {
     final chat = widget.chatsByPeer[member.uid];
     final unread = chat?.isUnreadFor(widget.currentUser.uid) ?? false;
-    final reachable = widget.currentUserReachable && member.reachableByChat;
+    final reachable = widget.currentUserReachable && _isMemberOnline(member);
     if (unread) {
       return 2;
     }
@@ -1845,7 +1845,7 @@ class _MemberTableRow extends StatelessWidget {
                 child: Align(
                   alignment: Alignment.centerLeft,
                   child: _ChatButton(
-                    enabled: currentUserReachable && member.reachableByChat,
+                    enabled: currentUserReachable && _isMemberOnline(member),
                     memberName: member.displayName,
                     unreadCount: chat?.unreadCountFor(currentUser.uid) ?? 0,
                     onPressed: onChat,
@@ -3308,7 +3308,7 @@ String _lastSeenLabel(DateTime? lastSeen) {
 bool _isMemberOnline(MemberProfile member) {
   if (!member.reachableByChat ||
       !member.shareLocation ||
-      member.presenceStatus == LocationPresenceStatus.offline.name ||
+      _isOfflinePresenceStatus(member.presenceStatus) ||
       member.lastSeen == null) {
     return false;
   }
@@ -3325,10 +3325,14 @@ int _memberStatusRank(MemberProfile member) {
     return 0;
   }
   if (!member.shareLocation ||
-      member.presenceStatus == LocationPresenceStatus.offline.name) {
+      _isOfflinePresenceStatus(member.presenceStatus)) {
     return 1;
   }
   return 2;
+}
+
+bool _isOfflinePresenceStatus(String value) {
+  return value.trim().toLowerCase() == LocationPresenceStatus.offline.name;
 }
 
 String _timeLabel(DateTime date) {
