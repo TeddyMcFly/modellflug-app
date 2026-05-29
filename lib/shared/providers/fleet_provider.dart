@@ -15,6 +15,7 @@ import '../services/fleet_cloud_repository.dart';
 import '../services/fleet_storage_service.dart';
 import '../services/member_chat_service.dart';
 import '../services/starter_fleet_service.dart';
+import '../services/user_device_service.dart';
 import '../utils/image_thumbnail.dart';
 
 export '../models/fleet_state.dart';
@@ -668,6 +669,7 @@ class FleetNotifier extends StateNotifier<FleetState> {
     final repository = _ref.read(fleetCloudRepositoryProvider);
     if (repository == null) {
       state = state.copyWith(syncStatus: FleetSyncStatus.localOnly);
+      _recordDeviceAccessLater(user);
       _publishMemberProfileLater();
       _startMemberPresenceHeartbeat();
       return;
@@ -712,11 +714,13 @@ class FleetNotifier extends StateNotifier<FleetState> {
         },
       );
       unawaited(_createAutomaticBackupIfNeeded());
+      _recordDeviceAccessLater(user);
       _publishMemberProfileLater();
       _startMemberPresenceHeartbeat();
     } catch (_) {
       state = state.copyWith(syncStatus: FleetSyncStatus.cloudPaused);
       await _saveLocalState(state);
+      _recordDeviceAccessLater(user);
       _publishMemberProfileLater();
       _startMemberPresenceHeartbeat();
     }
@@ -757,6 +761,29 @@ class FleetNotifier extends StateNotifier<FleetState> {
 
   void _publishMemberProfileLater() {
     unawaited(_publishMemberProfile());
+  }
+
+  void _recordDeviceAccessLater(User user) {
+    unawaited(_recordDeviceAccess(user));
+  }
+
+  Future<void> _recordDeviceAccess(User user) async {
+    if (Firebase.apps.isEmpty || _activeUid != user.uid) {
+      return;
+    }
+
+    final service = _ref.read(userDeviceServiceProvider);
+    if (service == null) {
+      return;
+    }
+
+    final snapshot = state;
+    try {
+      await service.recordCurrentDevice(
+        user: user,
+        displayName: _memberDisplayNameFor(user, snapshot.pilotProfile),
+      );
+    } catch (_) {}
   }
 
   Future<void> _publishMemberProfile() async {
@@ -834,6 +861,11 @@ class FleetNotifier extends StateNotifier<FleetState> {
     final user = FirebaseAuth.instance.currentUser;
     final service = _ref.read(memberChatServiceProvider);
     if (user == null || user.uid != _activeUid || service == null) {
+      return;
+    }
+    if (!state.appSettings.reachableByChat ||
+        !state.appSettings.shareLocationWithFriends ||
+        state.appSettings.presenceStatus == LocationPresenceStatus.offline) {
       return;
     }
 

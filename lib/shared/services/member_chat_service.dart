@@ -85,6 +85,7 @@ class MemberChatService {
             ? fallbackName
             : user.email ?? 'Mitglied';
 
+    final publishesPresence = reachableByChat && shareLocation;
     final data = {
       'uid': user.uid,
       'active': true,
@@ -95,9 +96,10 @@ class MemberChatService {
       'club': club.trim(),
       'reachableByChat': reachableByChat,
       'shareLocation': shareLocation,
-      'presenceStatus': shareLocation ? presenceStatus : 'offline',
-      'lastSeen': FieldValue.serverTimestamp(),
-      'lastSeenClient': DateTime.now().toUtc().toIso8601String(),
+      'presenceStatus': publishesPresence ? presenceStatus : 'offline',
+      'lastSeen': publishesPresence ? FieldValue.serverTimestamp() : null,
+      'lastSeenClient':
+          publishesPresence ? DateTime.now().toUtc().toIso8601String() : null,
     };
 
     final cleanPhoto = photoSource?.trim();

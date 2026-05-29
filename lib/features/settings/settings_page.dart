@@ -86,79 +86,61 @@ class SettingsPage extends ConsumerWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               const _SettingsTabs(),
-              Container(
-                height: 1870,
-                decoration: const BoxDecoration(
-                  borderRadius: BorderRadius.only(
-                    bottomLeft: Radius.circular(8),
-                    bottomRight: Radius.circular(8),
-                  ),
-                ),
-                child: TabBarView(
+              _SettingsTabContent(
+                userSettings: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Padding(
-                      padding: const EdgeInsets.all(2),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          _PilotProfileCard(
-                            profile: fleet.pilotProfile,
-                            onSave: (profile) => ref
-                                .read(fleetProvider.notifier)
-                                .updatePilotProfile(profile),
-                          ),
-                          const SizedBox(height: 12),
-                          _AccountCard(
-                            userEmail: userEmail,
-                            emailVerified: authUser?.emailVerified ?? false,
-                            syncStatus: fleet.syncStatus,
-                            accountAccess: accountAccess,
-                            onSyncNow: () => _syncNow(context, ref),
-                            onRequestActivation: () =>
-                                _requestPaidActivation(context, ref),
-                            onPasswordChange: () =>
-                                _sendPasswordReset(context, ref, userEmail),
-                            onVerifyEmail: () =>
-                                _sendEmailVerification(context, ref),
-                            onDeleteAccount: () =>
-                                _showDeleteAccountPreparation(context),
-                            onSignOut: () => _signOut(context, ref),
-                          ),
-                        ],
-                      ),
+                    _PilotProfileCard(
+                      profile: fleet.pilotProfile,
+                      onSave: (profile) => ref
+                          .read(fleetProvider.notifier)
+                          .updatePilotProfile(profile),
                     ),
-                    Padding(
-                      padding: const EdgeInsets.all(2),
-                      child: _AppSettingsCard(
-                        settings: fleet.appSettings,
-                        syncStatus: fleet.syncStatus,
-                        userEmail: userEmail,
-                        canOpenAdmin: canOpenAdmin,
-                        onCreateBackup: () => _showBackupDialog(
-                          context,
-                          ref,
-                        ),
-                        onExportFlightbook: () => _showFlightbookExportDialog(
-                          context,
-                          ref,
-                        ),
-                        onRestoreBackup: () => _showRestoreBackupDialog(
-                          context,
-                          ref,
-                        ),
-                        onLocationSharingChanged: (value) => ref
-                            .read(fleetProvider.notifier)
-                            .updateLocationSharing(value),
-                        onChatReachabilityChanged: (value) => ref
-                            .read(fleetProvider.notifier)
-                            .updateChatReachability(value),
-                        onSettingsChanged: (settings) => ref
-                            .read(fleetProvider.notifier)
-                            .updateAppSettings(settings),
-                        onSyncNow: () => _syncNow(context, ref),
-                      ),
+                    const SizedBox(height: 12),
+                    _AccountCard(
+                      userEmail: userEmail,
+                      emailVerified: authUser?.emailVerified ?? false,
+                      syncStatus: fleet.syncStatus,
+                      accountAccess: accountAccess,
+                      onSyncNow: () => _syncNow(context, ref),
+                      onRequestActivation: () =>
+                          _requestPaidActivation(context, ref),
+                      onPasswordChange: () =>
+                          _sendPasswordReset(context, ref, userEmail),
+                      onVerifyEmail: () => _sendEmailVerification(context, ref),
+                      onDeleteAccount: () =>
+                          _showDeleteAccountPreparation(context),
+                      onSignOut: () => _signOut(context, ref),
                     ),
                   ],
+                ),
+                appSettings: _AppSettingsCard(
+                  settings: fleet.appSettings,
+                  syncStatus: fleet.syncStatus,
+                  userEmail: userEmail,
+                  canOpenAdmin: canOpenAdmin,
+                  onCreateBackup: () => _showBackupDialog(
+                    context,
+                    ref,
+                  ),
+                  onExportFlightbook: () => _showFlightbookExportDialog(
+                    context,
+                    ref,
+                  ),
+                  onRestoreBackup: () => _showRestoreBackupDialog(
+                    context,
+                    ref,
+                  ),
+                  onLocationSharingChanged: (value) => ref
+                      .read(fleetProvider.notifier)
+                      .updateLocationSharing(value),
+                  onChatReachabilityChanged: (value) => ref
+                      .read(fleetProvider.notifier)
+                      .updateChatReachability(value),
+                  onSettingsChanged: (settings) => ref
+                      .read(fleetProvider.notifier)
+                      .updateAppSettings(settings),
+                  onSyncNow: () => _syncNow(context, ref),
                 ),
               ),
             ],
@@ -1020,6 +1002,50 @@ class _SettingsTabs extends StatelessWidget {
           _SettingsTab(icon: Icons.tune_rounded, label: 'App Einstellungen'),
         ],
       ),
+    );
+  }
+}
+
+class _SettingsTabContent extends StatelessWidget {
+  final Widget userSettings;
+  final Widget appSettings;
+
+  const _SettingsTabContent({
+    required this.userSettings,
+    required this.appSettings,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final controller = DefaultTabController.of(context);
+
+    return AnimatedBuilder(
+      animation: controller,
+      builder: (context, _) {
+        final selectedIndex = controller.index;
+
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Visibility(
+              visible: selectedIndex == 0,
+              maintainState: true,
+              child: Padding(
+                padding: const EdgeInsets.all(2),
+                child: userSettings,
+              ),
+            ),
+            Visibility(
+              visible: selectedIndex == 1,
+              maintainState: true,
+              child: Padding(
+                padding: const EdgeInsets.all(2),
+                child: appSettings,
+              ),
+            ),
+          ],
+        );
+      },
     );
   }
 }

@@ -11,6 +11,7 @@ import '../../shared/providers/fleet_provider.dart';
 import '../../shared/services/admin_access.dart';
 import '../../shared/services/auth_service.dart';
 import '../../shared/services/starter_fleet_service.dart';
+import '../../shared/services/user_device_service.dart';
 import '../../shared/utils/centered_snack_bar.dart';
 import '../../shared/utils/download_helper.dart';
 
@@ -278,6 +279,7 @@ class _AdminPageState extends ConsumerState<AdminPage> {
     }
 
     final summary = _summary;
+    final deviceService = ref.watch(userDeviceServiceProvider);
     return AppScaffold(
       title: 'Admin',
       subtitle: 'Starter-Datei fuer neue Konten vorbereiten.',
@@ -381,6 +383,8 @@ class _AdminPageState extends ConsumerState<AdminPage> {
             ),
           ),
         ),
+        const SizedBox(height: 16),
+        _DeviceAccessCard(service: deviceService),
       ],
     );
   }
@@ -499,6 +503,270 @@ class _ErrorBanner extends StatelessWidget {
   }
 }
 
+class _DeviceAccessCard extends StatelessWidget {
+  final UserDeviceService? service;
+
+  const _DeviceAccessCard({required this.service});
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      margin: EdgeInsets.zero,
+      child: Padding(
+        padding: const EdgeInsets.all(22),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Row(
+              children: [
+                Icon(Icons.devices_rounded),
+                SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    'Geraetezugriffe',
+                    style: TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 6),
+            const Text(
+              'Diese Tabelle ist nur im Admin-Bereich sichtbar.',
+              style: TextStyle(
+                color: Color(0xFF64748B),
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(height: 16),
+            if (service == null)
+              const _DeviceAccessInfo(
+                icon: Icons.cloud_off_rounded,
+                title: 'Firebase nicht verbunden',
+                message: 'Geraetezugriffe koennen gerade nicht geladen werden.',
+              )
+            else
+              StreamBuilder<List<UserDeviceAccess>>(
+                stream: service!.watchDeviceAccess(),
+                builder: (context, snapshot) {
+                  if (snapshot.hasError) {
+                    return const _DeviceAccessInfo(
+                      icon: Icons.error_rounded,
+                      title: 'Geraete konnten nicht geladen werden',
+                      message:
+                          'Bitte pruefe, ob die Firestore-Regeln veroeffentlicht sind.',
+                    );
+                  }
+
+                  if (snapshot.connectionState == ConnectionState.waiting &&
+                      !snapshot.hasData) {
+                    return const LinearProgressIndicator();
+                  }
+
+                  final records = snapshot.data ?? const <UserDeviceAccess>[];
+                  if (records.isEmpty) {
+                    return const _DeviceAccessInfo(
+                      icon: Icons.devices_other_rounded,
+                      title: 'Noch keine Eintraege',
+                      message:
+                          'Sobald sich ein Mitglied anmeldet, erscheint sein Browser oder Geraet hier.',
+                    );
+                  }
+
+                  return _DeviceAccessTable(records: records);
+                },
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _DeviceAccessTable extends StatelessWidget {
+  final List<UserDeviceAccess> records;
+
+  const _DeviceAccessTable({required this.records});
+
+  @override
+  Widget build(BuildContext context) {
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: DataTable(
+        headingRowColor: WidgetStateProperty.all(const Color(0xFFEFF6FF)),
+        columnSpacing: 18,
+        columns: const [
+          DataColumn(label: Text('Mitglied')),
+          DataColumn(label: Text('Geraet')),
+          DataColumn(label: Text('Browser')),
+          DataColumn(label: Text('Bildschirm')),
+          DataColumn(label: Text('Zuletzt')),
+          DataColumn(label: Text('Erstzugriff')),
+        ],
+        rows: [
+          for (final record in records)
+            DataRow(
+              cells: [
+                DataCell(
+                  _DeviceAccessCell(
+                    width: 190,
+                    primary: record.displayName,
+                    secondary: record.email ?? record.uid,
+                  ),
+                ),
+                DataCell(
+                  Tooltip(
+                    message: record.userAgent.isEmpty
+                        ? 'Keine Browserkennung'
+                        : record.userAgent,
+                    child: _DeviceAccessCell(
+                      width: 170,
+                      primary: record.deviceLabel,
+                      secondary: 'ID ${record.shortDeviceId}',
+                    ),
+                  ),
+                ),
+                DataCell(
+                  _DeviceAccessCell(
+                    width: 150,
+                    primary: record.browserLabel,
+                    secondary: record.platform.isEmpty
+                        ? record.operatingSystem
+                        : record.platform,
+                  ),
+                ),
+                DataCell(
+                  _DeviceAccessCell(
+                    width: 140,
+                    primary: record.screenLabel,
+                    secondary: 'Fenster ${record.viewportLabel}',
+                  ),
+                ),
+                DataCell(
+                  _DeviceAccessCell(
+                    width: 140,
+                    primary: _adminDateTimeLabel(record.lastSeenAt),
+                    secondary: record.language.isEmpty ? '-' : record.language,
+                  ),
+                ),
+                DataCell(
+                  _DeviceAccessCell(
+                    width: 140,
+                    primary: _adminDateTimeLabel(record.firstSeenAt),
+                    secondary: record.deviceType,
+                  ),
+                ),
+              ],
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _DeviceAccessCell extends StatelessWidget {
+  final double width;
+  final String primary;
+  final String secondary;
+
+  const _DeviceAccessCell({
+    required this.width,
+    required this.primary,
+    required this.secondary,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: width,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            primary.isEmpty ? '-' : primary,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+              color: Color(0xFF0F172A),
+              fontSize: 12,
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+          const SizedBox(height: 2),
+          Text(
+            secondary.isEmpty ? '-' : secondary,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+              color: Color(0xFF64748B),
+              fontSize: 11,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _DeviceAccessInfo extends StatelessWidget {
+  final IconData icon;
+  final String title;
+  final String message;
+
+  const _DeviceAccessInfo({
+    required this.icon,
+    required this.title,
+    required this.message,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF8FAFC),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: const Color(0xFFE2E8F0)),
+      ),
+      child: Row(
+        children: [
+          Icon(icon, color: const Color(0xFF0A84FF)),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: const TextStyle(
+                    color: Color(0xFF0F172A),
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  message,
+                  style: const TextStyle(
+                    color: Color(0xFF64748B),
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _StarterFleetSummary {
   final int aircraftCount;
   final int batteryCount;
@@ -520,4 +788,17 @@ class _StarterFleetSummary {
       pilotName: state.pilotProfile.name.trim(),
     );
   }
+}
+
+String _adminDateTimeLabel(DateTime? date) {
+  if (date == null) {
+    return '-';
+  }
+  final local = date.toLocal();
+  return '${_twoDigits(local.day)}.${_twoDigits(local.month)}.${local.year} '
+      '${_twoDigits(local.hour)}:${_twoDigits(local.minute)}';
+}
+
+String _twoDigits(int value) {
+  return value.toString().padLeft(2, '0');
 }

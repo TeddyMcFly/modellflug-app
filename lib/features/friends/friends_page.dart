@@ -58,6 +58,7 @@ class _FriendsPageState extends ConsumerState<FriendsPage> {
             service: chatService,
             currentUser: authUser,
             currentDisplayName: _displayNameFor(authUser, fleet),
+            currentUserClub: fleet.pilotProfile.club,
             currentPhotoSource: _chatAvatarSourceFor(
               authUser,
               fleet.pilotProfile,
@@ -122,6 +123,7 @@ class _MemberList extends StatefulWidget {
   final MemberChatService service;
   final User currentUser;
   final String currentDisplayName;
+  final String currentUserClub;
   final String? currentPhotoSource;
   final bool currentUserReachable;
 
@@ -129,6 +131,7 @@ class _MemberList extends StatefulWidget {
     required this.service,
     required this.currentUser,
     required this.currentDisplayName,
+    required this.currentUserClub,
     required this.currentPhotoSource,
     required this.currentUserReachable,
   });
@@ -141,6 +144,8 @@ class _MemberListState extends State<_MemberList> {
   final Set<String> _knownUnreadMessageKeys = {};
   OverlayEntry? _unreadNotificationOverlay;
   Timer? _unreadNotificationTimer;
+  var _onlyOwnClub = false;
+  var _onlyOnline = false;
   bool _unreadNotificationsPrimed = false;
 
   @override
@@ -176,9 +181,6 @@ class _MemberListState extends State<_MemberList> {
           );
         }
 
-        final chatReachableCount =
-            members.where((member) => member.reachableByChat).length;
-
         return StreamBuilder<List<ChatSummary>>(
           stream: widget.service.watchChatSummaries(widget.currentUser.uid),
           builder: (context, chatSnapshot) {
@@ -190,8 +192,11 @@ class _MemberListState extends State<_MemberList> {
             final flightRoomChat = _flightRoomChatFrom(chats);
             final privateGroupChats = _privateGroupChatsFrom(chats);
             final displayMembers = _membersWithChatFallbacks(members, chats);
+            final chatReachableCount =
+                displayMembers.where((member) => member.reachableByChat).length;
+            final filteredMembers = _filterMembersForTable(displayMembers);
             final tableMembers =
-                _membersSortedForTable(displayMembers, chatsByPeer);
+                _membersSortedForTable(filteredMembers, chatsByPeer);
             final reachableMembers = [
               for (final member in members)
                 if (member.reachableByChat && member.visibleInMemberList)
@@ -248,11 +253,31 @@ class _MemberListState extends State<_MemberList> {
                   ),
                 ),
                 const SizedBox(height: 12),
+                _MemberTableFilters(
+                  onlyOwnClub: _onlyOwnClub,
+                  onlyOnline: _onlyOnline,
+                  ownClubAvailable:
+                      _normalizedClub(widget.currentUserClub).isNotEmpty,
+                  onOnlyOwnClubChanged: (value) {
+                    setState(() => _onlyOwnClub = value);
+                  },
+                  onOnlyOnlineChanged: (value) {
+                    setState(() => _onlyOnline = value);
+                  },
+                ),
+                const SizedBox(height: 12),
                 if (displayMembers.isEmpty)
                   _InfoCard(
                     icon: Icons.group_add_rounded,
                     title: 'Noch keine anderen Mitglieder',
                     message: _emptyMembersMessage(widget.currentUser),
+                  )
+                else if (tableMembers.isEmpty)
+                  const _InfoCard(
+                    icon: Icons.filter_alt_off_rounded,
+                    title: 'Keine passenden Mitglieder',
+                    message:
+                        'Mit den aktuellen Filtern ist gerade niemand in der Tabelle sichtbar.',
                   )
                 else
                   _MembersTable(
@@ -276,6 +301,17 @@ class _MemberListState extends State<_MemberList> {
         if (chat.isDirect && chat.peerUidFor(widget.currentUser.uid).isNotEmpty)
           chat.peerUidFor(widget.currentUser.uid): chat,
     };
+  }
+
+  List<MemberProfile> _filterMembersForTable(List<MemberProfile> members) {
+    final ownClub = _normalizedClub(widget.currentUserClub);
+    final filterOwnClub = _onlyOwnClub && ownClub.isNotEmpty;
+    return [
+      for (final member in members)
+        if ((!filterOwnClub || _normalizedClub(member.club) == ownClub) &&
+            (!_onlyOnline || _isMemberOnline(member)))
+          member,
+    ];
   }
 
   List<MemberProfile> _membersWithChatFallbacks(
@@ -774,6 +810,114 @@ class _MemberStatCard extends StatelessWidget {
               ),
             ],
           ),
+        ),
+      ),
+    );
+  }
+}
+
+class _MemberTableFilters extends StatelessWidget {
+  final bool onlyOwnClub;
+  final bool onlyOnline;
+  final bool ownClubAvailable;
+  final ValueChanged<bool> onOnlyOwnClubChanged;
+  final ValueChanged<bool> onOnlyOnlineChanged;
+
+  const _MemberTableFilters({
+    required this.onlyOwnClub,
+    required this.onlyOnline,
+    required this.ownClubAvailable,
+    required this.onOnlyOwnClubChanged,
+    required this.onOnlyOnlineChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: const Color(0xFFEAF4FF),
+        border: Border.all(color: const Color(0xFFB7DBFF)),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        child: Wrap(
+          spacing: 14,
+          runSpacing: 6,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          children: [
+            _MemberTableFilterCheckbox(
+              label: 'Nur eigener Verein',
+              value: onlyOwnClub && ownClubAvailable,
+              enabled: ownClubAvailable,
+              onChanged: onOnlyOwnClubChanged,
+            ),
+            _MemberTableFilterCheckbox(
+              label: 'nur Online',
+              value: onlyOnline,
+              enabled: true,
+              onChanged: onOnlyOnlineChanged,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _MemberTableFilterCheckbox extends StatelessWidget {
+  final String label;
+  final bool value;
+  final bool enabled;
+  final ValueChanged<bool> onChanged;
+
+  const _MemberTableFilterCheckbox({
+    required this.label,
+    required this.value,
+    required this.enabled,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final accentColor =
+        enabled ? const Color(0xFF0A84FF) : const Color(0xFF94A3B8);
+    final fillColor = value ? accentColor : Colors.white;
+    final iconColor = value ? Colors.white : accentColor;
+
+    return InkWell(
+      borderRadius: BorderRadius.circular(999),
+      onTap: enabled ? () => onChanged(!value) : null,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            AnimatedContainer(
+              duration: const Duration(milliseconds: 140),
+              width: 20,
+              height: 20,
+              decoration: BoxDecoration(
+                color: fillColor,
+                shape: BoxShape.circle,
+                border: Border.all(color: accentColor, width: 2),
+              ),
+              child: Icon(
+                value ? Icons.check_rounded : Icons.circle_outlined,
+                color: iconColor,
+                size: value ? 14 : 0,
+              ),
+            ),
+            const SizedBox(width: 8),
+            Text(
+              label,
+              style: TextStyle(
+                color: accentColor,
+                fontSize: 13,
+                fontWeight: FontWeight.w900,
+              ),
+            ),
+          ],
         ),
       ),
     );
@@ -1816,20 +1960,27 @@ class _MemberStatusCell extends StatelessWidget {
   Widget build(BuildContext context) {
     final online = _isMemberOnline(member);
     final chatEnabled = member.reachableByChat;
+    final statusShared = member.shareLocation;
     final color = online
         ? const Color(0xFF16A34A)
         : chatEnabled
-            ? const Color(0xFF64748B)
+            ? statusShared
+                ? const Color(0xFF64748B)
+                : const Color(0xFF94A3B8)
             : const Color(0xFF94A3B8);
     final label = online
         ? 'Online'
         : chatEnabled
-            ? 'Offline'
+            ? statusShared
+                ? 'Offline'
+                : 'Status aus'
             : 'Chat aus';
     final detail = online
         ? 'jetzt erreichbar'
         : chatEnabled
-            ? 'zuletzt ${_lastSeenLabel(member.lastSeen)}'
+            ? statusShared
+                ? 'zuletzt ${_lastSeenLabel(member.lastSeen)}'
+                : 'nicht freigegeben'
             : 'nicht erreichbar';
 
     return Row(
@@ -3068,6 +3219,10 @@ String _clubLabel(String club) {
   return clean.isEmpty ? '-' : clean;
 }
 
+String _normalizedClub(String club) {
+  return club.trim().toLowerCase();
+}
+
 int _compareText(String first, String second) {
   final left = first.trim().toLowerCase();
   final right = second.trim().toLowerCase();
@@ -3158,7 +3313,10 @@ String _lastSeenLabel(DateTime? lastSeen) {
 }
 
 bool _isMemberOnline(MemberProfile member) {
-  if (!member.reachableByChat || member.lastSeen == null) {
+  if (!member.reachableByChat ||
+      !member.shareLocation ||
+      member.presenceStatus == LocationPresenceStatus.offline.name ||
+      member.lastSeen == null) {
     return false;
   }
 
@@ -3168,9 +3326,16 @@ bool _isMemberOnline(MemberProfile member) {
 
 int _memberStatusRank(MemberProfile member) {
   if (_isMemberOnline(member)) {
-    return 2;
+    return 3;
   }
-  return member.reachableByChat ? 1 : 0;
+  if (!member.reachableByChat) {
+    return 0;
+  }
+  if (!member.shareLocation ||
+      member.presenceStatus == LocationPresenceStatus.offline.name) {
+    return 1;
+  }
+  return 2;
 }
 
 String _timeLabel(DateTime date) {

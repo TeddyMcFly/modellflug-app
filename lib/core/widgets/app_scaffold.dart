@@ -1769,14 +1769,6 @@ const _topNavItems = [
   ),
 ];
 
-const _centeredTopNavPaths = {
-  '/batteries',
-  '/statistics',
-  '/webcam',
-  '/flightbook',
-  '/friends',
-};
-
 class _TopNavItem {
   final IconData icon;
   final String label;
@@ -1888,8 +1880,7 @@ class _TopNavState extends State<_TopNav> {
 
 String? _centeredTopNavPath(String location) {
   for (final item in _topNavItems) {
-    if (_isSelectedLocation(location, item.path) &&
-        _centeredTopNavPaths.contains(item.path)) {
+    if (_isSelectedLocation(location, item.path)) {
       return item.path;
     }
   }

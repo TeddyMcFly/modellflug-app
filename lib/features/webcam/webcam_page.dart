@@ -1439,26 +1439,78 @@ class _WindCompassInstrument extends StatefulWidget {
 }
 
 class _WindCompassInstrumentState extends State<_WindCompassInstrument>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _controller;
+    with TickerProviderStateMixin {
+  late final AnimationController _swayController;
+  late final AnimationController _directionController;
+  late final AnimationController _gustLengthController;
+  late final math.Random _gustRandom;
+  late Animation<double> _directionAnimation;
+  late double _gustLengthStart;
+  late double _gustLengthEnd;
+  late double _gustSideStart;
+  late double _gustSideEnd;
 
   @override
   void initState() {
     super.initState();
-    _controller = AnimationController(
+    _gustRandom = math.Random();
+    _gustLengthStart = _nextRandomGustLengthFactor();
+    _gustLengthEnd = _nextRandomGustLengthFactor();
+    _gustSideStart = _nextRandomGustSideFactor();
+    _gustSideEnd = _nextRandomGustSideFactor(oppositeOf: _gustSideStart);
+    _swayController = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 2600),
-    )..repeat(reverse: true);
+      duration: const Duration(milliseconds: 9200),
+    )..repeat();
+    _directionController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 900),
+    )..value = 1;
+    _gustLengthController = AnimationController(
+      vsync: this,
+      duration: _nextRandomGustLengthDuration(),
+    )..addStatusListener((status) {
+        if (status == AnimationStatus.completed && mounted) {
+          _startNextRandomGustLength();
+        }
+      });
+    _directionAnimation =
+        AlwaysStoppedAnimation<double>(widget.degrees.toDouble());
+    _gustLengthController.forward();
+  }
+
+  @override
+  void didUpdateWidget(covariant _WindCompassInstrument oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.degrees != widget.degrees) {
+      final currentDegrees = _directionAnimation.value;
+      final targetDegrees =
+          currentDegrees + _shortestAngleDelta(currentDegrees, widget.degrees);
+      _directionAnimation = Tween<double>(
+        begin: currentDegrees,
+        end: targetDegrees,
+      ).chain(CurveTween(curve: Curves.easeOutCubic)).animate(
+            _directionController,
+          );
+      _directionController.forward(from: 0);
+    }
   }
 
   @override
   void dispose() {
-    _controller.dispose();
+    _swayController.dispose();
+    _directionController.dispose();
+    _gustLengthController.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
+    final arrowAnimation = Listenable.merge([
+      _directionController,
+      _swayController,
+      _gustLengthController,
+    ]);
     return Stack(
       clipBehavior: Clip.none,
       fit: StackFit.expand,
@@ -1468,13 +1520,20 @@ class _WindCompassInstrumentState extends State<_WindCompassInstrument>
           fit: BoxFit.contain,
         ),
         AnimatedBuilder(
-          animation: _controller,
+          animation: arrowAnimation,
           builder: (context, _) {
-            final sway = math.sin(_controller.value * math.pi * 2) * 4.5;
+            final phase = _swayController.value * math.pi * 2;
+            final windSway = _windSwayDegrees(phase);
+            final gustSway = _gustSwayDegrees(phase);
+            final gustLengthFactor = _gustLengthFactor(phase);
+            final gustSideOffsetFactor = _gustSideOffsetFactor();
             return CustomPaint(
               painter: _WindDirectionArrowPainter(
-                degrees: widget.degrees,
-                swayDegrees: sway,
+                degrees: _directionAnimation.value,
+                windSwayDegrees: windSway,
+                gustSwayDegrees: gustSway,
+                gustLengthFactor: gustLengthFactor,
+                gustSideOffsetFactor: gustSideOffsetFactor,
                 windKmh: widget.windKmh,
                 gustsKmh: widget.gustsKmh,
               ),
@@ -1484,17 +1543,80 @@ class _WindCompassInstrumentState extends State<_WindCompassInstrument>
       ],
     );
   }
+
+  double _shortestAngleDelta(double fromDegrees, int toDegrees) {
+    return ((toDegrees - fromDegrees + 540) % 360) - 180;
+  }
+
+  double _windSwayDegrees(double phase) {
+    final mixedSway = math.sin(phase * 1.0 + 0.8) * 1.2 +
+        math.sin(phase * 3.0 + 2.4) * 0.65 +
+        math.sin(phase * 7.0 + 4.1) * 0.35;
+    return mixedSway.clamp(-2.2, 2.2).toDouble();
+  }
+
+  double _gustSwayDegrees(double phase) {
+    final mixedSway = math.sin(phase * 1.0 + 0.4) * 3.2 +
+        math.sin(phase * 3.0 + 1.1) * 1.5 +
+        math.sin(phase * 7.0 + 2.6) * 0.8;
+    return mixedSway.clamp(-6.0, 6.0).toDouble();
+  }
+
+  double _gustLengthFactor(double phase) {
+    final eased = Curves.easeInOutCubic.transform(_gustLengthController.value);
+    final randomLength =
+        _gustLengthStart + (_gustLengthEnd - _gustLengthStart) * eased;
+    final turbulence = math.sin(phase * 8.0 + 1.7) * 0.06 +
+        math.sin(phase * 13.0 + 4.2) * 0.04;
+    return (randomLength + turbulence).clamp(0.48, 1.28).toDouble();
+  }
+
+  double _gustSideOffsetFactor() {
+    final eased = Curves.easeInOutCubic.transform(_gustLengthController.value);
+    return _gustSideStart + (_gustSideEnd - _gustSideStart) * eased;
+  }
+
+  double _nextRandomGustLengthFactor() {
+    return 0.5 + _gustRandom.nextDouble() * 0.74;
+  }
+
+  double _nextRandomGustSideFactor({double? oppositeOf}) {
+    final magnitude = 0.75 + _gustRandom.nextDouble() * 0.5;
+    if (oppositeOf != null && oppositeOf != 0) {
+      return oppositeOf.isNegative ? magnitude : -magnitude;
+    }
+    return (_gustRandom.nextBool() ? 1.0 : -1.0) * magnitude;
+  }
+
+  Duration _nextRandomGustLengthDuration() {
+    return Duration(milliseconds: 650 + _gustRandom.nextInt(1350));
+  }
+
+  void _startNextRandomGustLength() {
+    _gustLengthStart = _gustLengthFactor(_swayController.value * math.pi * 2);
+    _gustLengthEnd = _nextRandomGustLengthFactor();
+    _gustSideStart = _gustSideOffsetFactor();
+    _gustSideEnd = _nextRandomGustSideFactor(oppositeOf: _gustSideStart);
+    _gustLengthController.duration = _nextRandomGustLengthDuration();
+    _gustLengthController.forward(from: 0);
+  }
 }
 
 class _WindDirectionArrowPainter extends CustomPainter {
-  final int degrees;
-  final double swayDegrees;
+  final double degrees;
+  final double windSwayDegrees;
+  final double gustSwayDegrees;
+  final double gustLengthFactor;
+  final double gustSideOffsetFactor;
   final double windKmh;
   final double gustsKmh;
 
   const _WindDirectionArrowPainter({
     required this.degrees,
-    required this.swayDegrees,
+    required this.windSwayDegrees,
+    required this.gustSwayDegrees,
+    required this.gustLengthFactor,
+    required this.gustSideOffsetFactor,
     required this.windKmh,
     required this.gustsKmh,
   });
@@ -1503,27 +1625,27 @@ class _WindDirectionArrowPainter extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     final center = Offset(size.width / 2, size.height / 2);
     final radius = size.shortestSide / 2;
-    final angle = -math.pi / 2 + (degrees + swayDegrees) * math.pi / 180;
-    final direction = Offset(math.cos(angle), math.sin(angle));
-    final normal = Offset(-direction.dy, direction.dx);
     _drawSpeedArrow(
       canvas: canvas,
       center: center,
       radius: radius,
-      direction: direction,
-      normal: normal,
+      degrees: degrees + gustSwayDegrees,
+      sideOffsetDegrees: degrees,
       speedKmh: gustsKmh,
+      lengthFactor: gustLengthFactor,
+      maxLengthFactor: 0.9,
       color: const Color(0xFFE11D2E),
-      offset: 0,
-      strokeWidth: 6.8,
+      offset: 6.2 * gustSideOffsetFactor,
+      strokeWidth: 6.4,
     );
     _drawSpeedArrow(
       canvas: canvas,
       center: center,
       radius: radius,
-      direction: direction,
-      normal: normal,
+      degrees: degrees + windSwayDegrees,
       speedKmh: windKmh,
+      lengthFactor: 1,
+      maxLengthFactor: 0.78,
       color: const Color(0xFF0A84FF),
       offset: 0,
       strokeWidth: 5.4,
@@ -1534,21 +1656,33 @@ class _WindDirectionArrowPainter extends CustomPainter {
     required Canvas canvas,
     required Offset center,
     required double radius,
-    required Offset direction,
-    required Offset normal,
+    required double degrees,
+    double? sideOffsetDegrees,
     required double speedKmh,
+    required double lengthFactor,
+    required double maxLengthFactor,
     required Color color,
     required double offset,
     required double strokeWidth,
   }) {
     const pixelsPerKmh = 2.0;
-    final maxLength = radius * 0.78;
+    final maxLength = radius * maxLengthFactor;
     final length = math
-        .min(speedKmh.clamp(0.0, double.infinity) * pixelsPerKmh, maxLength)
+        .min(
+          speedKmh.clamp(0.0, double.infinity) * pixelsPerKmh * lengthFactor,
+          maxLength,
+        )
         .toDouble();
     if (length <= 1) {
       return;
     }
+    final angle = -math.pi / 2 + degrees * math.pi / 180;
+    final direction = Offset(math.cos(angle), math.sin(angle));
+    final offsetAngle =
+        -math.pi / 2 + (sideOffsetDegrees ?? degrees) * math.pi / 180;
+    final offsetDirection =
+        Offset(math.cos(offsetAngle), math.sin(offsetAngle));
+    final normal = Offset(-offsetDirection.dy, offsetDirection.dx);
     final sideOffset = normal * offset;
     final tip = center + direction * (radius * 0.72) + sideOffset;
     final tail = tip + direction * length;
@@ -1580,7 +1714,10 @@ class _WindDirectionArrowPainter extends CustomPainter {
   @override
   bool shouldRepaint(covariant _WindDirectionArrowPainter oldDelegate) {
     return oldDelegate.degrees != degrees ||
-        oldDelegate.swayDegrees != swayDegrees ||
+        oldDelegate.windSwayDegrees != windSwayDegrees ||
+        oldDelegate.gustSwayDegrees != gustSwayDegrees ||
+        oldDelegate.gustLengthFactor != gustLengthFactor ||
+        oldDelegate.gustSideOffsetFactor != gustSideOffsetFactor ||
         oldDelegate.windKmh != windKmh ||
         oldDelegate.gustsKmh != gustsKmh;
   }

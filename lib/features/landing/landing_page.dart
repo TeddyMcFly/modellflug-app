@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -208,11 +209,23 @@ class _LandingPageState extends ConsumerState<LandingPage> {
       backgroundColor: const Color(0xFF06172E),
       body: LayoutBuilder(
         builder: (context, constraints) {
-          final availableWidth = constraints.maxWidth - 48;
-          final availableHeight = constraints.maxHeight - 48;
-          final posterWidth = (availableHeight * 2 / 3).clamp(
-            280.0,
-            availableWidth.clamp(280.0, 720.0),
+          final shortestSide = math.min(
+            constraints.maxWidth,
+            constraints.maxHeight,
+          );
+          final outerPadding = shortestSide < 600 ? 16.0 : 24.0;
+          final bottomReserve = shortestSide < 700 ? 20.0 : 28.0;
+          final availableWidth = math.max(
+            0.0,
+            constraints.maxWidth - outerPadding * 2,
+          );
+          final availableHeight = math.max(
+            0.0,
+            constraints.maxHeight - outerPadding * 2 - bottomReserve,
+          );
+          final posterWidth = math.min(
+            720.0,
+            math.min(availableWidth, availableHeight * 2 / 3),
           );
 
           return Stack(
@@ -220,7 +233,7 @@ class _LandingPageState extends ConsumerState<LandingPage> {
             children: [
               Image.asset(
                 _landingImage,
-                fit: BoxFit.cover,
+                fit: BoxFit.contain,
                 opacity: const AlwaysStoppedAnimation(0.32),
               ),
               DecoratedBox(
@@ -238,7 +251,7 @@ class _LandingPageState extends ConsumerState<LandingPage> {
               SafeArea(
                 child: Center(
                   child: Padding(
-                    padding: const EdgeInsets.all(24),
+                    padding: EdgeInsets.all(outerPadding),
                     child: ConstrainedBox(
                       constraints: BoxConstraints(
                         maxWidth: posterWidth,

@@ -118,7 +118,8 @@ img {
   align-items: center;
   background:
     linear-gradient(90deg, rgba(3, 14, 27, 0.82), rgba(3, 14, 27, 0.46) 36%, rgba(3, 14, 27, 0.10) 62%, rgba(255, 255, 255, 0.10)),
-    url("assets/landingpage_heaven.png") center / cover no-repeat;
+    url("assets/landingpage_heaven.png") right center / clamp(520px, 48vw, 760px) auto no-repeat;
+  background-color: #06172e;
   color: #ffffff;
 }
 
@@ -1074,7 +1075,8 @@ h3 {
     align-items: flex-end;
     background:
       linear-gradient(180deg, rgba(3, 14, 27, 0.22), rgba(3, 14, 27, 0.86)),
-      url("assets/landingpage_heaven.png") center / cover no-repeat;
+      url("assets/landingpage_heaven.png") center top / contain no-repeat;
+    background-color: #06172e;
   }
 
   h1 {
