@@ -14,6 +14,7 @@ import '../../shared/utils/media_source.dart';
 const _chatFrameColor = Color(0xFF06172E);
 const _flightRadioAsset = 'assets/icons/flight_radio_header_logo.png';
 const _memberOnlineWindow = Duration(minutes: 3);
+const _presenceRefreshInterval = Duration(seconds: 15);
 
 class FriendsPage extends ConsumerStatefulWidget {
   const FriendsPage({super.key});
@@ -144,12 +145,24 @@ class _MemberListState extends State<_MemberList> {
   final Set<String> _knownUnreadMessageKeys = {};
   OverlayEntry? _unreadNotificationOverlay;
   Timer? _unreadNotificationTimer;
+  Timer? _presenceRefreshTimer;
   var _onlyOwnClub = false;
   var _onlyOnline = false;
   bool _unreadNotificationsPrimed = false;
 
   @override
+  void initState() {
+    super.initState();
+    _presenceRefreshTimer = Timer.periodic(_presenceRefreshInterval, (_) {
+      if (mounted) {
+        setState(() {});
+      }
+    });
+  }
+
+  @override
   void dispose() {
+    _presenceRefreshTimer?.cancel();
     _dismissUnreadNotification();
     super.dispose();
   }
@@ -191,7 +204,7 @@ class _MemberListState extends State<_MemberList> {
             final chatsByPeer = _directChatsByPeer(chats);
             final flightRoomChat = _flightRoomChatFrom(chats);
             final privateGroupChats = _privateGroupChatsFrom(chats);
-            final displayMembers = _membersWithChatFallbacks(members, chats);
+            final displayMembers = members;
             final chatReachableCount =
                 displayMembers.where((member) => member.reachableByChat).length;
             final filteredMembers = _filterMembersForTable(displayMembers);
@@ -312,26 +325,6 @@ class _MemberListState extends State<_MemberList> {
             (!_onlyOnline || _isMemberOnline(member)))
           member,
     ];
-  }
-
-  List<MemberProfile> _membersWithChatFallbacks(
-    List<MemberProfile> members,
-    List<ChatSummary> chats,
-  ) {
-    final knownUids = {for (final member in members) member.uid};
-    final displayMembers = [...members];
-    for (final chat in chats) {
-      if (!chat.isDirect) {
-        continue;
-      }
-      final peerUid = chat.peerUidFor(widget.currentUser.uid);
-      if (peerUid.isEmpty || knownUids.contains(peerUid)) {
-        continue;
-      }
-      displayMembers.add(_memberForChatParticipant(peerUid, chat, members));
-      knownUids.add(peerUid);
-    }
-    return displayMembers;
   }
 
   ChatSummary? _flightRoomChatFrom(List<ChatSummary> chats) {
