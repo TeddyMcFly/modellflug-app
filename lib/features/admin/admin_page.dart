@@ -11,6 +11,7 @@ import '../../shared/providers/fleet_provider.dart';
 import '../../shared/services/admin_access.dart';
 import '../../shared/services/auth_service.dart';
 import '../../shared/services/starter_fleet_service.dart';
+import '../../shared/utils/centered_snack_bar.dart';
 import '../../shared/utils/download_helper.dart';
 
 class AdminPage extends ConsumerStatefulWidget {
@@ -156,7 +157,7 @@ class _AdminPageState extends ConsumerState<AdminPage> {
       return;
     }
     setState(() => _hasLocalOverride = true);
-    _showMessage('Lokale Starter-Vorlage gespeichert.');
+    _showMessage('Starter-Vorlage in dieser Browser-Vorschau gemerkt.');
   }
 
   Future<void> _clearLocalOverride() async {
@@ -166,7 +167,7 @@ class _AdminPageState extends ConsumerState<AdminPage> {
     }
     setState(() => _hasLocalOverride = false);
     await _loadBundledStarterFleet();
-    _showMessage('Lokale Starter-Vorlage zurueckgesetzt.');
+    _showMessage('Vorschau-Vorlage zurueckgesetzt.');
   }
 
   Future<void> _downloadStarterFleet() async {
@@ -175,21 +176,33 @@ class _AdminPageState extends ConsumerState<AdminPage> {
     }
     final content = normalizeStarterFleetJson(_jsonController.text);
     if (kIsWeb) {
-      final saved = await saveTextFile(
+      final saveResult = await saveTextFileResult(
         fileName: starterFleetFileName,
         content: content,
         mimeType: 'application/json',
         allowedExtensions: const ['json'],
         description: 'Modellflug Starter-Datei',
       );
-      if (!saved) {
-        downloadTextFile(
+      final fallbackStarted = saveResult == SaveFileResult.unavailable ||
+          saveResult == SaveFileResult.failed;
+      if (fallbackStarted) {
+        downloadBytesFile(
           fileName: starterFleetFileName,
-          content: content,
+          bytes: Uint8List.fromList(utf8.encode(content)),
           mimeType: 'application/json',
         );
       }
-      _showMessage('Starter-Datei wurde gespeichert.');
+      _showMessage(
+        switch (saveResult) {
+          SaveFileResult.saved =>
+            'Starter-Datei wurde im gewaehlten Ordner gespeichert.',
+          SaveFileResult.cancelled => 'Speichern abgebrochen.',
+          SaveFileResult.unavailable =>
+            'Dieser Browser kann keinen Speicherort waehlen. Die Datei wurde als Download gestartet.',
+          SaveFileResult.failed =>
+            'Die Datei konnte dort nicht geschrieben werden. Ein Download wurde stattdessen gestartet.',
+        },
+      );
       return;
     }
 
@@ -209,9 +222,7 @@ class _AdminPageState extends ConsumerState<AdminPage> {
     if (!mounted) {
       return;
     }
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message)),
-    );
+    showCenteredSnackBar(context, message);
   }
 
   @override
@@ -322,7 +333,7 @@ class _AdminPageState extends ConsumerState<AdminPage> {
                     OutlinedButton.icon(
                       onPressed: _loading ? null : _saveLocalOverride,
                       icon: const Icon(Icons.save_rounded),
-                      label: const Text('Lokal speichern'),
+                      label: const Text('In Vorschau merken'),
                     ),
                     OutlinedButton.icon(
                       onPressed: _loading || !_hasLocalOverride
@@ -334,7 +345,7 @@ class _AdminPageState extends ConsumerState<AdminPage> {
                     FilledButton.icon(
                       onPressed: _loading ? null : _downloadStarterFleet,
                       icon: const Icon(Icons.download_rounded),
-                      label: const Text('Herunterladen'),
+                      label: const Text('Als Datei speichern'),
                     ),
                   ],
                 ),
@@ -387,7 +398,7 @@ class _OverrideChip extends StatelessWidget {
         active ? Icons.tune_rounded : Icons.inventory_2_rounded,
         size: 18,
       ),
-      label: Text(active ? 'Lokal geaendert' : 'Eingebaut'),
+      label: Text(active ? 'Vorschau geaendert' : 'Eingebaut'),
     );
   }
 }

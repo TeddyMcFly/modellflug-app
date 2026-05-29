@@ -1,50 +1,6 @@
 {
   "aircraft": [
     {
-      "id": "demo-segler",
-      "name": "Beispiel Segler",
-      "type": "Segelflugzeug",
-      "manufacturer": "Beispiel",
-      "registration": "",
-      "wingspanMeters": 2.4,
-      "lengthMeters": 1.18,
-      "weightKg": 2.1,
-      "transmitter": "Mein Sender",
-      "transmitterMemorySlot": "SEG-01",
-      "receiver": "Beispiel RX",
-      "propeller": "Klapp 12x6",
-      "rcFunctions": "",
-      "materialFuselageWing": "GFK / Schaum",
-      "wingLoading": "42 g/dm2",
-      "centerOfGravity": "",
-      "recommendedDriveBattery": "3S 2200 mAh LiPo",
-      "servos": "4x Standard-Micro",
-      "purchaseDate": "2026-05-01T00:00:00.000",
-      "purchaseDateInput": null,
-      "drive": "Elektrosegler",
-      "driveType": "",
-      "speedController": "",
-      "batteryCount": 3,
-      "batteryCellOptions": [
-        3
-      ],
-      "featureOptions": [],
-      "totalFlights": 1,
-      "flightHours": 0.4166666666666667,
-      "previousFlightMinutes": 0,
-      "status": "ready",
-      "lastService": "2026-05-01T00:00:00.000",
-      "nextService": "2026-07-01T00:00:00.000",
-      "notes": "Beispielmodell: Hier kannst du spaeter dein eigenes Segelflugzeug eintragen.",
-      "repairNotes": "",
-      "photoDataUri": null,
-      "photoDataUris": [
-        "assets/aircraft/beispiel_segler.png"
-      ],
-      "photoStoragePaths": [],
-      "photoDownloadUrls": []
-    },
-    {
       "id": "demo-kunstflug",
       "name": "Beispiel Kunstflug",
       "type": "Kunstflieger",
@@ -54,7 +10,7 @@
       "lengthMeters": 1.25,
       "weightKg": 1.9,
       "transmitter": "Mein Sender",
-      "transmitterMemorySlot": "KUNST-01",
+      "transmitterMemorySlot": "1",
       "receiver": "Beispiel RX",
       "propeller": "13x6.5",
       "rcFunctions": "",
@@ -64,9 +20,9 @@
       "recommendedDriveBattery": "4S 2600 mAh LiPo",
       "servos": "4x Digital-Micro",
       "purchaseDate": "2026-05-01T00:00:00.000",
-      "purchaseDateInput": null,
+      "purchaseDateInput": "",
       "drive": "Brushless 4S",
-      "driveType": "",
+      "driveType": "Elektrisch",
       "speedController": "",
       "batteryCount": 4,
       "batteryCellOptions": [
@@ -82,26 +38,58 @@
       "notes": "Beispielmodell: Nutze diesen Eintrag zum Ausprobieren oder loesche ihn.",
       "repairNotes": "",
       "photoDataUri": null,
-      "photoDataUris": [
-        "assets/aircraft/beispiel_kunstflieger.png"
-      ],
+      "photoDataUris": [],
       "photoStoragePaths": [],
-      "photoDownloadUrls": []
+      "photoDownloadUrls": [
+        "assets/aircraft/beispiel_kunstflieger.png"
+      ]
+    },
+    {
+      "id": "demo-segler",
+      "name": "Beispiel Segler",
+      "type": "Segelflugzeug",
+      "manufacturer": "Beispiel",
+      "registration": "",
+      "wingspanMeters": 2.4,
+      "lengthMeters": 1.18,
+      "weightKg": 2.1,
+      "transmitter": "Mein Sender",
+      "transmitterMemorySlot": "2",
+      "receiver": "Beispiel RX",
+      "propeller": "Klapp 12x6",
+      "rcFunctions": "",
+      "materialFuselageWing": "GFK / Schaum",
+      "wingLoading": "42 g/dm2",
+      "centerOfGravity": "",
+      "recommendedDriveBattery": "3S 2200 mAh LiPo",
+      "servos": "4x Standard-Micro",
+      "purchaseDate": "2026-05-01T00:00:00.000",
+      "purchaseDateInput": "",
+      "drive": "Elektrosegler",
+      "driveType": "Elektrisch",
+      "speedController": "",
+      "batteryCount": 3,
+      "batteryCellOptions": [
+        3
+      ],
+      "featureOptions": [],
+      "totalFlights": 1,
+      "flightHours": 0.4166666666666667,
+      "previousFlightMinutes": 0,
+      "status": "ready",
+      "lastService": "2026-05-01T00:00:00.000",
+      "nextService": "2026-07-01T00:00:00.000",
+      "notes": "Beispielmodell: Hier kannst du spaeter dein eigenes Segelflugzeug eintragen.",
+      "repairNotes": "",
+      "photoDataUri": null,
+      "photoDataUris": [],
+      "photoStoragePaths": [],
+      "photoDownloadUrls": [
+        "assets/aircraft/beispiel_segler.png"
+      ]
     }
   ],
   "flights": [
-    {
-      "id": "demo-flug-segler",
-      "aircraftId": "demo-segler",
-      "date": "2026-05-20T17:15:00.000",
-      "location": "Mein Flugplatz",
-      "durationMinutes": 25,
-      "batteryPacks": 1,
-      "batteryId": "demo-akku-3s-2200",
-      "batteryLabel": "Beispiel 3S 2200",
-      "pilot": "Neuer Pilot",
-      "notes": "Beispielflug: ruhige Platzrunde und erste Landung."
-    },
     {
       "id": "demo-flug-kunstflug",
       "aircraftId": "demo-kunstflug",
@@ -113,6 +101,18 @@
       "batteryLabel": "Beispiel 4S 2600",
       "pilot": "Neuer Pilot",
       "notes": "Beispielflug: Looping, Rollen und kurze Motorkontrolle."
+    },
+    {
+      "id": "demo-flug-segler",
+      "aircraftId": "demo-segler",
+      "date": "2026-05-20T17:15:00.000",
+      "location": "Mein Flugplatz",
+      "durationMinutes": 25,
+      "batteryPacks": 1,
+      "batteryId": "demo-akku-3s-2200",
+      "batteryLabel": "Beispiel 3S 2200",
+      "pilot": "Neuer Pilot",
+      "notes": "Beispielflug: ruhige Platzrunde und erste Landung."
     }
   ],
   "batteries": [
@@ -260,14 +260,10 @@
       "LiPo 4S"
     ],
     "webcams": [
-      "LMFC-Fluggelaende",
-      "Startbahn Nord",
-      "Vereinsheim"
+      "LMFC-Fluggelaende"
     ],
     "webcamUrls": [
-      "https://www.lmfc.de/fileadmin/Modellflug/cam/bilder/webcam.jpg",
-      "",
-      ""
+      "https://www.lmfc.de/fileadmin/Modellflug/cam/bilder/webcam.jpg"
     ],
     "notifyFriendsAtField": true,
     "notifyBatteryLimits": true,
@@ -275,10 +271,8 @@
     "notifyGoodWeather": true,
     "playStartSound": true,
     "playFlightTimerMinuteTone": true,
-    "autoOpenDashboardAfterLoading": true,
+    "autoOpenDashboardAfterLoading": false,
     "surfaceSettingsInitialized": true,
-    "automaticBackupEnabled": true,
-    "lastAutomaticBackupAt": null,
-    "lastAutomaticBackupSignature": null
+    "automaticBackupEnabled": true
   }
 }

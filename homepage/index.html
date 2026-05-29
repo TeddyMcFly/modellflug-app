@@ -502,6 +502,36 @@
     </footer>
     <script>
       (() => {
+        const scrollToHashTarget = () => {
+          const id = window.location.hash.slice(1);
+          if (!id) {
+            return;
+          }
+
+          const target = document.getElementById(decodeURIComponent(id));
+          if (!target) {
+            return;
+          }
+
+          const header = document.querySelector(".site-header");
+          const headerHeight = header ? header.getBoundingClientRect().height : 0;
+          const top = target.getBoundingClientRect().top + window.scrollY - headerHeight - 12;
+          window.scrollTo({
+            top: Math.max(0, top),
+            behavior: "auto"
+          });
+        };
+
+        const stabilizeHashScroll = () => {
+          scrollToHashTarget();
+          window.setTimeout(scrollToHashTarget, 150);
+          window.setTimeout(scrollToHashTarget, 500);
+          window.setTimeout(scrollToHashTarget, 1100);
+        };
+
+        window.addEventListener("hashchange", stabilizeHashScroll);
+        window.addEventListener("load", stabilizeHashScroll);
+
         const revealTexts = document.querySelectorAll([
           ".feature-card h3 + p",
           ".showcase-copy h2 + p",

@@ -18,6 +18,7 @@ import '../../shared/services/admin_access.dart';
 import '../../shared/services/auth_service.dart';
 import '../../shared/services/subscription_service.dart';
 import '../../shared/services/webcam_url_diagnostics.dart';
+import '../../shared/utils/centered_snack_bar.dart';
 import '../../shared/utils/download_helper.dart';
 import '../../shared/utils/image_thumbnail.dart';
 import '../../shared/utils/media_source.dart';
@@ -172,14 +173,12 @@ class SettingsPage extends ConsumerWidget {
     BuildContext context,
     WidgetRef ref,
   ) async {
-    final messenger = ScaffoldMessenger.of(context);
     final user = ref.read(firebaseAuthProvider).currentUser;
     final subscriptionService = ref.read(subscriptionServiceProvider);
     if (user == null || subscriptionService == null) {
-      messenger.showSnackBar(
-        const SnackBar(
-          content: Text('Die Freischaltung braucht ein angemeldetes Konto.'),
-        ),
+      showCenteredSnackBar(
+        context,
+        'Die Freischaltung braucht ein angemeldetes Konto.',
       );
       return;
     }
@@ -214,21 +213,17 @@ class SettingsPage extends ConsumerWidget {
       if (!context.mounted) {
         return;
       }
-      messenger.showSnackBar(
-        const SnackBar(
-          content: Text('Die Aktivierungsanfrage wurde gespeichert.'),
-        ),
+      showCenteredSnackBar(
+        context,
+        'Die Aktivierungsanfrage wurde gespeichert.',
       );
     } on Object {
       if (!context.mounted) {
         return;
       }
-      messenger.showSnackBar(
-        const SnackBar(
-          content: Text(
-            'Die Aktivierungsanfrage konnte nicht gespeichert werden.',
-          ),
-        ),
+      showCenteredSnackBar(
+        context,
+        'Die Aktivierungsanfrage konnte nicht gespeichert werden.',
       );
     }
   }
@@ -325,7 +320,6 @@ class SettingsPage extends ConsumerWidget {
     bool backup = false,
     String? preferredFileName,
   }) async {
-    final messenger = ScaffoldMessenger.of(context);
     final now = DateTime.now();
     final stamp =
         '${now.year}${now.month.toString().padLeft(2, '0')}${now.day.toString().padLeft(2, '0')}_${now.hour.toString().padLeft(2, '0')}${now.minute.toString().padLeft(2, '0')}';
@@ -337,26 +331,36 @@ class SettingsPage extends ConsumerWidget {
     final bytes = Uint8List.fromList(utf8.encode(rawJson));
 
     if (kIsWeb) {
-      final saved = await saveTextFile(
+      final saveResult = await saveTextFileResult(
         fileName: fileName,
         content: rawJson,
         mimeType: 'application/json;charset=utf-8',
       );
       if (!context.mounted) {
-        return saved;
+        return saveResult == SaveFileResult.saved;
       }
-      messenger.showSnackBar(
-        SnackBar(
-          content: Text(
-            saved
-                ? backup
-                    ? 'Sicherung wurde erstellt.'
-                    : 'Daten wurden exportiert.'
-                : 'Sicherung konnte in diesem Browser nicht geschrieben werden. Bitte Chrome verwenden.',
-          ),
-        ),
+      final fallbackStarted = saveResult == SaveFileResult.unavailable ||
+          saveResult == SaveFileResult.failed;
+      if (fallbackStarted) {
+        downloadTextFile(
+          fileName: fileName,
+          content: rawJson,
+          mimeType: 'application/json;charset=utf-8',
+        );
+      }
+      showCenteredSnackBar(
+        context,
+        switch (saveResult) {
+          SaveFileResult.saved =>
+            backup ? 'Sicherung wurde erstellt.' : 'Daten wurden exportiert.',
+          SaveFileResult.cancelled => 'Speichern abgebrochen.',
+          SaveFileResult.unavailable =>
+            'Dieser Browser kann keinen Speicherort waehlen. Die Datei wurde als Download gestartet.',
+          SaveFileResult.failed =>
+            'Die Datei konnte dort nicht geschrieben werden. Ein Download wurde stattdessen gestartet.',
+        },
       );
-      return saved;
+      return saveResult == SaveFileResult.saved || fallbackStarted;
     }
 
     final savedPath = await FilePicker.platform.saveFile(
@@ -371,16 +375,13 @@ class SettingsPage extends ConsumerWidget {
       return savedPath != null;
     }
 
-    messenger.showSnackBar(
-      SnackBar(
-        content: Text(
-          savedPath == null
-              ? 'Speichern abgebrochen.'
-              : backup
-                  ? 'Sicherung wurde erstellt.'
-                  : 'Daten wurden exportiert.',
-        ),
-      ),
+    showCenteredSnackBar(
+      context,
+      savedPath == null
+          ? 'Speichern abgebrochen.'
+          : backup
+              ? 'Sicherung wurde erstellt.'
+              : 'Daten wurden exportiert.',
     );
     return savedPath != null;
   }
@@ -480,13 +481,11 @@ class SettingsPage extends ConsumerWidget {
     BuildContext context,
     WidgetRef ref,
   ) async {
-    final messenger = ScaffoldMessenger.of(context);
     final fleet = ref.read(fleetProvider);
     if (fleet.flights.isEmpty) {
-      messenger.showSnackBar(
-        const SnackBar(
-          content: Text('Im Flugbuch sind noch keine Eintraege vorhanden.'),
-        ),
+      showCenteredSnackBar(
+        context,
+        'Im Flugbuch sind noch keine Eintraege vorhanden.',
       );
       return;
     }
@@ -570,18 +569,16 @@ class SettingsPage extends ConsumerWidget {
     required String description,
     String? textContent,
   }) async {
-    final messenger = ScaffoldMessenger.of(context);
-
     if (kIsWeb) {
-      final saved = textContent == null
-          ? await saveBytesFile(
+      final saveResult = textContent == null
+          ? await saveBytesFileResult(
               fileName: fileName,
               bytes: bytes,
               mimeType: mimeType,
               allowedExtensions: allowedExtensions,
               description: description,
             )
-          : await saveTextFile(
+          : await saveTextFileResult(
               fileName: fileName,
               content: textContent,
               mimeType: mimeType,
@@ -589,7 +586,9 @@ class SettingsPage extends ConsumerWidget {
               description: description,
             );
 
-      if (!saved) {
+      final fallbackStarted = saveResult == SaveFileResult.unavailable ||
+          saveResult == SaveFileResult.failed;
+      if (fallbackStarted) {
         if (textContent == null) {
           downloadBytesFile(
             fileName: fileName,
@@ -606,11 +605,19 @@ class SettingsPage extends ConsumerWidget {
       }
 
       if (context.mounted) {
-        messenger.showSnackBar(
-          SnackBar(content: Text('Flugbuch wurde als $fileName exportiert.')),
+        showCenteredSnackBar(
+          context,
+          switch (saveResult) {
+            SaveFileResult.saved => 'Flugbuch wurde als $fileName exportiert.',
+            SaveFileResult.cancelled => 'Export abgebrochen.',
+            SaveFileResult.unavailable =>
+              'Dieser Browser kann keinen Speicherort waehlen. Das Flugbuch wurde als Download gestartet.',
+            SaveFileResult.failed =>
+              'Die Datei konnte dort nicht geschrieben werden. Ein Download wurde stattdessen gestartet.',
+          },
         );
       }
-      return true;
+      return saveResult == SaveFileResult.saved || fallbackStarted;
     }
 
     final savedPath = await FilePicker.platform.saveFile(
@@ -625,39 +632,31 @@ class SettingsPage extends ConsumerWidget {
       return savedPath != null;
     }
 
-    messenger.showSnackBar(
-      SnackBar(
-        content: Text(
-          savedPath == null
-              ? 'Export abgebrochen.'
-              : 'Flugbuch wurde als $fileName exportiert.',
-        ),
-      ),
+    showCenteredSnackBar(
+      context,
+      savedPath == null
+          ? 'Export abgebrochen.'
+          : 'Flugbuch wurde als $fileName exportiert.',
     );
     return savedPath != null;
   }
 
   Future<void> _syncNow(BuildContext context, WidgetRef ref) async {
-    final messenger = ScaffoldMessenger.of(context);
     final syncResult = await ref.read(fleetProvider.notifier).syncNow();
 
     if (!context.mounted) {
       return;
     }
 
-    messenger.showSnackBar(
-      SnackBar(
-        content: Text(
-          switch (syncResult) {
-            CloudSyncResult.synced =>
-              'Daten wurden mit der Cloud synchronisiert.',
-            CloudSyncResult.wifiRequired =>
-              'Synchronisation wartet auf WLAN. Deine Daten bleiben lokal gespeichert.',
-            CloudSyncResult.cloudUnavailable =>
-              'Cloud-Synchronisation konnte nicht abgeschlossen werden. Bitte Internet und Anmeldung pruefen.',
-          },
-        ),
-      ),
+    showCenteredSnackBar(
+      context,
+      switch (syncResult) {
+        CloudSyncResult.synced => 'Daten wurden mit der Cloud synchronisiert.',
+        CloudSyncResult.wifiRequired =>
+          'Synchronisation wartet auf WLAN. Deine Daten bleiben lokal gespeichert.',
+        CloudSyncResult.cloudUnavailable =>
+          'Cloud-Synchronisation konnte nicht abgeschlossen werden. Bitte Internet und Anmeldung pruefen.',
+      },
     );
   }
 
@@ -666,7 +665,6 @@ class SettingsPage extends ConsumerWidget {
     WidgetRef ref, {
     bool restore = false,
   }) async {
-    final messenger = ScaffoldMessenger.of(context);
     final result = await FilePicker.platform.pickFiles(
       dialogTitle: restore ? 'Sicherung wiederherstellen' : 'Daten importieren',
       type: FileType.custom,
@@ -676,9 +674,7 @@ class SettingsPage extends ConsumerWidget {
 
     if (result == null || result.files.isEmpty) {
       if (context.mounted) {
-        messenger.showSnackBar(
-          const SnackBar(content: Text('Auswahl abgebrochen.')),
-        );
+        showCenteredSnackBar(context, 'Auswahl abgebrochen.');
       }
       return;
     }
@@ -686,9 +682,7 @@ class SettingsPage extends ConsumerWidget {
     final bytes = result.files.single.bytes;
     if (bytes == null) {
       if (context.mounted) {
-        messenger.showSnackBar(
-          const SnackBar(content: Text('Datei konnte nicht gelesen werden.')),
-        );
+        showCenteredSnackBar(context, 'Datei konnte nicht gelesen werden.');
       }
       return;
     }
@@ -696,22 +690,18 @@ class SettingsPage extends ConsumerWidget {
     try {
       await ref.read(fleetProvider.notifier).importJson(utf8.decode(bytes));
       if (context.mounted) {
-        messenger.showSnackBar(
-          SnackBar(
-            content: Text(
-              restore
-                  ? 'Sicherung wurde wiederhergestellt.'
-                  : 'Daten wurden importiert.',
-            ),
-          ),
+        showCenteredSnackBar(
+          context,
+          restore
+              ? 'Sicherung wurde wiederhergestellt.'
+              : 'Daten wurden importiert.',
         );
       }
     } on Object {
       if (context.mounted) {
-        messenger.showSnackBar(
-          const SnackBar(
-            content: Text('Die Datei ist keine gueltige Modellflug-Sicherung.'),
-          ),
+        showCenteredSnackBar(
+          context,
+          'Die Datei ist keine gueltige Modellflug-Sicherung.',
         );
       }
     }
@@ -1776,9 +1766,7 @@ class _PilotProfileCardState extends State<_PilotProfileCard> {
     widget.onSave(submittedProfile);
     settingsProfileHasUnsavedChanges.value = false;
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Pilotprofil gespeichert.')),
-    );
+    showCenteredSnackBar(context, 'Pilotprofil gespeichert.');
     setState(() => _editing = false);
   }
 

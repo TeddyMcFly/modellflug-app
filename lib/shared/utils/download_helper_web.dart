@@ -1,3 +1,5 @@
+import 'dart:async';
+import 'dart:convert';
 import 'dart:js_interop';
 import 'dart:js_interop_unsafe';
 import 'dart:typed_data';
@@ -9,11 +11,19 @@ external JSPromise<JSAny> _showSaveFilePicker(JSObject options);
 
 extension type _FileSystemFileHandle(JSObject _) implements JSObject {
   external JSPromise<_FileSystemWritableFileStream> createWritable();
+  external JSPromise<web.File> getFile();
 }
 
 extension type _FileSystemWritableFileStream(JSObject _) implements JSObject {
   external JSPromise<JSAny?> write(JSAny data);
   external JSPromise<JSAny?> close();
+}
+
+enum SaveFileResult {
+  saved,
+  cancelled,
+  unavailable,
+  failed,
 }
 
 void downloadBytesFile({
@@ -34,7 +44,7 @@ void downloadBytesFile({
   web.document.body?.append(anchor);
   anchor.click();
   anchor.remove();
-  web.URL.revokeObjectURL(url);
+  Timer(const Duration(seconds: 2), () => web.URL.revokeObjectURL(url));
 }
 
 void downloadTextFile({
@@ -55,7 +65,7 @@ void downloadTextFile({
   web.document.body?.append(anchor);
   anchor.click();
   anchor.remove();
-  web.URL.revokeObjectURL(url);
+  Timer(const Duration(seconds: 2), () => web.URL.revokeObjectURL(url));
 }
 
 Future<bool> saveTextFile({
@@ -65,47 +75,50 @@ Future<bool> saveTextFile({
   List<String> allowedExtensions = const ['json'],
   String description = 'Modellflug Datei',
 }) async {
-  try {
-    final picker = globalContext.getProperty<JSAny?>(
-      'showSaveFilePicker'.toJS,
-    );
-    if (picker == null || picker.isUndefinedOrNull) {
-      return false;
-    }
+  return await saveTextFileResult(
+        fileName: fileName,
+        content: content,
+        mimeType: mimeType,
+        allowedExtensions: allowedExtensions,
+        description: description,
+      ) ==
+      SaveFileResult.saved;
+}
 
-    final pickerMimeType = mimeType.split(';').first.trim();
-    final options = {
-      'suggestedName': fileName,
-      'types': [
-        {
-          'description': description,
-          'accept': {
-            pickerMimeType: [
-              for (final extension in allowedExtensions) '.$extension',
-            ],
-          },
-        },
-      ],
-    }.jsify()! as JSObject;
-
-    final blob = web.Blob(
-      [content.toJS].toJS,
-      web.BlobPropertyBag(type: mimeType),
-    );
-    final handle = _FileSystemFileHandle(
-      await _showSaveFilePicker(options).toDart as JSObject,
-    );
-    final writable = await handle.createWritable().toDart;
-
-    await writable.write(blob).toDart;
-    await writable.close().toDart;
-    return true;
-  } on Object {
-    return false;
-  }
+Future<SaveFileResult> saveTextFileResult({
+  required String fileName,
+  required String content,
+  required String mimeType,
+  List<String> allowedExtensions = const ['json'],
+  String description = 'Modellflug Datei',
+}) {
+  return saveBytesFileResult(
+    fileName: fileName,
+    bytes: Uint8List.fromList(utf8.encode(content)),
+    mimeType: mimeType,
+    allowedExtensions: allowedExtensions,
+    description: description,
+  );
 }
 
 Future<bool> saveBytesFile({
+  required String fileName,
+  required Uint8List bytes,
+  required String mimeType,
+  List<String> allowedExtensions = const ['pdf'],
+  String description = 'Modellflug Datei',
+}) async {
+  return await saveBytesFileResult(
+        fileName: fileName,
+        bytes: bytes,
+        mimeType: mimeType,
+        allowedExtensions: allowedExtensions,
+        description: description,
+      ) ==
+      SaveFileResult.saved;
+}
+
+Future<SaveFileResult> saveBytesFileResult({
   required String fileName,
   required Uint8List bytes,
   required String mimeType,
@@ -117,7 +130,7 @@ Future<bool> saveBytesFile({
       'showSaveFilePicker'.toJS,
     );
     if (picker == null || picker.isUndefinedOrNull) {
-      return false;
+      return SaveFileResult.unavailable;
     }
 
     final pickerMimeType = mimeType.split(';').first.trim();
@@ -136,7 +149,7 @@ Future<bool> saveBytesFile({
     }.jsify()! as JSObject;
 
     final blob = web.Blob(
-      [bytes.toJS].toJS,
+      <JSUint8Array>[bytes.toJS].toJS,
       web.BlobPropertyBag(type: mimeType),
     );
     final handle = _FileSystemFileHandle(
@@ -146,8 +159,19 @@ Future<bool> saveBytesFile({
 
     await writable.write(blob).toDart;
     await writable.close().toDart;
-    return true;
-  } on Object {
-    return false;
+    final writtenFile = await handle.getFile().toDart;
+    if (bytes.isNotEmpty && writtenFile.size == 0) {
+      return SaveFileResult.failed;
+    }
+    return SaveFileResult.saved;
+  } on Object catch (error) {
+    return _isUserCancelledSave(error)
+        ? SaveFileResult.cancelled
+        : SaveFileResult.failed;
   }
+}
+
+bool _isUserCancelledSave(Object error) {
+  final message = error.toString().toLowerCase();
+  return message.contains('abort') || message.contains('cancel');
 }

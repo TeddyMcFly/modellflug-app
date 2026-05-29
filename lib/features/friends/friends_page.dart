@@ -486,7 +486,7 @@ class _MemberListState extends State<_MemberList> {
       (chat) => newKeys.contains(_notificationKeyFor(chat)),
       orElse: () => unreadChats.first,
     );
-    final chatName = newestChat.titleFor(widget.currentUser.uid);
+    final senderName = _chatNotificationSenderName(newestChat, members);
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) {
@@ -494,7 +494,7 @@ class _MemberListState extends State<_MemberList> {
       }
       _showCenteredUnreadNotification(
         context: context,
-        message: 'Neue Nachricht in $chatName',
+        message: 'Neue Nachrichten von $senderName',
         onOpen: () {
           if (newestChat.isFlightRoom) {
             final reachableMembers = [
@@ -519,6 +519,17 @@ class _MemberListState extends State<_MemberList> {
         },
       );
     });
+  }
+
+  String _chatNotificationSenderName(
+    ChatSummary chat,
+    List<MemberProfile> members,
+  ) {
+    final senderUid = chat.lastSenderId.trim();
+    if (senderUid.isEmpty || senderUid == widget.currentUser.uid) {
+      return chat.titleFor(widget.currentUser.uid);
+    }
+    return _participantName(senderUid, chat, members);
   }
 
   void _showCenteredUnreadNotification({
@@ -1443,7 +1454,7 @@ class _MembersTableState extends State<_MembersTable> {
   List<MemberProfile> _sortedMembers() {
     final column = _sortColumn;
     if (column == null) {
-      return widget.members;
+      return _defaultSortedMembers();
     }
 
     final originalOrder = {
@@ -1456,6 +1467,53 @@ class _MembersTableState extends State<_MembersTable> {
       if (result != 0) {
         return _sortAscending ? result : -result;
       }
+      return (originalOrder[a.uid] ?? 0).compareTo(originalOrder[b.uid] ?? 0);
+    });
+    return sorted;
+  }
+
+  List<MemberProfile> _defaultSortedMembers() {
+    final originalOrder = {
+      for (final entry in widget.members.asMap().entries)
+        entry.value.uid: entry.key,
+    };
+    final sorted = [...widget.members];
+    sorted.sort((a, b) {
+      final byUnread = _compareNumbers(
+        _unreadSortValue(b.uid),
+        _unreadSortValue(a.uid),
+      );
+      if (byUnread != 0) {
+        return byUnread;
+      }
+
+      final aUnread = _unreadSortValue(a.uid) > 0;
+      final bUnread = _unreadSortValue(b.uid) > 0;
+      if (aUnread && bUnread) {
+        final byChatDate =
+            _compareDates(_chatDateFor(a.uid), _chatDateFor(b.uid));
+        if (byChatDate != 0) {
+          return -byChatDate;
+        }
+      }
+
+      final byOnline = _compareNumbers(
+        _memberOnlineSortValue(b),
+        _memberOnlineSortValue(a),
+      );
+      if (byOnline != 0) {
+        return byOnline;
+      }
+
+      final bothOnline =
+          _memberOnlineSortValue(a) > 0 && _memberOnlineSortValue(b) > 0;
+      if (bothOnline) {
+        final byLastSeen = _compareDates(a.lastSeen, b.lastSeen);
+        if (byLastSeen != 0) {
+          return -byLastSeen;
+        }
+      }
+
       return (originalOrder[a.uid] ?? 0).compareTo(originalOrder[b.uid] ?? 0);
     });
     return sorted;
@@ -1506,6 +1564,15 @@ class _MembersTableState extends State<_MembersTable> {
       return 2;
     }
     return reachable ? 1 : 0;
+  }
+
+  int _unreadSortValue(String uid) {
+    final chat = widget.chatsByPeer[uid];
+    return (chat?.isUnreadFor(widget.currentUser.uid) ?? false) ? 1 : 0;
+  }
+
+  int _memberOnlineSortValue(MemberProfile member) {
+    return _isMemberOnline(member) ? 1 : 0;
   }
 }
 
