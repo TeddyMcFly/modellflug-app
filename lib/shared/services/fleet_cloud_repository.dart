@@ -14,6 +14,39 @@ final fleetCloudRepositoryProvider = Provider<FleetCloudRepository?>((ref) {
   return FleetCloudRepository(FirebaseFirestore.instance);
 });
 
+class FleetCloudBackup {
+  final String id;
+  final DateTime? createdAt;
+  final String signature;
+  final int aircraftCount;
+  final int batteryCount;
+  final int flightCount;
+
+  const FleetCloudBackup({
+    required this.id,
+    required this.createdAt,
+    required this.signature,
+    required this.aircraftCount,
+    required this.batteryCount,
+    required this.flightCount,
+  });
+
+  factory FleetCloudBackup.fromJson({
+    required String id,
+    required Map<String, dynamic> json,
+  }) {
+    return FleetCloudBackup(
+      id: id,
+      createdAt: _dateFromFirestoreValue(json['createdAt']) ??
+          _dateFromFirestoreValue(json['createdAtClient']),
+      signature: json['signature'] as String? ?? '',
+      aircraftCount: json['aircraftCount'] as int? ?? 0,
+      batteryCount: json['batteryCount'] as int? ?? 0,
+      flightCount: json['flightCount'] as int? ?? 0,
+    );
+  }
+}
+
 class FleetCloudRepository {
   static const schemaVersion = 1;
 
@@ -270,6 +303,36 @@ class FleetCloudRepository {
     });
   }
 
+  Future<List<FleetCloudBackup>> loadAutomaticBackups(
+    String uid, {
+    int limit = 10,
+  }) async {
+    final snapshot = await _automaticBackups(uid)
+        .orderBy('createdAt', descending: true)
+        .limit(limit)
+        .get();
+    return [
+      for (final doc in snapshot.docs)
+        FleetCloudBackup.fromJson(
+          id: doc.id,
+          json: doc.data(),
+        ),
+    ];
+  }
+
+  Future<FleetState?> loadAutomaticBackupState({
+    required String uid,
+    required String backupId,
+  }) async {
+    final snapshot = await _automaticBackups(uid).doc(backupId).get();
+    final data = snapshot.data();
+    final stateJson = data?['state'];
+    if (stateJson is! Map<String, dynamic>) {
+      return null;
+    }
+    return FleetState.fromJson(stateJson);
+  }
+
   Future<void> deleteAircraft({
     required User user,
     required FleetState state,
@@ -492,4 +555,20 @@ int _compareFlights(Map<String, dynamic> a, Map<String, dynamic> b) {
   final aDate = DateTime.tryParse(a['date'] as String? ?? '') ?? DateTime(0);
   final bDate = DateTime.tryParse(b['date'] as String? ?? '') ?? DateTime(0);
   return bDate.compareTo(aDate);
+}
+
+DateTime? _dateFromFirestoreValue(Object? value) {
+  if (value == null) {
+    return null;
+  }
+  if (value is Timestamp) {
+    return value.toDate();
+  }
+  if (value is DateTime) {
+    return value;
+  }
+  if (value is String) {
+    return DateTime.tryParse(value);
+  }
+  return null;
 }

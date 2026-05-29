@@ -18,6 +18,7 @@ import '../services/starter_fleet_service.dart';
 import '../utils/image_thumbnail.dart';
 
 export '../models/fleet_state.dart';
+export '../services/fleet_cloud_repository.dart' show FleetCloudBackup;
 
 final fleetProvider = StateNotifierProvider<FleetNotifier, FleetState>((ref) {
   return FleetNotifier(ref);
@@ -346,6 +347,55 @@ class FleetNotifier extends StateNotifier<FleetState> {
   Future<AutomaticBackupResult> runAutomaticBackupCheck() async {
     await _bootstrapFuture;
     return _createAutomaticBackupIfNeeded();
+  }
+
+  Future<List<FleetCloudBackup>> loadAutomaticBackups() async {
+    await _bootstrapFuture;
+    if (Firebase.apps.isEmpty || _activeUid == null) {
+      return const [];
+    }
+
+    final user = FirebaseAuth.instance.currentUser;
+    final repository = _ref.read(fleetCloudRepositoryProvider);
+    if (user == null || user.uid != _activeUid || repository == null) {
+      return const [];
+    }
+
+    return repository.loadAutomaticBackups(user.uid);
+  }
+
+  Future<bool> restoreAutomaticBackup(String backupId) async {
+    await _bootstrapFuture;
+    if (Firebase.apps.isEmpty || _activeUid == null) {
+      return false;
+    }
+
+    final user = FirebaseAuth.instance.currentUser;
+    final repository = _ref.read(fleetCloudRepositoryProvider);
+    if (user == null || user.uid != _activeUid || repository == null) {
+      return false;
+    }
+
+    final backupState = await repository.loadAutomaticBackupState(
+      uid: user.uid,
+      backupId: backupId,
+    );
+    if (backupState == null) {
+      return false;
+    }
+
+    state = backupState.copyWith(
+      isLoaded: true,
+      syncStatus: FleetSyncStatus.syncing,
+    );
+    await _persist(
+      (repository, user, snapshot) => repository.saveState(
+        user: user,
+        state: snapshot,
+        replaceCollections: true,
+      ),
+    );
+    return true;
   }
 
   String exportJson() {

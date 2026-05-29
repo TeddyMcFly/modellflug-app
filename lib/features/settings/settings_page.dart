@@ -142,10 +142,9 @@ class SettingsPage extends ConsumerWidget {
                           context,
                           ref,
                         ),
-                        onRestoreBackup: () => _importData(
+                        onRestoreBackup: () => _showRestoreBackupDialog(
                           context,
                           ref,
-                          restore: true,
                         ),
                         onLocationSharingChanged: (value) => ref
                             .read(fleetProvider.notifier)
@@ -475,6 +474,113 @@ class SettingsPage extends ConsumerWidget {
       },
     );
     fileNameController.dispose();
+  }
+
+  Future<void> _showRestoreBackupDialog(
+    BuildContext context,
+    WidgetRef ref,
+  ) async {
+    final messenger = ScaffoldMessenger.of(context);
+    final backups =
+        await ref.read(fleetProvider.notifier).loadAutomaticBackups();
+
+    if (!context.mounted) {
+      return;
+    }
+
+    final selectedBackupId = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Sicherung wiederherstellen'),
+        content: SizedBox(
+          width: 470,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Automatische Sicherungen liegen in der Cloud unter deinem Konto. Du kannst eine Cloud-Sicherung laden oder weiterhin eine JSON-Datei auswaehlen.',
+                style: TextStyle(
+                  color: Color(0xFF475569),
+                  fontWeight: FontWeight.w700,
+                  height: 1.35,
+                ),
+              ),
+              const SizedBox(height: 12),
+              if (backups.isEmpty)
+                const Text(
+                  'Es wurde noch keine automatische Cloud-Sicherung gefunden.',
+                  style: TextStyle(
+                    color: Color(0xFF64748B),
+                    fontWeight: FontWeight.w700,
+                  ),
+                )
+              else
+                ConstrainedBox(
+                  constraints: const BoxConstraints(maxHeight: 280),
+                  child: SingleChildScrollView(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        for (final backup in backups)
+                          ListTile(
+                            contentPadding: EdgeInsets.zero,
+                            leading: const Icon(
+                              Icons.cloud_download_rounded,
+                              color: Color(0xFF0A84FF),
+                            ),
+                            title: Text(_backupTitle(backup)),
+                            subtitle: Text(_backupSubtitle(backup)),
+                            onTap: () => Navigator.of(context).pop(backup.id),
+                          ),
+                      ],
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Abbrechen'),
+          ),
+          OutlinedButton.icon(
+            onPressed: () => Navigator.of(context).pop('__file__'),
+            icon: const Icon(Icons.folder_open_rounded),
+            label: const Text('Datei auswaehlen'),
+          ),
+        ],
+      ),
+    );
+
+    if (selectedBackupId == null) {
+      return;
+    }
+    if (selectedBackupId == '__file__') {
+      if (!context.mounted) {
+        return;
+      }
+      await _importData(context, ref, restore: true);
+      return;
+    }
+
+    final restored = await ref
+        .read(fleetProvider.notifier)
+        .restoreAutomaticBackup(selectedBackupId);
+    if (!context.mounted) {
+      return;
+    }
+
+    messenger.showSnackBar(
+      SnackBar(
+        content: Text(
+          restored
+              ? 'Cloud-Sicherung wurde wiederhergestellt.'
+              : 'Cloud-Sicherung konnte nicht geladen werden.',
+        ),
+      ),
+    );
   }
 
   Future<void> _showFlightbookExportDialog(
@@ -2321,9 +2427,6 @@ class _StorageNote extends StatelessWidget {
 }
 
 String _lastAutomaticBackupLabel(AppSettings settings) {
-  if (!settings.automaticBackupEnabled) {
-    return 'Aus';
-  }
   final lastBackup = _parseBackupDate(settings.lastAutomaticBackupAt);
   if (lastBackup == null) {
     return 'Noch keine';
@@ -2346,8 +2449,16 @@ String _nextAutomaticBackupLabel(AppSettings settings) {
   return 'Ab ${_formatBackupDateTime(nextBackup)}';
 }
 
-String _automaticBackupCloudLabel(AppSettings settings) {
-  return settings.automaticBackupEnabled ? 'Taeglich bei Aenderung' : 'Aus';
+String _backupTitle(FleetCloudBackup backup) {
+  final createdAt = backup.createdAt;
+  if (createdAt == null) {
+    return 'Cloud-Sicherung ${backup.id}';
+  }
+  return 'Cloud-Sicherung ${_formatBackupDateTime(createdAt)}';
+}
+
+String _backupSubtitle(FleetCloudBackup backup) {
+  return '${backup.aircraftCount} Modelle, ${backup.batteryCount} Akkus, ${backup.flightCount} Fluege';
 }
 
 DateTime? _parseBackupDate(String? value) {
@@ -2609,11 +2720,6 @@ class _AppSettingsCard extends StatelessWidget {
                       icon: cloudConnection.icon,
                       title: 'Verbindung',
                       value: cloudConnection.value,
-                    ),
-                    _AppSettingTile(
-                      icon: Icons.backup_table_rounded,
-                      title: 'Automatische Sicherung',
-                      value: _automaticBackupCloudLabel(settings),
                     ),
                     _SwitchSettingTile(
                       icon: Icons.wifi_rounded,
