@@ -2766,6 +2766,11 @@ class _AppSettingsCard extends StatelessWidget {
                   title: 'Webcams',
                   icon: Icons.videocam_rounded,
                   children: [
+                    _ButtonSettingTile(
+                      icon: Icons.info_outline_rounded,
+                      label: 'Webcam-Infos',
+                      onPressed: () => _showWebcamInfoDialog(context),
+                    ),
                     _WebcamSourcesEditor(
                       webcams: settings.webcams,
                       webcamUrls: settings.webcamUrls,
@@ -4220,6 +4225,115 @@ Future<void> _showProgramHelpDialog(BuildContext context) async {
       );
     },
   );
+}
+
+Future<void> _showWebcamInfoDialog(BuildContext context) async {
+  await showDialog<void>(
+    context: context,
+    builder: (context) {
+      return AlertDialog(
+        title: const Text('Webcam-Infos'),
+        content: const SizedBox(
+          width: 520,
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _WebcamInfoItem(
+                  icon: Icons.link_rounded,
+                  title: 'Direkte Bild- oder Stream-Adresse',
+                  text:
+                      'Viele Webseiten zeigen eine Webcam nur in einer ganzen Internetseite. Die App braucht am besten die direkte Adresse zum Bild oder Stream.',
+                ),
+                _WebcamInfoItem(
+                  icon: Icons.lock_rounded,
+                  title: 'Login oder Zustimmung',
+                  text:
+                      'Wenn die Kamera-Seite ein Passwort, Cookies oder eine Zustimmung verlangt, kann die App das Bild oft nicht automatisch laden.',
+                ),
+                _WebcamInfoItem(
+                  icon: Icons.block_rounded,
+                  title: 'Einbettung blockiert',
+                  text:
+                      'Einige Anbieter verbieten, dass ihre Webcam in einer anderen App angezeigt wird. Dann bleibt die Vorschau leer, obwohl die Adresse im Browser funktioniert.',
+                ),
+                _WebcamInfoItem(
+                  icon: Icons.security_rounded,
+                  title: 'http und https',
+                  text:
+                      'Wenn die App ueber eine sichere https-Seite laeuft, blockieren Browser manchmal unsichere http-Webcams.',
+                ),
+                _WebcamInfoItem(
+                  icon: Icons.refresh_rounded,
+                  title: 'Zwischenspeicher',
+                  text:
+                      'Manche Webcam-Bilder werden vom Browser zwischengespeichert. Dann hilft oft ein Neuladen oder eine Adresse, die regelmaessig ein neues Bild liefert.',
+                ),
+              ],
+            ),
+          ),
+        ),
+        actions: [
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Verstanden'),
+          ),
+        ],
+      );
+    },
+  );
+}
+
+class _WebcamInfoItem extends StatelessWidget {
+  final IconData icon;
+  final String title;
+  final String text;
+
+  const _WebcamInfoItem({
+    required this.icon,
+    required this.title,
+    required this.text,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 14),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, color: const Color(0xFF0A84FF), size: 20),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: const TextStyle(
+                    color: Color(0xFF06172E),
+                    fontSize: 13,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  text,
+                  style: const TextStyle(
+                    color: Color(0xFF475569),
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    height: 1.35,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 class _WhatsNewDialog extends ConsumerWidget {

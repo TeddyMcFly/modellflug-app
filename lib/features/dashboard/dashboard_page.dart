@@ -67,7 +67,7 @@ class DashboardPage extends ConsumerWidget {
         const SizedBox(height: 12),
         LayoutBuilder(
           builder: (context, constraints) {
-            final isWide = constraints.maxWidth >= 900;
+            final isWide = constraints.maxWidth >= 940;
             if (isWide) {
               return Row(
                 crossAxisAlignment: CrossAxisAlignment.start,

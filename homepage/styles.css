@@ -1000,6 +1000,30 @@ h3 {
   max-width: 720px;
 }
 
+.about-card {
+  display: grid;
+  grid-template-columns: minmax(220px, 280px) minmax(0, 1fr);
+  gap: 28px;
+  align-items: start;
+}
+
+.about-photo {
+  margin: 0;
+}
+
+.about-photo img {
+  width: 100%;
+  height: auto;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.66);
+  box-shadow: var(--glass-shadow);
+  object-fit: cover;
+}
+
+.about-copy h2:first-child {
+  margin-top: 0;
+}
+
 .legal-actions {
   width: min(920px, 100%);
   display: flex;
@@ -1039,7 +1063,23 @@ h3 {
 }
 
 @media (max-width: 900px) {
-  body,
+  body:not(.legal-page) {
+    position: relative;
+    isolation: isolate;
+    background: transparent;
+  }
+
+  body:not(.legal-page)::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    background:
+      linear-gradient(180deg, rgba(255, 255, 255, 0.08), rgba(255, 244, 230, 0.08)),
+      url("assets/bg_handy_02.png") center center / cover no-repeat;
+    pointer-events: none;
+  }
+
   body.legal-page {
     background-attachment: scroll, scroll, scroll;
     background-position:
@@ -1146,6 +1186,15 @@ h3 {
 }
 
 @media (max-width: 620px) {
+  .about-card {
+    grid-template-columns: 1fr;
+  }
+
+  .about-photo {
+    max-width: 420px;
+    margin: 0 auto;
+  }
+
   .feature-table-card {
     overflow-x: visible;
   }
