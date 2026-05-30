@@ -2726,15 +2726,19 @@ class _AppSettingsCard extends StatelessWidget {
                       value: 'Aus Backup auswaehlen',
                       onTap: onRestoreBackup,
                     ),
-                    _ButtonSettingTile(
-                      icon: Icons.backup_rounded,
-                      label: 'Jetzt sichern',
-                      onPressed: onCreateBackup,
-                    ),
-                    _ButtonSettingTile(
-                      icon: Icons.ios_share_rounded,
-                      label: 'Flugbuch exportieren',
-                      onPressed: onExportFlightbook,
+                    _ButtonSettingTileRow(
+                      buttons: [
+                        _ButtonSettingButton(
+                          icon: Icons.backup_rounded,
+                          label: 'Jetzt sichern',
+                          onPressed: onCreateBackup,
+                        ),
+                        _ButtonSettingButton(
+                          icon: Icons.ios_share_rounded,
+                          label: 'Flugbuch exportieren',
+                          onPressed: onExportFlightbook,
+                        ),
+                      ],
                     ),
                   ],
                 ),
@@ -2766,10 +2770,23 @@ class _AppSettingsCard extends StatelessWidget {
                   title: 'Webcams',
                   icon: Icons.videocam_rounded,
                   children: [
-                    _ButtonSettingTile(
-                      icon: Icons.info_outline_rounded,
-                      label: 'Webcam-Infos',
-                      onPressed: () => _showWebcamInfoDialog(context),
+                    _ButtonSettingTileRow(
+                      buttons: [
+                        _ButtonSettingButton(
+                          icon: Icons.info_outline_rounded,
+                          label: 'Webcam-Infos',
+                          onPressed: () => _showWebcamInfoDialog(context),
+                        ),
+                        _ButtonSettingButton(
+                          icon: Icons.auto_fix_high_rounded,
+                          label: 'Webcam-Assistent',
+                          onPressed: () => _showWebcamSetupAssistant(
+                            context,
+                            settings,
+                            onSettingsChanged,
+                          ),
+                        ),
+                      ],
                     ),
                     _WebcamSourcesEditor(
                       webcams: settings.webcams,
@@ -3476,6 +3493,410 @@ class _WebcamDiagnosticPanel extends StatelessWidget {
   }
 }
 
+class _WebcamAssistantResult {
+  final int? replaceIndex;
+  final String name;
+  final String url;
+
+  const _WebcamAssistantResult({
+    required this.replaceIndex,
+    required this.name,
+    required this.url,
+  });
+}
+
+class _WebcamSetupAssistantDialog extends StatefulWidget {
+  final AppSettings settings;
+
+  const _WebcamSetupAssistantDialog({required this.settings});
+
+  @override
+  State<_WebcamSetupAssistantDialog> createState() =>
+      _WebcamSetupAssistantDialogState();
+}
+
+class _WebcamSetupAssistantDialogState
+    extends State<_WebcamSetupAssistantDialog> {
+  late final List<String> _webcamNames;
+  late final List<String> _webcamUrls;
+  late final TextEditingController _nameController;
+  late final TextEditingController _urlController;
+  int _targetIndex = -1;
+  WebcamUrlDiagnostic? _diagnostic;
+  int _previewSerial = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _webcamNames = _settingsWebcamNames(widget.settings);
+    _webcamUrls = _settingsWebcamUrls(_webcamNames, widget.settings.webcamUrls);
+    _nameController =
+        TextEditingController(text: _nextWebcamName(_webcamNames));
+    _urlController = TextEditingController();
+  }
+
+  @override
+  void dispose() {
+    _nameController.dispose();
+    _urlController.dispose();
+    super.dispose();
+  }
+
+  void _selectTarget(int? value) {
+    final nextIndex = value ?? -1;
+    setState(() {
+      _targetIndex = nextIndex;
+      if (nextIndex >= 0 && nextIndex < _webcamNames.length) {
+        _nameController.text = _webcamNames[nextIndex];
+        _urlController.text = _webcamUrls[nextIndex];
+        _diagnostic = _urlController.text.trim().isEmpty
+            ? null
+            : diagnoseWebcamUrl(_urlController.text);
+      } else {
+        _nameController.text = _nextWebcamName(_webcamNames);
+        _urlController.clear();
+        _diagnostic = null;
+      }
+      _previewSerial++;
+    });
+  }
+
+  void _runCheck() {
+    setState(() {
+      _diagnostic = diagnoseWebcamUrl(_urlController.text);
+      _previewSerial++;
+    });
+  }
+
+  void _useSuggestedUrl() {
+    final suggestedUrl = _diagnostic?.suggestedUrl;
+    if (suggestedUrl == null) {
+      return;
+    }
+    setState(() {
+      _urlController.text = suggestedUrl;
+      _diagnostic = diagnoseWebcamUrl(suggestedUrl);
+      _previewSerial++;
+    });
+  }
+
+  void _save() {
+    final diagnostic = _diagnostic;
+    if (diagnostic == null || !diagnostic.hasPreview) {
+      return;
+    }
+    final name = _nameController.text.trim();
+    if (name.isEmpty) {
+      return;
+    }
+    final url = diagnostic.suggestedUrl ??
+        diagnostic.displayUrl ??
+        diagnostic.normalizedUrl ??
+        _urlController.text.trim();
+    Navigator.of(context).pop(
+      _WebcamAssistantResult(
+        replaceIndex: _targetIndex >= 0 && _targetIndex < _webcamNames.length
+            ? _targetIndex
+            : null,
+        name: name,
+        url: url,
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final diagnostic = _diagnostic;
+    final canSave = diagnostic?.hasPreview == true &&
+        _nameController.text.trim().isNotEmpty;
+    final previewName = _nameController.text.trim().isEmpty
+        ? 'Webcam'
+        : _nameController.text.trim();
+
+    return AlertDialog(
+      title: const Text('Webcam-Assistent'),
+      content: SizedBox(
+        width: 720,
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              _WebcamAssistantStep(
+                number: '1',
+                title: 'Ziel waehlen',
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    DropdownButtonFormField<int>(
+                      initialValue: _targetIndex,
+                      decoration: const InputDecoration(
+                        labelText: 'Speichern als',
+                        prefixIcon: Icon(Icons.videocam_rounded),
+                      ),
+                      items: [
+                        const DropdownMenuItem<int>(
+                          value: -1,
+                          child: Text('Neue Webcam anlegen'),
+                        ),
+                        for (var index = 0;
+                            index < _webcamNames.length;
+                            index++)
+                          DropdownMenuItem<int>(
+                            value: index,
+                            child: Text('Vorhandene ersetzen: '
+                                '${_webcamNames[index]}'),
+                          ),
+                      ],
+                      onChanged: _selectTarget,
+                    ),
+                    const SizedBox(height: 10),
+                    TextField(
+                      controller: _nameController,
+                      decoration: const InputDecoration(
+                        labelText: 'Name der Webcam',
+                        hintText: 'z. B. Flugplatz Nord',
+                        prefixIcon: Icon(Icons.label_rounded),
+                      ),
+                      onChanged: (_) => setState(() {}),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 14),
+              _WebcamAssistantStep(
+                number: '2',
+                title: 'Adresse einfuegen',
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    TextField(
+                      controller: _urlController,
+                      decoration: const InputDecoration(
+                        labelText: 'Webcam-Adresse',
+                        hintText: 'https://...',
+                        prefixIcon: Icon(Icons.link_rounded),
+                      ),
+                      onChanged: (_) {
+                        setState(() {
+                          _diagnostic = null;
+                        });
+                      },
+                      onSubmitted: (_) => _runCheck(),
+                    ),
+                    const SizedBox(height: 10),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [
+                        FilledButton.icon(
+                          onPressed: _runCheck,
+                          icon: const Icon(Icons.manage_search_rounded),
+                          label: const Text('Adresse pruefen'),
+                        ),
+                        if (diagnostic?.suggestedUrl != null)
+                          OutlinedButton.icon(
+                            onPressed: _useSuggestedUrl,
+                            icon: const Icon(Icons.auto_fix_high_rounded),
+                            label: const Text('Vorschlag einsetzen'),
+                          ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 14),
+              _WebcamAssistantStep(
+                number: '3',
+                title: 'Ergebnis ansehen',
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    if (diagnostic == null)
+                      const _WebcamAssistantHint(
+                        icon: Icons.manage_search_rounded,
+                        title: 'Noch nicht geprueft',
+                        text:
+                            'Fuege eine Adresse ein und druecke Adresse pruefen. Wenn nur die Homepage-Adresse vorhanden ist, kann der Assistent trotzdem Hinweise geben.',
+                      )
+                    else ...[
+                      _WebcamDiagnosticPanel(diagnostic: diagnostic),
+                      if (diagnostic.kind == WebcamSourceKind.webPage) ...[
+                        const SizedBox(height: 10),
+                        const _WebcamAssistantHint(
+                          icon: Icons.mouse_rounded,
+                          title: 'Homepage-Adresse erkannt',
+                          text:
+                              'Falls die Vorschau leer bleibt: Auf der Webcam-Webseite direkt auf das Videobild rechtsklicken und Video-Adresse, Bildadresse oder Frame-Adresse kopieren. Diese Adresse dann hier erneut pruefen.',
+                        ),
+                      ],
+                      if (diagnostic.hasPreview) ...[
+                        const SizedBox(height: 12),
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(8),
+                          child: AspectRatio(
+                            aspectRatio: 16 / 9,
+                            child: WebcamLivePreview(
+                              title: previewName,
+                              sourceUrl: diagnostic.displayUrl,
+                              refreshSerial: _previewSerial,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ],
+                  ],
+                ),
+              ),
+              const SizedBox(height: 14),
+              const _WebcamAssistantHint(
+                icon: Icons.fact_check_rounded,
+                title: 'Was der Assistent prueft',
+                text:
+                    'Er erkennt unlesbare Adressen, direkte Bilder, Video-Streams, YouTube-Adressen und bekannte Webcams. Sperren, Login-Fenster oder Cookie-Abfragen der Webcam-Webseite kann er nicht umgehen.',
+              ),
+            ],
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Abbrechen'),
+        ),
+        FilledButton.icon(
+          onPressed: canSave ? _save : null,
+          icon: const Icon(Icons.save_rounded),
+          label: const Text('Webcam speichern'),
+        ),
+      ],
+    );
+  }
+}
+
+class _WebcamAssistantStep extends StatelessWidget {
+  final String number;
+  final String title;
+  final Widget child;
+
+  const _WebcamAssistantStep({
+    required this.number,
+    required this.title,
+    required this.child,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: const Color(0xFFF8FAFC),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: const Color(0xFFE2E8F0)),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              children: [
+                Container(
+                  width: 24,
+                  height: 24,
+                  alignment: Alignment.center,
+                  decoration: const BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: Color(0xFF0A84FF),
+                  ),
+                  child: Text(
+                    number,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    title,
+                    style: const TextStyle(
+                      color: Color(0xFF06172E),
+                      fontSize: 14,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            child,
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _WebcamAssistantHint extends StatelessWidget {
+  final IconData icon;
+  final String title;
+  final String text;
+
+  const _WebcamAssistantHint({
+    required this.icon,
+    required this.title,
+    required this.text,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: const Color(0xFFEFF6FF),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: const Color(0xFFBFDBFE)),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Icon(icon, color: const Color(0xFF0A84FF), size: 20),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: const TextStyle(
+                      color: Color(0xFF0F172A),
+                      fontSize: 12,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                  const SizedBox(height: 3),
+                  Text(
+                    text,
+                    style: const TextStyle(
+                      color: Color(0xFF334155),
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      height: 1.35,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class _ButtonSettingTile extends StatelessWidget {
   final IconData icon;
   final String label;
@@ -3498,6 +3919,71 @@ class _ButtonSettingTile extends StatelessWidget {
           icon: Icon(icon, size: 18),
           label: Text(label),
         ),
+      ),
+    );
+  }
+}
+
+class _ButtonSettingButton {
+  final IconData icon;
+  final String label;
+  final VoidCallback? onPressed;
+
+  const _ButtonSettingButton({
+    required this.icon,
+    required this.label,
+    this.onPressed,
+  });
+}
+
+class _ButtonSettingTileRow extends StatelessWidget {
+  final List<_ButtonSettingButton> buttons;
+
+  const _ButtonSettingTileRow({required this.buttons});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: Row(
+        children: [
+          for (var index = 0; index < buttons.length; index++) ...[
+            if (index > 0) const SizedBox(width: 8),
+            Expanded(child: _ButtonSettingRowButton(button: buttons[index])),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _ButtonSettingRowButton extends StatelessWidget {
+  final _ButtonSettingButton button;
+
+  const _ButtonSettingRowButton({required this.button});
+
+  @override
+  Widget build(BuildContext context) {
+    return FilledButton(
+      onPressed: button.onPressed,
+      style: FilledButton.styleFrom(
+        minimumSize: const Size.fromHeight(40),
+        padding: const EdgeInsets.symmetric(horizontal: 10),
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(button.icon, size: 18),
+          const SizedBox(width: 6),
+          Flexible(
+            child: Text(
+              button.label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              softWrap: false,
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -4227,6 +4713,69 @@ Future<void> _showProgramHelpDialog(BuildContext context) async {
   );
 }
 
+Future<void> _showWebcamSetupAssistant(
+  BuildContext context,
+  AppSettings settings,
+  ValueChanged<AppSettings> onSettingsChanged,
+) async {
+  final result = await showDialog<_WebcamAssistantResult>(
+    context: context,
+    builder: (context) => _WebcamSetupAssistantDialog(settings: settings),
+  );
+  if (result == null || !context.mounted) {
+    return;
+  }
+
+  final webcamNames = [..._settingsWebcamNames(settings)];
+  final webcamUrls = _settingsWebcamUrls(webcamNames, settings.webcamUrls);
+  final replaceIndex = result.replaceIndex;
+  if (replaceIndex != null &&
+      replaceIndex >= 0 &&
+      replaceIndex < webcamNames.length) {
+    webcamNames[replaceIndex] = result.name;
+    webcamUrls[replaceIndex] = result.url;
+  } else {
+    webcamNames.add(result.name);
+    webcamUrls.add(result.url);
+  }
+
+  onSettingsChanged(
+    settings.copyWith(
+      webcams: webcamNames,
+      webcamUrls: webcamUrls,
+    ),
+  );
+  showCenteredSnackBar(
+    context,
+    replaceIndex == null
+        ? 'Webcam wurde hinzugefuegt.'
+        : 'Webcam wurde aktualisiert.',
+  );
+}
+
+List<String> _settingsWebcamNames(AppSettings settings) {
+  final names = [
+    for (final webcam in settings.webcams)
+      if (webcam.trim().isNotEmpty) webcam.trim(),
+  ];
+  return names.isEmpty ? [...defaultWebcams] : names;
+}
+
+List<String> _settingsWebcamUrls(List<String> webcamNames, List<String> urls) {
+  return [
+    for (var index = 0; index < webcamNames.length; index++)
+      index < urls.length ? urls[index].trim() : '',
+  ];
+}
+
+String _nextWebcamName(List<String> existingNames) {
+  var counter = existingNames.length + 1;
+  while (existingNames.contains('Webcam $counter')) {
+    counter++;
+  }
+  return 'Webcam $counter';
+}
+
 Future<void> _showWebcamInfoDialog(BuildContext context) async {
   await showDialog<void>(
     context: context,
@@ -4234,17 +4783,54 @@ Future<void> _showWebcamInfoDialog(BuildContext context) async {
       return AlertDialog(
         title: const Text('Webcam-Infos'),
         content: const SizedBox(
-          width: 520,
+          width: 640,
           child: SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                _WebcamInfoItem(
-                  icon: Icons.link_rounded,
-                  title: 'Direkte Bild- oder Stream-Adresse',
+                _WebcamInfoNote(
                   text:
-                      'Viele Webseiten zeigen eine Webcam nur in einer ganzen Internetseite. Die App braucht am besten die direkte Adresse zum Bild oder Stream.',
+                      'Webcams sind technisch oft komplizierter als normale Bilder. Eine Adresse kann im Browser gut aussehen und in einer App trotzdem nicht funktionieren. Das liegt meistens am Anbieter der Webcam, nicht an deinen Einstellungen.',
+                ),
+                SizedBox(height: 14),
+                _WebcamInfoItem(
+                  icon: Icons.language_rounded,
+                  title: 'Homepage-Adresse reicht selten',
+                  text:
+                      'Die Adresse der Internetseite, auf der die Webcam sichtbar ist, fuehrt selten direkt zur Anzeige im Flugbuch-Programm. Diese Seite enthaelt oft nur Text, Werbung, Cookie-Fenster und ein eingebettetes Videofenster.',
+                ),
+                _WebcamInfoItem(
+                  icon: Icons.videocam_rounded,
+                  title: 'Gesucht wird die eigentliche Medien-Adresse',
+                  text:
+                      'Meist braucht die App die Adresse des Bildes, Videos oder Streams. Solche Adressen enden oft auf .jpg, .mjpg, .mjpeg, .m3u8, .mp4 oder enthalten Woerter wie stream, live, snapshot oder image.',
+                ),
+                _WebcamInfoItem(
+                  icon: Icons.mouse_rounded,
+                  title: 'Rechtsklick direkt auf das Videobild',
+                  text:
+                      'Klicke nicht irgendwo auf die Webseite, sondern direkt auf das Webcam-Bild oder Video. Im Rechtsklick-Menue stehen manchmal Eintraege wie Video-Adresse kopieren, Bildadresse kopieren oder Frame-Adresse kopieren.',
+                ),
+                _WebcamRightClickExample(),
+                SizedBox(height: 14),
+                _WebcamInfoItem(
+                  icon: Icons.fact_check_rounded,
+                  title: 'Der eingebaute Checker',
+                  text:
+                      'Neben jeder Webcam-Adresse gibt es den Pruefen-Knopf. Der Checker erkennt leere oder unlesbare Adressen, direkte Bilder, direkte Video-Streams, YouTube-Adressen und einige bekannte Webcams. Wenn er eine bessere interne Anzeige-Adresse kennt, schlaegt er sie vor.',
+                ),
+                _WebcamInfoItem(
+                  icon: Icons.preview_rounded,
+                  title: 'Was der Checker leisten kann',
+                  text:
+                      'Er zeigt eine Vorschau, bewertet die Adresse und gibt Hinweise. Er kann auch normale Adressen in eine bessere Anzeige-Adresse umwandeln, zum Beispiel bei bekannten Kameras oder YouTube-Videos.',
+                ),
+                _WebcamInfoItem(
+                  icon: Icons.warning_amber_rounded,
+                  title: 'Was der Checker nicht umgehen kann',
+                  text:
+                      'Er kann keine Passwoerter eingeben, keine Cookie-Fenster bestaetigen und keine Sperren des Webcam-Anbieters aufheben. Wenn ein Anbieter das Einbetten verbietet, bleibt die Anzeige oft leer.',
                 ),
                 _WebcamInfoItem(
                   icon: Icons.lock_rounded,
@@ -4262,13 +4848,17 @@ Future<void> _showWebcamInfoDialog(BuildContext context) async {
                   icon: Icons.security_rounded,
                   title: 'http und https',
                   text:
-                      'Wenn die App ueber eine sichere https-Seite laeuft, blockieren Browser manchmal unsichere http-Webcams.',
+                      'Wenn die App spaeter ueber eine sichere https-Seite laeuft, blockieren Browser manchmal unsichere http-Webcams. Lokal am eigenen Rechner kann dieselbe Adresse deshalb anders wirken als spaeter online.',
                 ),
                 _WebcamInfoItem(
                   icon: Icons.refresh_rounded,
                   title: 'Zwischenspeicher',
                   text:
                       'Manche Webcam-Bilder werden vom Browser zwischengespeichert. Dann hilft oft ein Neuladen oder eine Adresse, die regelmaessig ein neues Bild liefert.',
+                ),
+                _WebcamInfoNote(
+                  text:
+                      'Faustregel: Erst die Homepage-Adresse testen. Wenn die Vorschau nicht kommt, direkt auf dem Videobild per Rechtsklick nach der Medien-Adresse suchen und diese im Checker pruefen.',
                 ),
               ],
             ),
@@ -4283,6 +4873,200 @@ Future<void> _showWebcamInfoDialog(BuildContext context) async {
       );
     },
   );
+}
+
+class _WebcamInfoNote extends StatelessWidget {
+  final String text;
+
+  const _WebcamInfoNote({required this.text});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: const Color(0xFFEFF6FF),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: const Color(0xFFBFDBFE)),
+      ),
+      child: Text(
+        text,
+        style: const TextStyle(
+          color: Color(0xFF334155),
+          fontSize: 12,
+          fontWeight: FontWeight.w700,
+          height: 1.35,
+        ),
+      ),
+    );
+  }
+}
+
+class _WebcamRightClickExample extends StatelessWidget {
+  const _WebcamRightClickExample();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.only(bottom: 16),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF8FAFC),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: const Color(0xFFE2E8F0)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Beispiel: Rechtsklick auf das Videobild',
+            style: TextStyle(
+              color: Color(0xFF06172E),
+              fontSize: 13,
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+          const SizedBox(height: 10),
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final menuWidth = constraints.maxWidth < 430 ? 204.0 : 230.0;
+
+              return ClipRRect(
+                borderRadius: BorderRadius.circular(8),
+                child: AspectRatio(
+                  aspectRatio: 1034 / 542,
+                  child: Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      Image.asset(
+                        'assets/webcam/webcam_adler.png',
+                        fit: BoxFit.cover,
+                        errorBuilder: (context, error, stackTrace) {
+                          return Container(
+                            color: const Color(0xFF0F172A),
+                            alignment: Alignment.center,
+                            child: const Icon(
+                              Icons.videocam_off_rounded,
+                              color: Colors.white,
+                              size: 38,
+                            ),
+                          );
+                        },
+                      ),
+                      Positioned(
+                        left: 18,
+                        bottom: 54,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 7,
+                          ),
+                          decoration: BoxDecoration(
+                            color: Colors.black.withValues(alpha: 0.72),
+                            borderRadius: BorderRadius.circular(999),
+                            border: Border.all(
+                              color: Colors.white.withValues(alpha: 0.72),
+                            ),
+                          ),
+                          child: const Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                Icons.mouse_rounded,
+                                color: Colors.white,
+                                size: 16,
+                              ),
+                              SizedBox(width: 6),
+                              Text(
+                                'Hier rechts klicken',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w900,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                      Positioned(
+                        right: 14,
+                        top: 18,
+                        child: Container(
+                          width: menuWidth,
+                          padding: const EdgeInsets.symmetric(vertical: 8),
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: const Color(0xFFCBD5E1)),
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.black.withValues(alpha: 0.24),
+                                blurRadius: 16,
+                                offset: const Offset(0, 8),
+                              ),
+                            ],
+                          ),
+                          child: const Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              _WebcamMenuLine(
+                                text: 'Video-Adresse kopieren',
+                              ),
+                              _WebcamMenuLine(text: 'Bildadresse kopieren'),
+                              _WebcamMenuLine(text: 'Frame-Adresse kopieren'),
+                              Divider(height: 12),
+                              _WebcamMenuLine(
+                                text: 'Video in neuem Tab oeffnen',
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            },
+          ),
+          const SizedBox(height: 10),
+          const Text(
+            'Die Bezeichnungen sind je nach Browser und Webcam verschieden. Wichtig ist: Die kopierte Adresse soll direkt zum Bild, Video oder Stream fuehren, nicht nur zur normalen Homepage.',
+            style: TextStyle(
+              color: Color(0xFF475569),
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+              height: 1.35,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _WebcamMenuLine extends StatelessWidget {
+  final String text;
+
+  const _WebcamMenuLine({required this.text});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+      child: Text(
+        text,
+        style: const TextStyle(
+          color: Color(0xFF0F172A),
+          fontSize: 11,
+          fontWeight: FontWeight.w700,
+        ),
+      ),
+    );
+  }
 }
 
 class _WebcamInfoItem extends StatelessWidget {

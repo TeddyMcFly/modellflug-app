@@ -239,8 +239,33 @@ class SubscriptionService {
 
   const SubscriptionService(this._firestore);
 
+  CollectionReference<Map<String, dynamic>> get _users {
+    return _firestore.collection('users');
+  }
+
   DocumentReference<Map<String, dynamic>> _userDoc(String uid) {
-    return _firestore.collection('users').doc(uid);
+    return _users.doc(uid);
+  }
+
+  Stream<List<ManualActivationAccount>> watchManualActivationAccounts() {
+    return _users
+        .where(
+          'subscriptionStatus',
+          whereIn: const [
+            'activationRequested',
+            'trial',
+            'active',
+            'expired',
+            'owner',
+          ],
+        )
+        .snapshots()
+        .map((snapshot) {
+          final accounts =
+              snapshot.docs.map(ManualActivationAccount.fromSnapshot).toList();
+          accounts.sort(_compareManualActivationAccounts);
+          return accounts;
+        });
   }
 
   Stream<AccountAccess> watchAccountAccess(User user) async* {
@@ -317,6 +342,135 @@ class SubscriptionService {
       SetOptions(merge: true),
     );
   }
+
+  Future<void> activateAccount({
+    required String uid,
+    String? adminEmail,
+  }) async {
+    final now = DateTime.now().toUtc();
+    await _userDoc(uid).set(
+      {
+        'subscriptionStatus': 'active',
+        'subscriptionEndsAt': null,
+        'subscriptionActivatedAt': FieldValue.serverTimestamp(),
+        'subscriptionActivatedAtClient': now.toIso8601String(),
+        'subscriptionUpdatedAt': FieldValue.serverTimestamp(),
+        'subscriptionUpdatedAtClient': now.toIso8601String(),
+        'subscriptionUpdatedBy': adminEmail,
+      },
+      SetOptions(merge: true),
+    );
+  }
+
+  Future<void> expireAccount({
+    required String uid,
+    String? adminEmail,
+  }) async {
+    final now = DateTime.now().toUtc();
+    await _userDoc(uid).set(
+      {
+        'subscriptionStatus': 'expired',
+        'subscriptionEndsAt': Timestamp.fromDate(now),
+        'subscriptionExpiredAt': FieldValue.serverTimestamp(),
+        'subscriptionExpiredAtClient': now.toIso8601String(),
+        'subscriptionUpdatedAt': FieldValue.serverTimestamp(),
+        'subscriptionUpdatedAtClient': now.toIso8601String(),
+        'subscriptionUpdatedBy': adminEmail,
+      },
+      SetOptions(merge: true),
+    );
+  }
+}
+
+class ManualActivationAccount {
+  final String uid;
+  final String email;
+  final String displayName;
+  final AccountAccess access;
+  final DateTime? trialEndsAt;
+  final DateTime? subscriptionUpdatedAt;
+
+  const ManualActivationAccount({
+    required this.uid,
+    required this.email,
+    required this.displayName,
+    required this.access,
+    this.trialEndsAt,
+    this.subscriptionUpdatedAt,
+  });
+
+  factory ManualActivationAccount.fromSnapshot(
+    QueryDocumentSnapshot<Map<String, dynamic>> snapshot,
+  ) {
+    final data = snapshot.data();
+    final email = data['email'] as String? ?? '';
+    return ManualActivationAccount(
+      uid: snapshot.id,
+      email: email,
+      displayName:
+          data['displayName'] as String? ?? data['publicName'] as String? ?? '',
+      access: AccountAccess.fromUserData(data, userEmail: email),
+      trialEndsAt: _dateFromFirestoreValue(data['trialEndsAt']) ??
+          _dateFromFirestoreValue(data['trialEndsAtClient']),
+      subscriptionUpdatedAt:
+          _dateFromFirestoreValue(data['subscriptionUpdatedAt']) ??
+              _dateFromFirestoreValue(data['subscriptionUpdatedAtClient']),
+    );
+  }
+
+  DateTime? get sortDate {
+    return access.activationRequestedAt ??
+        subscriptionUpdatedAt ??
+        access.subscriptionEndsAt ??
+        trialEndsAt ??
+        access.trialStartedAt;
+  }
+
+  bool get canActivate {
+    return access.status != AccountAccessStatus.active &&
+        access.status != AccountAccessStatus.owner;
+  }
+
+  bool get canExpire {
+    return access.status == AccountAccessStatus.active;
+  }
+}
+
+int _compareManualActivationAccounts(
+  ManualActivationAccount left,
+  ManualActivationAccount right,
+) {
+  final rankComparison = _manualActivationRank(left.access.status).compareTo(
+    _manualActivationRank(right.access.status),
+  );
+  if (rankComparison != 0) {
+    return rankComparison;
+  }
+
+  final leftDate = left.sortDate;
+  final rightDate = right.sortDate;
+  if (leftDate == null && rightDate == null) {
+    return left.email.compareTo(right.email);
+  }
+  if (leftDate == null) {
+    return 1;
+  }
+  if (rightDate == null) {
+    return -1;
+  }
+  return rightDate.compareTo(leftDate);
+}
+
+int _manualActivationRank(AccountAccessStatus status) {
+  return switch (status) {
+    AccountAccessStatus.activationRequested => 0,
+    AccountAccessStatus.expired => 1,
+    AccountAccessStatus.trial => 2,
+    AccountAccessStatus.active => 3,
+    AccountAccessStatus.owner => 4,
+    AccountAccessStatus.localDevelopment => 5,
+    AccountAccessStatus.signedOut => 6,
+  };
 }
 
 DateTime? _dateFromFirestoreValue(Object? value) {

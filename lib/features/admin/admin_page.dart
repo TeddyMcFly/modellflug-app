@@ -11,6 +11,7 @@ import '../../shared/providers/fleet_provider.dart';
 import '../../shared/services/admin_access.dart';
 import '../../shared/services/auth_service.dart';
 import '../../shared/services/starter_fleet_service.dart';
+import '../../shared/services/subscription_service.dart';
 import '../../shared/services/user_device_service.dart';
 import '../../shared/utils/centered_snack_bar.dart';
 import '../../shared/utils/download_helper.dart';
@@ -278,12 +279,19 @@ class _AdminPageState extends ConsumerState<AdminPage> {
       );
     }
 
-    final summary = _summary;
     final deviceService = ref.watch(userDeviceServiceProvider);
+    final subscriptionService = ref.watch(subscriptionServiceProvider);
+    final summary = _summary;
     return AppScaffold(
       title: 'Admin',
-      subtitle: 'Starter-Datei fuer neue Konten vorbereiten.',
+      subtitle: 'Freischaltungen, Starter-Datei und Geraetezugriffe verwalten.',
       children: [
+        _ManualActivationCard(
+          service: subscriptionService,
+          adminEmail: authState.valueOrNull?.email,
+          onMessage: _showMessage,
+        ),
+        const SizedBox(height: 16),
         Card(
           margin: EdgeInsets.zero,
           child: Padding(
@@ -501,6 +509,537 @@ class _ErrorBanner extends StatelessWidget {
       ),
     );
   }
+}
+
+class _ManualActivationCard extends StatelessWidget {
+  final SubscriptionService? service;
+  final String? adminEmail;
+  final ValueChanged<String> onMessage;
+
+  const _ManualActivationCard({
+    required this.service,
+    required this.adminEmail,
+    required this.onMessage,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final currentService = service;
+    return Card(
+      margin: EdgeInsets.zero,
+      child: Padding(
+        padding: const EdgeInsets.all(22),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Row(
+              children: [
+                Icon(Icons.workspace_premium_rounded),
+                SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    'Manuelle Freischaltung',
+                    style: TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 6),
+            const Text(
+              'Hier werden Konten nach Zahlung dauerhaft freigeschaltet.',
+              style: TextStyle(
+                color: Color(0xFF64748B),
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(height: 16),
+            if (currentService == null)
+              const _AdminInfoBox(
+                icon: Icons.cloud_off_rounded,
+                title: 'Firebase nicht verbunden',
+                message: 'Freischaltungen koennen gerade nicht geladen werden.',
+              )
+            else
+              StreamBuilder<List<ManualActivationAccount>>(
+                stream: currentService.watchManualActivationAccounts(),
+                builder: (context, snapshot) {
+                  if (snapshot.hasError) {
+                    return const _AdminInfoBox(
+                      icon: Icons.error_rounded,
+                      title: 'Freischaltungen konnten nicht geladen werden',
+                      message:
+                          'Bitte pruefe, ob die Firestore-Regeln veroeffentlicht sind.',
+                    );
+                  }
+
+                  if (snapshot.connectionState == ConnectionState.waiting &&
+                      !snapshot.hasData) {
+                    return const LinearProgressIndicator();
+                  }
+
+                  final accounts =
+                      snapshot.data ?? const <ManualActivationAccount>[];
+                  if (accounts.isEmpty) {
+                    return const _AdminInfoBox(
+                      icon: Icons.inbox_rounded,
+                      title: 'Noch keine Konten',
+                      message:
+                          'Sobald ein Konto die Testversion startet, erscheint es hier.',
+                    );
+                  }
+
+                  return _ManualActivationTable(
+                    accounts: accounts,
+                    service: currentService,
+                    adminEmail: adminEmail,
+                    onMessage: onMessage,
+                  );
+                },
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ManualActivationTable extends StatelessWidget {
+  final List<ManualActivationAccount> accounts;
+  final SubscriptionService service;
+  final String? adminEmail;
+  final ValueChanged<String> onMessage;
+
+  const _ManualActivationTable({
+    required this.accounts,
+    required this.service,
+    required this.adminEmail,
+    required this.onMessage,
+  });
+
+  Future<void> _activateAccount(
+    BuildContext context,
+    ManualActivationAccount account,
+  ) async {
+    try {
+      await service.activateAccount(
+        uid: account.uid,
+        adminEmail: adminEmail,
+      );
+      if (context.mounted) {
+        onMessage('Konto wurde freigeschaltet.');
+      }
+    } catch (_) {
+      if (context.mounted) {
+        onMessage('Konto konnte nicht freigeschaltet werden.');
+      }
+    }
+  }
+
+  Future<void> _expireAccount(
+    BuildContext context,
+    ManualActivationAccount account,
+  ) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Freischaltung sperren'),
+        content: Text(
+          'Soll ${_accountName(account)} wirklich wieder gesperrt werden?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Abbrechen'),
+          ),
+          FilledButton.icon(
+            onPressed: () => Navigator.of(context).pop(true),
+            icon: const Icon(Icons.lock_rounded),
+            label: const Text('Sperren'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true) {
+      return;
+    }
+
+    try {
+      await service.expireAccount(
+        uid: account.uid,
+        adminEmail: adminEmail,
+      );
+      if (context.mounted) {
+        onMessage('Konto wurde gesperrt.');
+      }
+    } catch (_) {
+      if (context.mounted) {
+        onMessage('Konto konnte nicht gesperrt werden.');
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: DataTable(
+        headingRowColor: WidgetStateProperty.all(const Color(0xFFEFF6FF)),
+        columnSpacing: 18,
+        columns: const [
+          DataColumn(label: Text('Status')),
+          DataColumn(label: Text('Mitglied')),
+          DataColumn(label: Text('Test bis')),
+          DataColumn(label: Text('Anfrage')),
+          DataColumn(label: Text('Bezahlversion')),
+          DataColumn(label: Text('Aktion')),
+        ],
+        rows: [
+          for (final account in accounts)
+            DataRow(
+              cells: [
+                DataCell(
+                  SizedBox(
+                    width: 165,
+                    child: _AccountStatusBadge(access: account.access),
+                  ),
+                ),
+                DataCell(
+                  _AdminTableCell(
+                    width: 210,
+                    primary: _accountName(account),
+                    secondary:
+                        account.email.isEmpty ? account.uid : account.email,
+                  ),
+                ),
+                DataCell(
+                  _AdminTableCell(
+                    width: 105,
+                    primary: _adminDateLabel(account.trialEndsAt),
+                    secondary: _trialRemainingLabel(account),
+                  ),
+                ),
+                DataCell(
+                  _AdminTableCell(
+                    width: 130,
+                    primary: _adminDateTimeLabel(
+                        account.access.activationRequestedAt),
+                    secondary: account.access.status ==
+                            AccountAccessStatus.activationRequested
+                        ? 'wartet'
+                        : '-',
+                  ),
+                ),
+                DataCell(
+                  _AdminTableCell(
+                    width: 135,
+                    primary: _paidAccessLabel(account.access),
+                    secondary:
+                        _adminDateTimeLabel(account.subscriptionUpdatedAt),
+                  ),
+                ),
+                DataCell(
+                  SizedBox(
+                    width: 150,
+                    child: _ManualActivationAction(
+                      account: account,
+                      onActivate: () => _activateAccount(context, account),
+                      onExpire: () => _expireAccount(context, account),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ManualActivationAction extends StatelessWidget {
+  final ManualActivationAccount account;
+  final Future<void> Function() onActivate;
+  final Future<void> Function() onExpire;
+
+  const _ManualActivationAction({
+    required this.account,
+    required this.onActivate,
+    required this.onExpire,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    if (account.canActivate) {
+      return FilledButton.icon(
+        onPressed: () {
+          onActivate();
+        },
+        style: FilledButton.styleFrom(
+          minimumSize: const Size(0, 38),
+          padding: const EdgeInsets.symmetric(horizontal: 10),
+        ),
+        icon: const Icon(Icons.check_circle_rounded, size: 18),
+        label: const Text('Freischalten'),
+      );
+    }
+
+    if (account.canExpire) {
+      return OutlinedButton.icon(
+        onPressed: () {
+          onExpire();
+        },
+        style: OutlinedButton.styleFrom(
+          minimumSize: const Size(0, 38),
+          padding: const EdgeInsets.symmetric(horizontal: 10),
+          foregroundColor: const Color(0xFFB91C1C),
+        ),
+        icon: const Icon(Icons.lock_rounded, size: 18),
+        label: const Text('Sperren'),
+      );
+    }
+
+    return const Text(
+      '-',
+      style: TextStyle(fontWeight: FontWeight.w900),
+    );
+  }
+}
+
+class _AccountStatusBadge extends StatelessWidget {
+  final AccountAccess access;
+
+  const _AccountStatusBadge({required this.access});
+
+  @override
+  Widget build(BuildContext context) {
+    final color = _statusColor(access.status);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(
+        color: color.background,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: color.border),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(_subscriptionIcon(access.status), size: 17, color: color.icon),
+          const SizedBox(width: 7),
+          Flexible(
+            child: Text(
+              access.title,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: color.text,
+                fontSize: 12,
+                fontWeight: FontWeight.w900,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _AdminTableCell extends StatelessWidget {
+  final double width;
+  final String primary;
+  final String secondary;
+
+  const _AdminTableCell({
+    required this.width,
+    required this.primary,
+    required this.secondary,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: width,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            primary.isEmpty ? '-' : primary,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+              color: Color(0xFF0F172A),
+              fontSize: 12,
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+          const SizedBox(height: 2),
+          Text(
+            secondary.isEmpty ? '-' : secondary,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+              color: Color(0xFF64748B),
+              fontSize: 11,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _AdminInfoBox extends StatelessWidget {
+  final IconData icon;
+  final String title;
+  final String message;
+
+  const _AdminInfoBox({
+    required this.icon,
+    required this.title,
+    required this.message,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF8FAFC),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: const Color(0xFFE2E8F0)),
+      ),
+      child: Row(
+        children: [
+          Icon(icon, color: const Color(0xFF0A84FF)),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: const TextStyle(
+                    color: Color(0xFF0F172A),
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  message,
+                  style: const TextStyle(
+                    color: Color(0xFF64748B),
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _StatusColors {
+  final Color background;
+  final Color border;
+  final Color icon;
+  final Color text;
+
+  const _StatusColors({
+    required this.background,
+    required this.border,
+    required this.icon,
+    required this.text,
+  });
+}
+
+_StatusColors _statusColor(AccountAccessStatus status) {
+  return switch (status) {
+    AccountAccessStatus.active ||
+    AccountAccessStatus.owner =>
+      const _StatusColors(
+        background: Color(0xFFECFDF5),
+        border: Color(0xFFA7F3D0),
+        icon: Color(0xFF047857),
+        text: Color(0xFF065F46),
+      ),
+    AccountAccessStatus.activationRequested => const _StatusColors(
+        background: Color(0xFFFFF7ED),
+        border: Color(0xFFFED7AA),
+        icon: Color(0xFFEA580C),
+        text: Color(0xFF9A3412),
+      ),
+    AccountAccessStatus.expired => const _StatusColors(
+        background: Color(0xFFFFF1F2),
+        border: Color(0xFFFDA4AF),
+        icon: Color(0xFFE11D48),
+        text: Color(0xFF9F1239),
+      ),
+    AccountAccessStatus.trial => const _StatusColors(
+        background: Color(0xFFEFF6FF),
+        border: Color(0xFFBFDBFE),
+        icon: Color(0xFF0A84FF),
+        text: Color(0xFF1D4ED8),
+      ),
+    AccountAccessStatus.localDevelopment ||
+    AccountAccessStatus.signedOut =>
+      const _StatusColors(
+        background: Color(0xFFF8FAFC),
+        border: Color(0xFFE2E8F0),
+        icon: Color(0xFF475569),
+        text: Color(0xFF334155),
+      ),
+  };
+}
+
+IconData _subscriptionIcon(AccountAccessStatus status) {
+  return switch (status) {
+    AccountAccessStatus.owner => Icons.verified_user_rounded,
+    AccountAccessStatus.active => Icons.workspace_premium_rounded,
+    AccountAccessStatus.activationRequested => Icons.mark_email_read_rounded,
+    AccountAccessStatus.expired => Icons.lock_clock_rounded,
+    AccountAccessStatus.trial => Icons.hourglass_top_rounded,
+    AccountAccessStatus.localDevelopment => Icons.developer_mode_rounded,
+    AccountAccessStatus.signedOut => Icons.account_circle_rounded,
+  };
+}
+
+String _accountName(ManualActivationAccount account) {
+  if (account.displayName.trim().isNotEmpty) {
+    return account.displayName.trim();
+  }
+  if (account.email.trim().isNotEmpty) {
+    return account.email.trim();
+  }
+  return 'Konto ${account.uid}';
+}
+
+String _paidAccessLabel(AccountAccess access) {
+  if (access.status == AccountAccessStatus.owner) {
+    return 'Dauerhaft';
+  }
+  if (access.status != AccountAccessStatus.active) {
+    return '-';
+  }
+  final endsAt = access.subscriptionEndsAt;
+  return endsAt == null ? 'Dauerhaft' : _adminDateLabel(endsAt);
+}
+
+String _trialRemainingLabel(ManualActivationAccount account) {
+  if (account.trialEndsAt == null ||
+      account.access.status == AccountAccessStatus.active ||
+      account.access.status == AccountAccessStatus.owner) {
+    return '-';
+  }
+  return '${account.access.trialDaysRemaining} Tage';
 }
 
 class _DeviceAccessCard extends StatelessWidget {
@@ -797,6 +1336,14 @@ String _adminDateTimeLabel(DateTime? date) {
   final local = date.toLocal();
   return '${_twoDigits(local.day)}.${_twoDigits(local.month)}.${local.year} '
       '${_twoDigits(local.hour)}:${_twoDigits(local.minute)}';
+}
+
+String _adminDateLabel(DateTime? date) {
+  if (date == null) {
+    return '-';
+  }
+  final local = date.toLocal();
+  return '${_twoDigits(local.day)}.${_twoDigits(local.month)}.${local.year}';
 }
 
 String _twoDigits(int value) {
