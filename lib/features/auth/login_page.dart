@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../shared/services/auth_service.dart';
+import '../../shared/utils/centered_snack_bar.dart';
 
 const _loginIntroLogoAsset = 'homepage/assets/login_logo12.png';
 const _loginNavy = Color(0xFF06172E);
@@ -299,9 +300,7 @@ class _LoginPageState extends ConsumerState<LoginPage> {
     if (!mounted) {
       return;
     }
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message)),
-    );
+    showCenteredSnackBar(context, message);
   }
 
   String? _safeRedirectTarget(BuildContext context) {

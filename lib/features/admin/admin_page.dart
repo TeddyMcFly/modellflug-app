@@ -1,6 +1,8 @@
 import 'dart:convert';
+import 'dart:math' as math;
 
 import 'package:file_picker/file_picker.dart';
+import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -286,6 +288,8 @@ class _AdminPageState extends ConsumerState<AdminPage> {
       title: 'Admin',
       subtitle: 'Freischaltungen, Starter-Datei und Geraetezugriffe verwalten.',
       children: [
+        _MemberDevelopmentCard(service: subscriptionService),
+        const SizedBox(height: 16),
         _ManualActivationCard(
           service: subscriptionService,
           adminEmail: authState.valueOrNull?.email,
@@ -511,6 +515,827 @@ class _ErrorBanner extends StatelessWidget {
   }
 }
 
+class _MemberDevelopmentCard extends StatelessWidget {
+  final SubscriptionService? service;
+
+  const _MemberDevelopmentCard({required this.service});
+
+  @override
+  Widget build(BuildContext context) {
+    final currentService = service;
+    return Card(
+      margin: EdgeInsets.zero,
+      child: Padding(
+        padding: const EdgeInsets.all(22),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Row(
+              children: [
+                Icon(Icons.trending_up_rounded),
+                SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    'Mitglieder-Entwicklung',
+                    style: TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 6),
+            const Text(
+              'Neue Konten, Freischaltungen und Bezahlstatus im Blick.',
+              style: TextStyle(
+                color: Color(0xFF64748B),
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(height: 16),
+            if (currentService == null)
+              const _AdminInfoBox(
+                icon: Icons.cloud_off_rounded,
+                title: 'Firebase nicht verbunden',
+                message:
+                    'Mitgliederzahlen koennen gerade nicht geladen werden.',
+              )
+            else
+              StreamBuilder<List<ManualActivationAccount>>(
+                stream: currentService.watchManualActivationAccounts(),
+                builder: (context, snapshot) {
+                  if (snapshot.hasError) {
+                    return const _AdminInfoBox(
+                      icon: Icons.error_rounded,
+                      title: 'Mitgliederzahlen konnten nicht geladen werden',
+                      message:
+                          'Bitte pruefe, ob die Firestore-Regeln veroeffentlicht sind.',
+                    );
+                  }
+
+                  if (snapshot.connectionState == ConnectionState.waiting &&
+                      !snapshot.hasData) {
+                    return const LinearProgressIndicator();
+                  }
+
+                  final accounts =
+                      snapshot.data ?? const <ManualActivationAccount>[];
+                  if (accounts.isEmpty) {
+                    return const _AdminInfoBox(
+                      icon: Icons.groups_rounded,
+                      title: 'Noch keine Mitglieder',
+                      message:
+                          'Sobald sich ein Konto anmeldet, startet hier die Auswertung.',
+                    );
+                  }
+
+                  return _MemberDevelopmentContent(accounts: accounts);
+                },
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _MemberDevelopmentContent extends StatelessWidget {
+  final List<ManualActivationAccount> accounts;
+
+  const _MemberDevelopmentContent({required this.accounts});
+
+  @override
+  Widget build(BuildContext context) {
+    final summary = _MemberDevelopmentSummary.fromAccounts(accounts);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Wrap(
+          spacing: 10,
+          runSpacing: 10,
+          children: [
+            _MemberMetricTile(
+              icon: Icons.groups_rounded,
+              value: '${summary.totalCount}',
+              label: 'Mitglieder gesamt',
+              color: const Color(0xFF0A84FF),
+            ),
+            _MemberMetricTile(
+              icon: Icons.person_add_alt_1_rounded,
+              value: '${summary.currentMonthNew}',
+              label: 'Neu in ${summary.currentMonthShortLabel}',
+              color: const Color(0xFF047857),
+            ),
+            _MemberMetricTile(
+              icon: Icons.history_rounded,
+              value: '${summary.last30DaysNew}',
+              label: 'Neue letzte 30 Tage',
+              color: const Color(0xFF7C3AED),
+            ),
+            _MemberMetricTile(
+              icon: Icons.hourglass_top_rounded,
+              value: '${summary.trialCount}',
+              label: 'Testversion',
+              color: const Color(0xFF1D4ED8),
+            ),
+            _MemberMetricTile(
+              icon: Icons.mark_email_read_rounded,
+              value: '${summary.activationRequestedCount}',
+              label: 'Warten',
+              color: const Color(0xFFEA580C),
+            ),
+            _MemberMetricTile(
+              icon: Icons.workspace_premium_rounded,
+              value: '${summary.activeCount}',
+              label: 'Bezahlversion',
+              color: const Color(0xFF047857),
+            ),
+            _MemberMetricTile(
+              icon: Icons.lock_clock_rounded,
+              value: '${summary.expiredCount}',
+              label: 'Abgelaufen',
+              color: const Color(0xFFE11D48),
+            ),
+          ],
+        ),
+        const SizedBox(height: 16),
+        _MemberDevelopmentText(summary: summary),
+        const SizedBox(height: 16),
+        _MemberDevelopmentChart(points: summary.points),
+      ],
+    );
+  }
+}
+
+class _MemberMetricTile extends StatelessWidget {
+  final IconData icon;
+  final String value;
+  final String label;
+  final Color color;
+
+  const _MemberMetricTile({
+    required this.icon,
+    required this.value,
+    required this.label,
+    required this.color,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: 158,
+      child: Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: const Color(0xFFF8FAFC),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: const Color(0xFFE2E8F0)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Icon(icon, color: color, size: 20),
+            const SizedBox(height: 8),
+            Text(
+              value,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                color: Color(0xFF0F172A),
+                fontSize: 22,
+                fontWeight: FontWeight.w900,
+              ),
+            ),
+            const SizedBox(height: 2),
+            Text(
+              label,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                color: Color(0xFF64748B),
+                fontSize: 11,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _MemberDevelopmentText extends StatelessWidget {
+  final _MemberDevelopmentSummary summary;
+
+  const _MemberDevelopmentText({required this.summary});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: const Color(0xFFEFF6FF),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: const Color(0xFFBFDBFE)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Icon(Icons.insights_rounded, color: Color(0xFF0A84FF)),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              '${summary.trendSentence} ${summary.statusSentence}',
+              style: const TextStyle(
+                color: Color(0xFF0F172A),
+                fontSize: 13,
+                fontWeight: FontWeight.w800,
+                height: 1.35,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _MemberDevelopmentChart extends StatelessWidget {
+  final List<_MemberChartPoint> points;
+
+  const _MemberDevelopmentChart({required this.points});
+
+  @override
+  Widget build(BuildContext context) {
+    final maxCount = points.fold<int>(
+      0,
+      (previous, point) => math.max(previous, point.count),
+    );
+    final interval = _memberChartInterval(maxCount);
+    final maxY = math
+        .max(
+          interval,
+          (maxCount / interval).ceil() * interval,
+        )
+        .toDouble();
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          'Neue Mitglieder pro Monat',
+          style: TextStyle(
+            color: Color(0xFF0F172A),
+            fontSize: 16,
+            fontWeight: FontWeight.w900,
+          ),
+        ),
+        const SizedBox(height: 10),
+        LayoutBuilder(
+          builder: (context, constraints) {
+            final chartWidth = math.max(constraints.maxWidth, 620.0);
+            return SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: SizedBox(
+                width: chartWidth,
+                height: 250,
+                child: BarChart(
+                  BarChartData(
+                    minY: 0,
+                    maxY: maxY,
+                    alignment: BarChartAlignment.spaceAround,
+                    barTouchData: BarTouchData(
+                      enabled: true,
+                      touchTooltipData: BarTouchTooltipData(
+                        getTooltipColor: (_) => const Color(0xFF0F172A),
+                        tooltipPadding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 7,
+                        ),
+                        tooltipMargin: 8,
+                        getTooltipItem: (group, groupIndex, rod, rodIndex) {
+                          final point = points[group.x.toInt()];
+                          return BarTooltipItem(
+                            '${_newMemberCountLabel(point.count)}\n'
+                            '${point.longLabel}',
+                            const TextStyle(
+                              color: Colors.white,
+                              fontSize: 11,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          );
+                        },
+                      ),
+                    ),
+                    gridData: FlGridData(
+                      drawVerticalLine: false,
+                      horizontalInterval: interval,
+                      getDrawingHorizontalLine: (value) => const FlLine(
+                        color: Color(0xFFD8DEE8),
+                        strokeWidth: 1,
+                      ),
+                    ),
+                    borderData: FlBorderData(
+                      show: true,
+                      border: const Border(
+                        left: BorderSide(color: Color(0xFFCBD5E1)),
+                        bottom: BorderSide(color: Color(0xFFCBD5E1)),
+                      ),
+                    ),
+                    titlesData: FlTitlesData(
+                      topTitles: const AxisTitles(
+                        sideTitles: SideTitles(showTitles: false),
+                      ),
+                      rightTitles: const AxisTitles(
+                        sideTitles: SideTitles(showTitles: false),
+                      ),
+                      leftTitles: AxisTitles(
+                        sideTitles: SideTitles(
+                          showTitles: true,
+                          reservedSize: 34,
+                          interval: interval,
+                          getTitlesWidget: (value, meta) {
+                            return Text(
+                              value.toInt().toString(),
+                              textAlign: TextAlign.right,
+                              style: const TextStyle(
+                                color: Color(0xFF64748B),
+                                fontSize: 10,
+                                fontWeight: FontWeight.w800,
+                              ),
+                            );
+                          },
+                        ),
+                      ),
+                      bottomTitles: AxisTitles(
+                        sideTitles: SideTitles(
+                          showTitles: true,
+                          reservedSize: 42,
+                          getTitlesWidget: (value, meta) {
+                            final index = value.toInt();
+                            if (index < 0 || index >= points.length) {
+                              return const SizedBox.shrink();
+                            }
+                            return Padding(
+                              padding: const EdgeInsets.only(top: 8),
+                              child: Text(
+                                points[index].shortLabel,
+                                textAlign: TextAlign.center,
+                                style: const TextStyle(
+                                  color: Color(0xFF64748B),
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.w800,
+                                  height: 1.15,
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+                      ),
+                    ),
+                    barGroups: [
+                      for (var index = 0; index < points.length; index++)
+                        BarChartGroupData(
+                          x: index,
+                          barRods: [
+                            BarChartRodData(
+                              toY: points[index].count.toDouble(),
+                              width: 18,
+                              color: const Color(0xFF0A84FF),
+                              borderRadius: const BorderRadius.vertical(
+                                top: Radius.circular(5),
+                              ),
+                            ),
+                          ],
+                        ),
+                    ],
+                  ),
+                ),
+              ),
+            );
+          },
+        ),
+      ],
+    );
+  }
+}
+
+class _MemberDevelopmentSummary {
+  final int totalCount;
+  final int currentMonthNew;
+  final int previousMonthNew;
+  final int last30DaysNew;
+  final int trialCount;
+  final int activationRequestedCount;
+  final int activeCount;
+  final int expiredCount;
+  final String currentMonthShortLabel;
+  final String currentMonthLabel;
+  final List<_MemberChartPoint> points;
+
+  const _MemberDevelopmentSummary({
+    required this.totalCount,
+    required this.currentMonthNew,
+    required this.previousMonthNew,
+    required this.last30DaysNew,
+    required this.trialCount,
+    required this.activationRequestedCount,
+    required this.activeCount,
+    required this.expiredCount,
+    required this.currentMonthShortLabel,
+    required this.currentMonthLabel,
+    required this.points,
+  });
+
+  factory _MemberDevelopmentSummary.fromAccounts(
+    List<ManualActivationAccount> accounts,
+  ) {
+    final now = DateTime.now();
+    final monthStarts = [
+      for (var offset = 11; offset >= 0; offset--)
+        DateTime(now.year, now.month - offset),
+    ];
+    final monthIndexByKey = {
+      for (var index = 0; index < monthStarts.length; index++)
+        _monthKey(monthStarts[index]): index,
+    };
+    final counts = List<int>.filled(monthStarts.length, 0);
+    final last30DaysStart = now.subtract(const Duration(days: 30));
+    final currentMonthStart = monthStarts.last;
+    final nextMonthStart = DateTime(now.year, now.month + 1);
+    var last30DaysNew = 0;
+    var currentMonthNew = 0;
+
+    for (final account in accounts) {
+      final startedAt = account.trialStartedAt?.toLocal();
+      if (startedAt == null || startedAt.isAfter(now)) {
+        continue;
+      }
+
+      final monthIndex = monthIndexByKey[_monthKey(startedAt)];
+      if (monthIndex != null) {
+        counts[monthIndex] += 1;
+      }
+      if (!startedAt.isBefore(last30DaysStart)) {
+        last30DaysNew += 1;
+      }
+      if (!startedAt.isBefore(currentMonthStart) &&
+          startedAt.isBefore(nextMonthStart)) {
+        currentMonthNew += 1;
+      }
+    }
+
+    int countStatus(AccountAccessStatus status) {
+      return accounts
+          .where((account) => account.access.status == status)
+          .length;
+    }
+
+    final points = [
+      for (var index = 0; index < monthStarts.length; index++)
+        _MemberChartPoint(
+          month: monthStarts[index],
+          count: counts[index],
+        ),
+    ];
+
+    return _MemberDevelopmentSummary(
+      totalCount: accounts.length,
+      currentMonthNew: currentMonthNew,
+      previousMonthNew: counts.length > 1 ? counts[counts.length - 2] : 0,
+      last30DaysNew: last30DaysNew,
+      trialCount: countStatus(AccountAccessStatus.trial),
+      activationRequestedCount:
+          countStatus(AccountAccessStatus.activationRequested),
+      activeCount: countStatus(AccountAccessStatus.active),
+      expiredCount: countStatus(AccountAccessStatus.expired),
+      currentMonthShortLabel: _monthShortName(now.month),
+      currentMonthLabel: _monthLongLabel(currentMonthStart),
+      points: points,
+    );
+  }
+
+  String get trendSentence {
+    if (currentMonthNew == 0 && previousMonthNew == 0) {
+      return 'Im $currentMonthLabel kam bisher kein neues Mitglied dazu.';
+    }
+    if (currentMonthNew == 0) {
+      return 'Im $currentMonthLabel kam bisher kein neues Mitglied dazu, '
+          'im Vormonat waren es ${_newMemberCountLabel(previousMonthNew)}.';
+    }
+
+    final sentenceStart =
+        'Im $currentMonthLabel ${_newMemberVerb(currentMonthNew)} dazu';
+    if (currentMonthNew == previousMonthNew) {
+      return '$sentenceStart, genauso viele wie im Vormonat.';
+    }
+    if (previousMonthNew == 0) {
+      return '$sentenceStart, im Vormonat kam kein neues Mitglied dazu.';
+    }
+
+    final difference = currentMonthNew - previousMonthNew;
+    if (difference > 0) {
+      return '$sentenceStart, '
+          '${_memberDifferenceLabel(difference)} mehr als im Vormonat.';
+    }
+    return '$sentenceStart, '
+        '${_memberDifferenceLabel(difference.abs())} weniger als im Vormonat.';
+  }
+
+  String get statusSentence {
+    final waitingSentence = activationRequestedCount == 0
+        ? 'Keine Freischaltung wartet gerade.'
+        : activationRequestedCount == 1
+            ? '1 Konto wartet auf Freischaltung.'
+            : '$activationRequestedCount Konten warten auf Freischaltung.';
+    final activeSentence = activeCount == 1
+        ? '1 Konto ist als Bezahlversion aktiv.'
+        : '$activeCount Konten sind als Bezahlversion aktiv.';
+    return '$waitingSentence $activeSentence';
+  }
+}
+
+class _MemberChartPoint {
+  final DateTime month;
+  final int count;
+
+  const _MemberChartPoint({
+    required this.month,
+    required this.count,
+  });
+
+  String get shortLabel {
+    return '${_monthShortName(month.month)}\n${month.year % 100}';
+  }
+
+  String get longLabel {
+    return _monthLongLabel(month);
+  }
+}
+
+double _memberChartInterval(int maxCount) {
+  if (maxCount <= 5) {
+    return 1;
+  }
+  if (maxCount <= 10) {
+    return 2;
+  }
+  if (maxCount <= 25) {
+    return 5;
+  }
+  if (maxCount <= 50) {
+    return 10;
+  }
+  return 20;
+}
+
+int _monthKey(DateTime date) {
+  return date.year * 12 + date.month;
+}
+
+String _monthShortName(int month) {
+  return switch (month) {
+    1 => 'Jan',
+    2 => 'Feb',
+    3 => 'Mrz',
+    4 => 'Apr',
+    5 => 'Mai',
+    6 => 'Jun',
+    7 => 'Jul',
+    8 => 'Aug',
+    9 => 'Sep',
+    10 => 'Okt',
+    11 => 'Nov',
+    12 => 'Dez',
+    _ => '',
+  };
+}
+
+String _monthLongLabel(DateTime month) {
+  final name = switch (month.month) {
+    1 => 'Januar',
+    2 => 'Februar',
+    3 => 'Maerz',
+    4 => 'April',
+    5 => 'Mai',
+    6 => 'Juni',
+    7 => 'Juli',
+    8 => 'August',
+    9 => 'September',
+    10 => 'Oktober',
+    11 => 'November',
+    12 => 'Dezember',
+    _ => '',
+  };
+  return '$name ${month.year}';
+}
+
+String _newMemberVerb(int count) {
+  return count == 1
+      ? 'kam ${_newMemberCountLabel(count)}'
+      : 'kamen ${_newMemberCountLabel(count)}';
+}
+
+String _newMemberCountLabel(int count) {
+  return count == 1 ? '1 neues Mitglied' : '$count neue Mitglieder';
+}
+
+String _memberDifferenceLabel(int count) {
+  return count == 1 ? '1 Mitglied' : '$count Mitglieder';
+}
+
+class _PaymentSettingsSection extends StatelessWidget {
+  final SubscriptionService service;
+  final String? adminEmail;
+  final ValueChanged<String> onMessage;
+
+  const _PaymentSettingsSection({
+    required this.service,
+    required this.adminEmail,
+    required this.onMessage,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Row(
+          children: [
+            Icon(Icons.payments_rounded),
+            SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                'PayPal-Zahlung',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 6),
+        const Text(
+          'Diesen Link sehen Mitglieder, wenn sie die Bezahlversion aktivieren.',
+          style: TextStyle(
+            color: Color(0xFF64748B),
+            fontSize: 12,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        const SizedBox(height: 12),
+        StreamBuilder<PaymentSettings>(
+          stream: service.watchPaymentSettings(),
+          builder: (context, snapshot) {
+            if (snapshot.hasError) {
+              return const _AdminInfoBox(
+                icon: Icons.error_rounded,
+                title: 'PayPal-Link konnte nicht geladen werden',
+                message:
+                    'Bitte pruefe, ob die Firestore-Regeln veroeffentlicht sind.',
+              );
+            }
+
+            if (snapshot.connectionState == ConnectionState.waiting &&
+                !snapshot.hasData) {
+              return const LinearProgressIndicator();
+            }
+
+            final settings = snapshot.data ?? PaymentSettings.empty();
+            return _PaymentSettingsEditor(
+              key: ValueKey(settings.paypalPaymentUrl),
+              service: service,
+              settings: settings,
+              adminEmail: adminEmail,
+              onMessage: onMessage,
+            );
+          },
+        ),
+      ],
+    );
+  }
+}
+
+class _PaymentSettingsEditor extends StatefulWidget {
+  final SubscriptionService service;
+  final PaymentSettings settings;
+  final String? adminEmail;
+  final ValueChanged<String> onMessage;
+
+  const _PaymentSettingsEditor({
+    super.key,
+    required this.service,
+    required this.settings,
+    required this.adminEmail,
+    required this.onMessage,
+  });
+
+  @override
+  State<_PaymentSettingsEditor> createState() => _PaymentSettingsEditorState();
+}
+
+class _PaymentSettingsEditorState extends State<_PaymentSettingsEditor> {
+  late final TextEditingController _paypalController;
+  bool _saving = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _paypalController = TextEditingController(
+      text: widget.settings.paypalPaymentUrl,
+    );
+  }
+
+  @override
+  void dispose() {
+    _paypalController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _save() async {
+    final url = _paypalController.text.trim();
+    final uri = Uri.tryParse(url);
+    if (url.isNotEmpty &&
+        (uri == null ||
+            !uri.hasScheme ||
+            uri.host.isEmpty ||
+            (uri.scheme != 'https' && uri.scheme != 'http'))) {
+      widget.onMessage('Bitte einen gueltigen PayPal-Link eintragen.');
+      return;
+    }
+
+    setState(() => _saving = true);
+    try {
+      await widget.service.savePaymentSettings(
+        paypalPaymentUrl: url,
+        adminEmail: widget.adminEmail,
+      );
+      if (mounted) {
+        widget.onMessage('PayPal-Link wurde gespeichert.');
+      }
+    } catch (_) {
+      if (mounted) {
+        widget.onMessage('PayPal-Link konnte nicht gespeichert werden.');
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _saving = false);
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final configured = widget.settings.hasPaypalPaymentUrl;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        TextField(
+          controller: _paypalController,
+          enabled: !_saving,
+          keyboardType: TextInputType.url,
+          decoration: const InputDecoration(
+            border: OutlineInputBorder(),
+            labelText: 'PayPal-Link',
+            hintText: 'https://www.paypal.com/...',
+            prefixIcon: Icon(Icons.link_rounded),
+          ),
+        ),
+        const SizedBox(height: 10),
+        Wrap(
+          spacing: 10,
+          runSpacing: 10,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          children: [
+            FilledButton.icon(
+              onPressed: _saving ? null : _save,
+              icon: _saving
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.save_rounded),
+              label: const Text('PayPal-Link speichern'),
+            ),
+            Chip(
+              avatar: Icon(
+                configured ? Icons.check_circle_rounded : Icons.info_rounded,
+                size: 18,
+              ),
+              label: Text(configured ? 'Link aktiv' : 'Noch kein Link'),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+}
+
 class _ManualActivationCard extends StatelessWidget {
   final SubscriptionService? service;
   final String? adminEmail;
@@ -563,7 +1388,23 @@ class _ManualActivationCard extends StatelessWidget {
                 title: 'Firebase nicht verbunden',
                 message: 'Freischaltungen koennen gerade nicht geladen werden.',
               )
-            else
+            else ...[
+              _PaymentSettingsSection(
+                service: currentService,
+                adminEmail: adminEmail,
+                onMessage: onMessage,
+              ),
+              const SizedBox(height: 18),
+              const Divider(),
+              const SizedBox(height: 14),
+              const Text(
+                'Freischalt-Anfragen',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+              const SizedBox(height: 12),
               StreamBuilder<List<ManualActivationAccount>>(
                 stream: currentService.watchManualActivationAccounts(),
                 builder: (context, snapshot) {
@@ -600,6 +1441,7 @@ class _ManualActivationCard extends StatelessWidget {
                   );
                 },
               ),
+            ],
           ],
         ),
       ),

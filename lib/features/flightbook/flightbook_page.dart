@@ -6,6 +6,7 @@ import 'package:uuid/uuid.dart';
 import '../../core/widgets/app_scaffold.dart';
 import '../../shared/models/aircraft_model.dart';
 import '../../shared/providers/fleet_provider.dart';
+import '../../shared/utils/centered_snack_bar.dart';
 import '../../shared/utils/media_source.dart';
 
 class FlightbookPage extends ConsumerWidget {
@@ -74,12 +75,9 @@ class FlightbookPage extends ConsumerWidget {
           orElse: () => null,
         )
         ?.name;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          '${aircraftName ?? 'Flug'} gespeichert: ${result.entry.durationMinutes} min.',
-        ),
-      ),
+    showCenteredSnackBar(
+      context,
+      '${aircraftName ?? 'Flug'} gespeichert: ${result.entry.durationMinutes} min.',
     );
   }
 
@@ -111,9 +109,7 @@ class FlightbookPage extends ConsumerWidget {
                 if (!context.mounted) {
                   return;
                 }
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Flugbucheintrag gelöscht.')),
-                );
+                showCenteredSnackBar(context, 'Flugbucheintrag geloescht.');
               },
       ),
     );

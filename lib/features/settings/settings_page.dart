@@ -9,6 +9,7 @@ import 'package:image/image.dart' as img;
 import 'package:image_picker/image_picker.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/widgets/app_scaffold.dart';
 import '../../shared/models/aircraft_model.dart';
@@ -106,7 +107,7 @@ class SettingsPage extends ConsumerWidget {
                       onRequestActivation: () =>
                           _requestPaidActivation(context, ref),
                       onPasswordChange: () =>
-                          _sendPasswordReset(context, ref, userEmail),
+                          _showPasswordChangeDialog(context, ref, userEmail),
                       onVerifyEmail: () => _sendEmailVerification(context, ref),
                       onDeleteAccount: () =>
                           _showDeleteAccountPreparation(context),
@@ -164,24 +165,23 @@ class SettingsPage extends ConsumerWidget {
       return;
     }
 
+    PaymentSettings paymentSettings;
+    try {
+      paymentSettings = await ref.read(paymentSettingsProvider.future);
+    } catch (_) {
+      paymentSettings = PaymentSettings.empty();
+    }
+
+    if (!context.mounted) {
+      return;
+    }
+
     final confirmed = await showDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Bezahlversion aktivieren'),
-        content: const Text(
-          'Die App merkt sich in deinem Konto, dass du die Bezahlversion aktivieren moechtest. Die eigentliche Zahlung oder manuelle Freischaltung kann danach angeschlossen werden.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('Abbrechen'),
-          ),
-          FilledButton.icon(
-            onPressed: () => Navigator.of(context).pop(true),
-            icon: const Icon(Icons.workspace_premium_rounded),
-            label: const Text('Aktivierung anfragen'),
-          ),
-        ],
+      builder: (dialogContext) => _PaypalActivationDialog(
+        settings: paymentSettings,
+        accountEmail: user.email,
+        onOpenPaypal: () => _openPaypalPayment(context, paymentSettings),
       ),
     );
 
@@ -209,6 +209,40 @@ class SettingsPage extends ConsumerWidget {
     }
   }
 
+  Future<void> _openPaypalPayment(
+    BuildContext context,
+    PaymentSettings settings,
+  ) async {
+    final uri = settings.paypalUri;
+    if (uri == null) {
+      showCenteredSnackBar(
+        context,
+        'Der PayPal-Link fehlt noch. Bitte im Admin-Bereich eintragen.',
+      );
+      return;
+    }
+
+    try {
+      final opened = await launchUrl(
+        uri,
+        mode: LaunchMode.externalApplication,
+      );
+      if (!opened && context.mounted) {
+        showCenteredSnackBar(
+          context,
+          'PayPal konnte nicht geoeffnet werden.',
+        );
+      }
+    } catch (_) {
+      if (context.mounted) {
+        showCenteredSnackBar(
+          context,
+          'PayPal konnte nicht geoeffnet werden.',
+        );
+      }
+    }
+  }
+
   Future<void> _signOut(BuildContext context, WidgetRef ref) async {
     final canLeave = await confirmLeaveSettingsProfile(context);
     if (!canLeave) {
@@ -221,34 +255,57 @@ class SettingsPage extends ConsumerWidget {
     }
   }
 
+  Future<void> _showPasswordChangeDialog(
+    BuildContext context,
+    WidgetRef ref,
+    String? userEmail,
+  ) async {
+    final email = userEmail?.trim();
+    if (email == null || email.isEmpty) {
+      showCenteredSnackBar(context, 'Fuer dieses Konto fehlt die E-Mail.');
+      return;
+    }
+
+    final changed = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => _PasswordChangeDialog(
+        email: email,
+        onChangePassword: (currentPassword, newPassword) =>
+            ref.read(authControllerProvider).changePassword(
+                  currentPassword: currentPassword,
+                  newPassword: newPassword,
+                ),
+        onSendResetLink: () => _sendPasswordReset(context, ref, email),
+      ),
+    );
+
+    if (changed == true && context.mounted) {
+      ref.invalidate(authStateProvider);
+      showCenteredSnackBar(context, 'Passwort wurde geaendert.');
+    }
+  }
+
   Future<void> _sendPasswordReset(
     BuildContext context,
     WidgetRef ref,
     String? userEmail,
   ) async {
-    final messenger = ScaffoldMessenger.of(context);
     final email = userEmail?.trim();
     if (email == null || email.isEmpty) {
-      messenger.showSnackBar(
-        const SnackBar(content: Text('Fuer dieses Konto fehlt die E-Mail.')),
-      );
+      showCenteredSnackBar(context, 'Fuer dieses Konto fehlt die E-Mail.');
       return;
     }
 
     try {
       await ref.read(authControllerProvider).sendPasswordResetEmail(email);
       if (context.mounted) {
-        messenger.showSnackBar(
-          SnackBar(
-            content: Text('Passwort-Link wurde an $email gesendet.'),
-          ),
-        );
+        showCenteredSnackBar(
+            context, 'Passwort-Link wurde an $email gesendet.');
       }
     } on Object catch (error) {
       if (context.mounted) {
-        messenger.showSnackBar(
-          SnackBar(content: Text(authErrorMessage(error))),
-        );
+        showCenteredSnackBar(context, authErrorMessage(error));
       }
     }
   }
@@ -257,22 +314,55 @@ class SettingsPage extends ConsumerWidget {
     BuildContext context,
     WidgetRef ref,
   ) async {
-    final messenger = ScaffoldMessenger.of(context);
-
+    final auth = ref.read(authControllerProvider);
     try {
-      await ref.read(authControllerProvider).sendEmailVerification();
-      if (context.mounted) {
-        messenger.showSnackBar(
-          const SnackBar(
-            content: Text('Bestaetigungs-E-Mail wurde versendet.'),
-          ),
-        );
+      final refreshedUser = await auth.reloadCurrentUser();
+      if (!context.mounted) {
+        return;
       }
+      if (refreshedUser == null) {
+        showCenteredSnackBar(
+          context,
+          'Die E-Mail-Bestaetigung braucht ein angemeldetes Konto.',
+        );
+        return;
+      }
+      ref.invalidate(authStateProvider);
+      if (refreshedUser.emailVerified) {
+        showCenteredSnackBar(context, 'E-Mail ist bereits bestaetigt.');
+        return;
+      }
+
+      await auth.sendEmailVerification();
+      if (!context.mounted) {
+        return;
+      }
+
+      final confirmed = await showDialog<bool>(
+        context: context,
+        barrierDismissible: false,
+        builder: (_) => _EmailVerificationDialog(
+          email: refreshedUser.email,
+          onCheckStatus: () async {
+            final checkedUser = await auth.reloadCurrentUser();
+            ref.invalidate(authStateProvider);
+            return checkedUser?.emailVerified ?? false;
+          },
+        ),
+      );
+
+      if (!context.mounted) {
+        return;
+      }
+      showCenteredSnackBar(
+        context,
+        confirmed == true
+            ? 'E-Mail ist bestaetigt.'
+            : 'Bestaetigungs-E-Mail wurde versendet.',
+      );
     } on Object catch (error) {
       if (context.mounted) {
-        messenger.showSnackBar(
-          SnackBar(content: Text(authErrorMessage(error))),
-        );
+        showCenteredSnackBar(context, authErrorMessage(error));
       }
     }
   }
@@ -462,7 +552,6 @@ class SettingsPage extends ConsumerWidget {
     BuildContext context,
     WidgetRef ref,
   ) async {
-    final messenger = ScaffoldMessenger.of(context);
     final backups =
         await ref.read(fleetProvider.notifier).loadAutomaticBackups();
 
@@ -554,14 +643,11 @@ class SettingsPage extends ConsumerWidget {
       return;
     }
 
-    messenger.showSnackBar(
-      SnackBar(
-        content: Text(
-          restored
-              ? 'Cloud-Sicherung wurde wiederhergestellt.'
-              : 'Cloud-Sicherung konnte nicht geladen werden.',
-        ),
-      ),
+    showCenteredSnackBar(
+      context,
+      restored
+          ? 'Cloud-Sicherung wurde wiederhergestellt.'
+          : 'Cloud-Sicherung konnte nicht geladen werden.',
     );
   }
 
@@ -793,6 +879,127 @@ class SettingsPage extends ConsumerWidget {
         );
       }
     }
+  }
+}
+
+class _PaypalActivationDialog extends StatefulWidget {
+  final PaymentSettings settings;
+  final String? accountEmail;
+  final Future<void> Function() onOpenPaypal;
+
+  const _PaypalActivationDialog({
+    required this.settings,
+    required this.accountEmail,
+    required this.onOpenPaypal,
+  });
+
+  @override
+  State<_PaypalActivationDialog> createState() =>
+      _PaypalActivationDialogState();
+}
+
+class _PaypalActivationDialogState extends State<_PaypalActivationDialog> {
+  bool _openingPaypal = false;
+
+  Future<void> _openPaypal() async {
+    setState(() => _openingPaypal = true);
+    try {
+      await widget.onOpenPaypal();
+    } finally {
+      if (mounted) {
+        setState(() => _openingPaypal = false);
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final email = widget.accountEmail?.trim();
+    final hasEmail = email != null && email.isNotEmpty;
+    final hasPaypalLink = widget.settings.hasPaypalPaymentUrl;
+    return AlertDialog(
+      title: const Text('Bezahlversion aktivieren'),
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Bitte zuerst die Zahlung ueber PayPal oeffnen. Danach kannst du die Freischaltung anfragen.',
+            ),
+            const SizedBox(height: 12),
+            _PaymentStep(
+              icon: Icons.payments_rounded,
+              text: hasPaypalLink
+                  ? 'PayPal oeffnen und bezahlen.'
+                  : 'Der PayPal-Link ist noch nicht eingetragen.',
+            ),
+            const SizedBox(height: 8),
+            _PaymentStep(
+              icon: Icons.alternate_email_rounded,
+              text: hasEmail
+                  ? 'Bei PayPal bitte diese Konto-E-Mail angeben: $email'
+                  : 'Bei PayPal bitte die Konto-E-Mail aus der App angeben.',
+            ),
+            const SizedBox(height: 8),
+            const _PaymentStep(
+              icon: Icons.mark_email_read_rounded,
+              text: 'Nach der Zahlung die Freischaltung anfragen.',
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: _openingPaypal ? null : () => Navigator.of(context).pop(),
+          child: const Text('Abbrechen'),
+        ),
+        OutlinedButton.icon(
+          onPressed: hasPaypalLink && !_openingPaypal ? _openPaypal : null,
+          icon: _openingPaypal
+              ? const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Icon(Icons.open_in_new_rounded),
+          label: const Text('PayPal oeffnen'),
+        ),
+        FilledButton.icon(
+          onPressed:
+              _openingPaypal ? null : () => Navigator.of(context).pop(true),
+          icon: const Icon(Icons.workspace_premium_rounded),
+          label: const Text('Freischaltung anfragen'),
+        ),
+      ],
+    );
+  }
+}
+
+class _PaymentStep extends StatelessWidget {
+  final IconData icon;
+  final String text;
+
+  const _PaymentStep({
+    required this.icon,
+    required this.text,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Icon(icon, size: 20, color: const Color(0xFF0A84FF)),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Text(
+            text,
+            style: const TextStyle(fontWeight: FontWeight.w700),
+          ),
+        ),
+      ],
+    );
   }
 }
 
@@ -1215,6 +1422,310 @@ class _AccountCard extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+class _PasswordChangeDialog extends StatefulWidget {
+  final String email;
+  final Future<void> Function(String currentPassword, String newPassword)
+      onChangePassword;
+  final Future<void> Function() onSendResetLink;
+
+  const _PasswordChangeDialog({
+    required this.email,
+    required this.onChangePassword,
+    required this.onSendResetLink,
+  });
+
+  @override
+  State<_PasswordChangeDialog> createState() => _PasswordChangeDialogState();
+}
+
+class _PasswordChangeDialogState extends State<_PasswordChangeDialog> {
+  final _formKey = GlobalKey<FormState>();
+  final _currentPassword = TextEditingController();
+  final _newPassword = TextEditingController();
+  final _repeatPassword = TextEditingController();
+  bool _loading = false;
+  bool _showPasswords = false;
+  String? _error;
+
+  @override
+  void dispose() {
+    _currentPassword.dispose();
+    _newPassword.dispose();
+    _repeatPassword.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submit() async {
+    if (!_formKey.currentState!.validate()) {
+      return;
+    }
+
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+
+    try {
+      await widget.onChangePassword(
+        _currentPassword.text,
+        _newPassword.text,
+      );
+      if (mounted) {
+        Navigator.of(context).pop(true);
+      }
+    } on Object catch (error) {
+      if (mounted) {
+        setState(() {
+          _loading = false;
+          _error = authErrorMessage(error);
+        });
+      }
+    }
+  }
+
+  Future<void> _sendResetLink() async {
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    await widget.onSendResetLink();
+    if (mounted) {
+      setState(() => _loading = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Passwort aendern'),
+      content: SizedBox(
+        width: 420,
+        child: Form(
+          key: _formKey,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(
+                widget.email,
+                style: const TextStyle(
+                  color: Color(0xFF475569),
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const SizedBox(height: 14),
+              TextFormField(
+                controller: _currentPassword,
+                enabled: !_loading,
+                obscureText: !_showPasswords,
+                autofillHints: const [AutofillHints.password],
+                decoration: const InputDecoration(
+                  labelText: 'Aktuelles Passwort',
+                  prefixIcon: Icon(Icons.lock_rounded),
+                ),
+                validator: (value) {
+                  if ((value ?? '').isEmpty) {
+                    return 'Bitte gib dein aktuelles Passwort ein.';
+                  }
+                  return null;
+                },
+              ),
+              const SizedBox(height: 12),
+              TextFormField(
+                controller: _newPassword,
+                enabled: !_loading,
+                obscureText: !_showPasswords,
+                autofillHints: const [AutofillHints.newPassword],
+                decoration: const InputDecoration(
+                  labelText: 'Neues Passwort',
+                  prefixIcon: Icon(Icons.password_rounded),
+                ),
+                validator: (value) {
+                  final password = value ?? '';
+                  if (password.length < 6) {
+                    return 'Bitte nutze mindestens 6 Zeichen.';
+                  }
+                  if (password == _currentPassword.text) {
+                    return 'Das neue Passwort muss anders sein.';
+                  }
+                  return null;
+                },
+              ),
+              const SizedBox(height: 12),
+              TextFormField(
+                controller: _repeatPassword,
+                enabled: !_loading,
+                obscureText: !_showPasswords,
+                autofillHints: const [AutofillHints.newPassword],
+                decoration: const InputDecoration(
+                  labelText: 'Neues Passwort wiederholen',
+                  prefixIcon: Icon(Icons.check_circle_rounded),
+                ),
+                validator: (value) {
+                  if ((value ?? '') != _newPassword.text) {
+                    return 'Die beiden neuen Passwoerter stimmen nicht ueberein.';
+                  }
+                  return null;
+                },
+              ),
+              const SizedBox(height: 8),
+              CheckboxListTile(
+                value: _showPasswords,
+                onChanged: _loading
+                    ? null
+                    : (value) {
+                        setState(() => _showPasswords = value ?? false);
+                      },
+                contentPadding: EdgeInsets.zero,
+                controlAffinity: ListTileControlAffinity.leading,
+                title: const Text('Passwoerter anzeigen'),
+              ),
+              if (_error != null) ...[
+                const SizedBox(height: 8),
+                Text(
+                  _error!,
+                  style: const TextStyle(
+                    color: Color(0xFFB91C1C),
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: _loading ? null : _sendResetLink,
+          child: const Text('Passwort-Link senden'),
+        ),
+        TextButton(
+          onPressed: _loading ? null : () => Navigator.of(context).pop(false),
+          child: const Text('Abbrechen'),
+        ),
+        FilledButton.icon(
+          onPressed: _loading ? null : _submit,
+          icon: _loading
+              ? const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Icon(Icons.save_rounded),
+          label: const Text('Speichern'),
+        ),
+      ],
+    );
+  }
+}
+
+class _EmailVerificationDialog extends StatefulWidget {
+  final String? email;
+  final Future<bool> Function() onCheckStatus;
+
+  const _EmailVerificationDialog({
+    required this.email,
+    required this.onCheckStatus,
+  });
+
+  @override
+  State<_EmailVerificationDialog> createState() =>
+      _EmailVerificationDialogState();
+}
+
+class _EmailVerificationDialogState extends State<_EmailVerificationDialog> {
+  bool _checking = false;
+  String? _message;
+
+  Future<void> _checkStatus() async {
+    setState(() {
+      _checking = true;
+      _message = null;
+    });
+
+    try {
+      final verified = await widget.onCheckStatus();
+      if (!mounted) {
+        return;
+      }
+      if (verified) {
+        Navigator.of(context).pop(true);
+        return;
+      }
+      setState(() {
+        _checking = false;
+        _message =
+            'Noch nicht bestaetigt. Bitte den Link in der E-Mail anklicken und danach erneut pruefen.';
+      });
+    } on Object {
+      if (mounted) {
+        setState(() {
+          _checking = false;
+          _message =
+              'Der Status konnte gerade nicht geprueft werden. Bitte spaeter erneut versuchen.';
+        });
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final email = widget.email?.trim();
+
+    return AlertDialog(
+      title: const Text('E-Mail bestaetigen'),
+      content: SizedBox(
+        width: 460,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(
+              email == null || email.isEmpty
+                  ? 'Die Bestaetigungs-E-Mail wurde versendet.'
+                  : 'Die Bestaetigungs-E-Mail wurde an $email versendet.',
+            ),
+            const SizedBox(height: 12),
+            const Text(
+              'Bitte oeffne die E-Mail, klicke den Bestaetigungs-Link an und pruefe danach hier den Status.',
+            ),
+            if (_message != null) ...[
+              const SizedBox(height: 12),
+              Text(
+                _message!,
+                style: const TextStyle(
+                  color: Color(0xFFB45309),
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: _checking ? null : () => Navigator.of(context).pop(false),
+          child: const Text('Schliessen'),
+        ),
+        FilledButton.icon(
+          onPressed: _checking ? null : _checkStatus,
+          icon: _checking
+              ? const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Icon(Icons.mark_email_read_rounded),
+          label: const Text('Status pruefen'),
+        ),
+      ],
     );
   }
 }
@@ -4579,7 +5090,7 @@ Future<void> _showFeedbackDialog(BuildContext context) async {
 
   await showDialog<void>(
     context: context,
-    builder: (context) {
+    builder: (dialogContext) {
       return AlertDialog(
         title: const Text('Feedback senden'),
         content: SizedBox(
@@ -4622,18 +5133,15 @@ Future<void> _showFeedbackDialog(BuildContext context) async {
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.of(context).pop(),
+            onPressed: () => Navigator.of(dialogContext).pop(),
             child: const Text('Abbrechen'),
           ),
           FilledButton.icon(
             onPressed: () {
-              Navigator.of(context).pop();
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text(
-                    'Feedback an teddroste@me.com wurde vorbereitet.',
-                  ),
-                ),
+              Navigator.of(dialogContext).pop();
+              showCenteredSnackBar(
+                context,
+                'Feedback an teddroste@me.com wurde vorbereitet.',
               );
             },
             icon: const Icon(Icons.send_rounded),

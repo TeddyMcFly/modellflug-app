@@ -9,6 +9,7 @@ import '../../shared/models/aircraft_model.dart';
 import '../../shared/providers/fleet_provider.dart';
 import '../../shared/services/auth_service.dart';
 import '../../shared/services/member_chat_service.dart';
+import '../../shared/utils/centered_snack_bar.dart';
 import '../../shared/utils/media_source.dart';
 
 const _chatFrameColor = Color(0xFF06172E);
@@ -2674,11 +2675,7 @@ class _ChatRoomDialogState extends State<_ChatRoomDialog> {
       if (!mounted) {
         return;
       }
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Nachricht konnte nicht gesendet werden.'),
-        ),
-      );
+      showCenteredSnackBar(context, 'Nachricht konnte nicht gesendet werden.');
     } finally {
       if (mounted) {
         setState(() => _sending = false);
@@ -2722,18 +2719,13 @@ class _ChatRoomDialogState extends State<_ChatRoomDialog> {
       if (!mounted) {
         return;
       }
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Chatverlauf geloescht.')),
-      );
+      showCenteredSnackBar(context, 'Chatverlauf geloescht.');
     } on Object {
       if (!mounted) {
         return;
       }
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Chatverlauf konnte nicht geloescht werden.'),
-        ),
-      );
+      showCenteredSnackBar(
+          context, 'Chatverlauf konnte nicht geloescht werden.');
     } finally {
       if (mounted) {
         setState(() => _clearingHistory = false);

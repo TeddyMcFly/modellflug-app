@@ -38,4 +38,22 @@ void main() {
       expect(access.hasFullAccess, isTrue);
     });
   });
+
+  group('PaymentSettings', () {
+    test('accepts a valid PayPal link', () {
+      const settings = PaymentSettings(
+        paypalPaymentUrl: 'https://www.paypal.com/paypalme/example',
+      );
+
+      expect(settings.hasPaypalPaymentUrl, isTrue);
+      expect(settings.paypalUri?.host, 'www.paypal.com');
+    });
+
+    test('rejects an empty or invalid PayPal link', () {
+      expect(PaymentSettings.empty().hasPaypalPaymentUrl, isFalse);
+      const settings = PaymentSettings(paypalPaymentUrl: 'kein-link');
+
+      expect(settings.hasPaypalPaymentUrl, isFalse);
+    });
+  });
 }

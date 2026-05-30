@@ -34,6 +34,14 @@ final accountAccessProvider = StreamProvider<AccountAccess>((ref) {
   return service.watchAccountAccess(user);
 });
 
+final paymentSettingsProvider = StreamProvider<PaymentSettings>((ref) {
+  final service = ref.watch(subscriptionServiceProvider);
+  if (service == null) {
+    return Stream.value(PaymentSettings.empty());
+  }
+  return service.watchPaymentSettings();
+});
+
 enum AccountAccessStatus {
   signedOut,
   localDevelopment,
@@ -247,6 +255,16 @@ class SubscriptionService {
     return _users.doc(uid);
   }
 
+  DocumentReference<Map<String, dynamic>> get _paymentSettingsDoc {
+    return _firestore.collection('appConfig').doc('payment');
+  }
+
+  Stream<PaymentSettings> watchPaymentSettings() {
+    return _paymentSettingsDoc.snapshots().map((snapshot) {
+      return PaymentSettings.fromData(snapshot.data() ?? const {});
+    });
+  }
+
   Stream<List<ManualActivationAccount>> watchManualActivationAccounts() {
     return _users
         .where(
@@ -380,6 +398,57 @@ class SubscriptionService {
       SetOptions(merge: true),
     );
   }
+
+  Future<void> savePaymentSettings({
+    required String paypalPaymentUrl,
+    String? adminEmail,
+  }) async {
+    final now = DateTime.now().toUtc();
+    await _paymentSettingsDoc.set(
+      {
+        'paypalPaymentUrl': paypalPaymentUrl.trim(),
+        'updatedAt': FieldValue.serverTimestamp(),
+        'updatedAtClient': now.toIso8601String(),
+        'updatedBy': adminEmail,
+      },
+      SetOptions(merge: true),
+    );
+  }
+}
+
+class PaymentSettings {
+  final String paypalPaymentUrl;
+
+  const PaymentSettings({
+    required this.paypalPaymentUrl,
+  });
+
+  factory PaymentSettings.empty() {
+    return const PaymentSettings(paypalPaymentUrl: '');
+  }
+
+  factory PaymentSettings.fromData(Map<String, dynamic> data) {
+    return PaymentSettings(
+      paypalPaymentUrl: data['paypalPaymentUrl'] as String? ?? '',
+    );
+  }
+
+  Uri? get paypalUri {
+    final trimmed = paypalPaymentUrl.trim();
+    if (trimmed.isEmpty) {
+      return null;
+    }
+    final uri = Uri.tryParse(trimmed);
+    if (uri == null || !uri.hasScheme || uri.host.isEmpty) {
+      return null;
+    }
+    if (uri.scheme != 'https' && uri.scheme != 'http') {
+      return null;
+    }
+    return uri;
+  }
+
+  bool get hasPaypalPaymentUrl => paypalUri != null;
 }
 
 class ManualActivationAccount {
@@ -387,6 +456,7 @@ class ManualActivationAccount {
   final String email;
   final String displayName;
   final AccountAccess access;
+  final DateTime? trialStartedAt;
   final DateTime? trialEndsAt;
   final DateTime? subscriptionUpdatedAt;
 
@@ -395,6 +465,7 @@ class ManualActivationAccount {
     required this.email,
     required this.displayName,
     required this.access,
+    this.trialStartedAt,
     this.trialEndsAt,
     this.subscriptionUpdatedAt,
   });
@@ -410,6 +481,8 @@ class ManualActivationAccount {
       displayName:
           data['displayName'] as String? ?? data['publicName'] as String? ?? '',
       access: AccountAccess.fromUserData(data, userEmail: email),
+      trialStartedAt: _dateFromFirestoreValue(data['trialStartedAt']) ??
+          _dateFromFirestoreValue(data['trialStartedAtClient']),
       trialEndsAt: _dateFromFirestoreValue(data['trialEndsAt']) ??
           _dateFromFirestoreValue(data['trialEndsAtClient']),
       subscriptionUpdatedAt:
@@ -423,6 +496,7 @@ class ManualActivationAccount {
         subscriptionUpdatedAt ??
         access.subscriptionEndsAt ??
         trialEndsAt ??
+        trialStartedAt ??
         access.trialStartedAt;
   }
 

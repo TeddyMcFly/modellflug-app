@@ -57,12 +57,50 @@ class AuthController {
     await _auth.sendPasswordResetEmail(email: email.trim());
   }
 
+  Future<void> changePassword({
+    required String currentPassword,
+    required String newPassword,
+  }) async {
+    final user = _auth.currentUser;
+    final email = user?.email?.trim();
+    if (user == null) {
+      throw FirebaseAuthException(code: 'user-not-found');
+    }
+    if (email == null || email.isEmpty) {
+      throw FirebaseAuthException(code: 'missing-email');
+    }
+
+    final credential = EmailAuthProvider.credential(
+      email: email,
+      password: currentPassword,
+    );
+    await user.reauthenticateWithCredential(credential);
+    await user.updatePassword(newPassword);
+  }
+
   Future<void> sendEmailVerification() async {
     final user = _auth.currentUser;
     if (user == null) {
       throw FirebaseAuthException(code: 'user-not-found');
     }
-    await user.sendEmailVerification();
+    await user.reload();
+    final refreshedUser = _auth.currentUser;
+    if (refreshedUser == null) {
+      throw FirebaseAuthException(code: 'user-not-found');
+    }
+    if (refreshedUser.emailVerified) {
+      return;
+    }
+    await refreshedUser.sendEmailVerification();
+  }
+
+  Future<User?> reloadCurrentUser() async {
+    final user = _auth.currentUser;
+    if (user == null) {
+      return null;
+    }
+    await user.reload();
+    return _auth.currentUser;
   }
 
   Future<void> signOut() async {
@@ -92,8 +130,11 @@ String authErrorMessage(Object error) {
       'E-Mail oder Passwort passt nicht.',
     'network-request-failed' =>
       'Firebase ist gerade nicht erreichbar. Bitte pruefe die Internetverbindung.',
+    'missing-email' => 'Fuer dieses Konto fehlt die E-Mail-Adresse.',
     'operation-not-allowed' =>
       'E-Mail/Passwort muss in Firebase noch aktiviert werden.',
+    'requires-recent-login' =>
+      'Bitte melde dich neu an und versuche es dann noch einmal.',
     'too-many-requests' =>
       'Zu viele Versuche. Bitte warte kurz und probiere es spaeter erneut.',
     'weak-password' =>

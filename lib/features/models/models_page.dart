@@ -15,6 +15,7 @@ import '../../core/widgets/app_scaffold.dart';
 import '../../shared/models/aircraft_model.dart';
 import '../../shared/providers/fleet_provider.dart';
 import '../../shared/services/flight_timer_tone_player.dart';
+import '../../shared/utils/centered_snack_bar.dart';
 import '../../shared/utils/flight_time_input.dart';
 import '../../shared/utils/flight_time_format.dart';
 import '../../shared/utils/image_drop_zone.dart';
@@ -328,12 +329,9 @@ class _ModelsPageState extends ConsumerState<ModelsPage> {
       return;
     }
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          'Flug mit ${aircraft.name} gespeichert: $durationMinutes min.',
-        ),
-      ),
+    showCenteredSnackBar(
+      context,
+      'Flug mit ${aircraft.name} gespeichert: $durationMinutes min.',
     );
   }
 }
